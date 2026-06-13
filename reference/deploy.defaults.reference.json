@@ -1,0 +1,73 @@
+{
+  "version": 1,
+  "description": "Non-sensitive LitPilot defaults seeded on deploy when /tmp config is missing. Secrets stay in Vercel env.",
+  "settings": {
+    "fetch_parallel": 5,
+    "fetch_timeout_sec": 15.0,
+    "tavily_max_results": 80,
+    "max_fetch_urls": 49,
+    "tavily_retry_count": 3,
+    "fetch_retry_count": 3,
+    "fetch_retry_delay_ms": 500,
+    "citation_format": "apa",
+    "use_llm_planner": true,
+    "orchestrator_mode": "lite",
+    "orchestrator_use_reasoning": false,
+    "orchestrator_max_tokens_per_phase": 280,
+    "review_system_prompt_template": "你是学术文献综述助手。仅依据用户消息中【多源材料】撰写结构化综述，不得用训练知识填补材料未出现的事实。\n\n【材料分栏说明】分栏标签与检索/抓取后端无关（可能是 native、OpenAlex、Brave、Tavily 等）；只使用材料里实际出现的栏目：\n- [web_search]：学术检索引擎返回的摘要与命中概况（本轮未做 web 检索时可能缺失）\n- [网页材料]：对已选 URL/PDF 抓取并清洗后的正文摘录（标题为文献标识；标注抓取失败者仅能谨慎引用其检索摘要）\n- [Citations]：从正文抽取、字段较完整的 {fmt_label} 参考文献条目\n\n证据优先级：以 [网页材料] 与 [Citations] 为主要依据；[web_search] 仅作背景与线索，不得仅凭检索摘要下定论。材料不足处须明示局限，勿臆测。\n\n【综述结构与各节内容标准】\n\n一、研究背景与问题定位\n- 阐明该领域的现实驱动力与技术/社会背景，说明为何此时此刻有必要开展综述\n- 明确提出 2–3 个贯穿全文的核心研究问题（RQ），后续各节内容应围绕这些问题展开\n- 简述综述范围的边界：涵盖哪类研究、排除哪类研究，以及为何如此划定\n\n二、理论/概念框架（如材料支撑）\n- 若材料中存在可抽象的分析框架，须先建立框架再展开综述，而非堆砌文献\n- 框架应说明关键变量之间的逻辑关系（如因果链、调节/中介关系、层级结构），并指明该框架如何指导后续文献的分类与对比\n- 若材料不足以支撑独立框架，则在「三、主要研究工作对比」节中内嵌分析维度\n\n三、主要研究工作对比\n- 按分析维度（而非按文献逐一罗列）组织内容；维度应从研究问题中自然导出\n- 对比时须同时呈现：研究发现的共识、存在的矛盾或张力、各方法论路径的优劣\n- 区分不同类型研究（如实证 vs. 概念性、定量 vs. 定性）并说明其对结论可靠性的影响\n- 在节末给出阶段性小结，明确交代该维度上已知什么、尚不清楚什么，并用一句话呼应 RQ\n\n四、研究空白与未来方向\n- 空白须有据可查（指向具体文献或对比结果），而非泛泛而谈\n- 区分两类空白：（1）已有研究但结论不一致；（2）完全缺乏实证或理论探讨\n- 未来方向须具体：建议研究问题、适宜的方法论路径及其理由\n- 如材料支撑，补充对实践者/管理者的启示\n\n五、参考文献\n- 格式严格遵循 {fmt_label} 规范\n- 仅列 [Citations] 中可核实条目；无法核实的事实在正文中标注「待核实」\n\n【通用写作标准】\n- 综述的论证主线须始终与开篇研究问题保持对应\n- 优先使用表格或维度对比呈现多文献的横向比较，避免流水式逐篇叙述\n- 仅引用材料中出现的事实；不得编造作者、数据、方法细节或结论\n- 使用与用户相同的语言（中文或英文）\n- 正文不得复述、引用或逐字粘贴用户的原始提问与写作指令；直接从「一、研究背景与问题定位」起笔\n- 文末注明本文由 AI 辅助生成，需用户自行核实所有事实与引用，不构成代写建议"
+  },
+  "credentials": [
+    {
+      "id": "c0a1f4e8b2d34c6e9f1a2b3c4d5e6f01",
+      "key": "tavily",
+      "type": "tavily",
+      "name": "Tavily · default"
+    },
+    {
+      "id": "c0a1f4e8b2d34c6e9f1a2b3c4d5e6f02",
+      "key": "jina",
+      "type": "jina",
+      "name": "Jina · default"
+    },
+    {
+      "id": "c0a1f4e8b2d34c6e9f1a2b3c4d5e6f03",
+      "key": "llm_primary",
+      "type": "llm:openai",
+      "name": "LLM · openai · primary",
+      "base_url": "https://api.deepseek.com",
+      "group_id": ""
+    },
+    {
+      "id": "c0a1f4e8b2d34c6e9f1a2b3c4d5e6f04",
+      "key": "semantic_scholar",
+      "type": "semantic_scholar",
+      "name": "Semantic Scholar · default"
+    }
+  ],
+  "instances": [
+    {
+      "id": "i0a1f4e8b2d34c6e9f1a2b3c4d5e6f01",
+      "key": "review_main",
+      "name": "review-main",
+      "credential_key": "llm_primary",
+      "model_name": "deepseek-v4-pro"
+    },
+    {
+      "id": "i0a1f4e8b2d34c6e9f1a2b3c4d5e6f02",
+      "key": "orchestrator",
+      "name": "orchestrator",
+      "credential_key": "llm_primary",
+      "model_name": "deepseek-v4-flash"
+    }
+  ],
+  "prompt_instance_bindings": {
+    "router_instance_id": "orchestrator",
+    "search_instance_id": "orchestrator",
+    "assessor_instance_id": "orchestrator",
+    "pipeline_instance_id": "orchestrator"
+  },
+  "capability_instance_bindings": {
+    "orchestrator": "orchestrator",
+    "review_main": "review_main"
+  }
+}

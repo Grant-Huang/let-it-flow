@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+*.egg-info/
+dist/
+build/
+
+# 环境与密钥
+.env
+.env.local
+.env.*.local
+*.key
+credentials.json
+
+# 运行时数据
+data/
+backend/data/
+*.db
+*.sqlite
+*.sqlite3
+
+# Node / 前端
+node_modules/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# 临时文件
+.tmp/
+tmp/
+*.log
+
+# Vercel
+.vercel/
+
+# 参考项目（独立仓库，本次提交排除）
+reference/ai-content-factory/

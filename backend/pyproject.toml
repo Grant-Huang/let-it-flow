@@ -1,0 +1,39 @@
+# let-it-flow backend - 占位配置（M1 里程碑实现时完善）
+# 参考 reference/pyproject.reference.toml
+
+[project]
+name = "let-it-flow-backend"
+version = "0.1.0"
+description = "通用意图驱动的工作流执行平台"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "openai>=1.57.0",
+    "httpx>=0.28.0",
+    "pydantic>=2.11.0",
+    "pydantic-settings>=2.7.0",
+    "anyio>=4.7.0",
+    "filelock>=3.16.0",
+    "beautifulsoup4>=4.12.0",
+    "lxml>=5.3.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+]
+
+[tool.vercel]
+entrypoint = "app.main:app"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+pythonpath = ["."]
+testpaths = ["tests"]
+markers = [
+    "live: network-dependent integration tests (excluded from default gates)",
+]
+addopts = "-m 'not live'"
