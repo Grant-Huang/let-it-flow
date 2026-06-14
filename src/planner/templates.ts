@@ -72,10 +72,13 @@ export function extractUrls(intent: string): string[] {
 }
 
 /**
- * 用抽取好的 PodcastParams 构建 podcast 文本子链 DAG。
- * 节点 id 稳定，供 inputRefs 引用。
+ * 用抽取好的 PodcastParams 构建 podcast DAG。节点 id 稳定，供 inputRefs 引用。
+ *
+ * @param params        规划参数
+ * @param fullPipeline  true → 完整 7 步链（含 TTS/生图/视频，P5）；
+ *                      false → 仅文本子链（fetch→rewrite→deliver，P4 默认）。
  */
-export function buildPodcastDag(params: PodcastParams): WorkflowDAG {
+export function buildPodcastDag(params: PodcastParams, fullPipeline = false): WorkflowDAG {
   const nodes: WorkflowNode[] = [];
   const confirmed = { maxTokens: 4000, strip: true, summarize: false };
 
@@ -121,44 +124,168 @@ export function buildPodcastDag(params: PodcastParams): WorkflowDAG {
     });
   }
 
-  // rewrite 节点：消费 fetch 正文，按 style 改写
+  if (!fullPipeline) {
+    // ── P4 文本子链：fetch → rewrite → deliver ──────────────────────────
+    nodes.push({
+      id: "rewrite",
+      toolName: "core.llm_node",
+      params: {
+        prompt: params.rewriteHint
+          ? `请把素材改写成播客文稿。要求：${params.rewriteHint}`
+          : "请把素材改写成播客文稿。",
+        style: params.style,
+        role: "writer",
+        systemPrompt: `目标语言：${params.language}。输出一段完整的播客文稿。`,
+      },
+      inputRefs: { "$.tasks.fetch.output[0].content": "context" },
+      dependsOn: [firstNodeId],
+      requireConfirmation: true, // HITL: 预览改写稿再继续
+      onNodeError: "abort",
+      contentPipeline: { maxTokens: 6000, strip: true, summarize: false },
+    });
+    nodes.push({
+      id: "deliver",
+      toolName: "core.deliver",
+      params: { artifactType: "podcast_script", title: `podcast-${params.style}` },
+      inputRefs: { "$.tasks.rewrite.output": "items" },
+      dependsOn: ["rewrite"],
+      requireConfirmation: false,
+      onNodeError: "abort",
+      contentPipeline: confirmed,
+    });
+    return { schemaVersion: "1.0", nodes, onNodeError: "abort", retryAttempts: 0 };
+  }
+
+  // ── P5 完整 7 步链 ─────────────────────────────────────────────────────
+  // fetch → translate(step2) → rewrite(step3) → seam_repair(step3b)
+  //      → terminology(step3c) → image_prompts(step3d)
+  //      → [tts(step4b) ∥ image_gen(step4a)] → subtitle(step5) → video_build(step6) → deliver
+
+  // step2 翻译：fetch 正文 → translated
   nodes.push({
-    id: "rewrite",
-    toolName: "core.llm_node",
-    params: {
-      prompt: params.rewriteHint
-        ? `请把素材改写成播客文稿。要求：${params.rewriteHint}`
-        : "请把素材改写成播客文稿。",
-      style: params.style,
-      role: "writer",
-      systemPrompt: `目标语言：${params.language}。输出一段完整的播客文稿。`,
-    },
-    // fetch 输出是 FetchedDoc[]，取第一篇正文（contentPipeline 已压缩）
-    inputRefs: { "$.tasks.fetch.output[0].content": "context" },
+    id: "translate",
+    toolName: "domain.translate",
+    params: {},
+    inputRefs: { "$.tasks.fetch.output[0].content": "sourceText" },
     dependsOn: [firstNodeId],
-    requireConfirmation: true, // HITL: 预览改写稿再继续
-    onNodeError: "abort",
-    contentPipeline: { maxTokens: 6000, strip: true, summarize: false },
+    requireConfirmation: false,
+    onNodeError: "skip",
+    contentPipeline: confirmed,
   });
 
-  // deliver 节点：聚合 rewrite 输出为最终产物（rewrite 输出单字符串，deliver 归一为单元素数组）
+  // step3 改写：translated → script_v2_raw
+  nodes.push({
+    id: "rewrite",
+    toolName: "domain.rewrite",
+    params: { style: params.style, language: params.language, hint: params.rewriteHint },
+    inputRefs: { "$.tasks.translate.output.text": "translatedText" },
+    dependsOn: ["translate"],
+    requireConfirmation: true, // HITL: 预览改写稿
+    onNodeError: "skip",
+    contentPipeline: confirmed,
+  });
+
+  // step3b 接缝修复：rewrite → seamed
+  nodes.push({
+    id: "seam_repair",
+    toolName: "domain.seam_repair",
+    params: {},
+    inputRefs: { "$.tasks.rewrite.output.script": "rewriteText" },
+    dependsOn: ["rewrite"],
+    requireConfirmation: false,
+    onNodeError: "skip",
+    contentPipeline: confirmed,
+  });
+
+  // step3c 术语统一：seamed → script_v2（权威文本）
+  nodes.push({
+    id: "terminology",
+    toolName: "domain.terminology",
+    params: {},
+    inputRefs: { "$.tasks.seam_repair.output.text": "seamedText" },
+    dependsOn: ["seam_repair"],
+    requireConfirmation: false,
+    onNodeError: "skip",
+    contentPipeline: confirmed,
+  });
+
+  // step3d 图片提示词：script_v2 → image_prompts.json
+  nodes.push({
+    id: "image_prompts",
+    toolName: "domain.image_prompts",
+    params: {},
+    inputRefs: { "$.tasks.terminology.output.text": "scriptText" },
+    dependsOn: ["terminology"],
+    requireConfirmation: false,
+    onNodeError: "skip",
+    contentPipeline: confirmed,
+  });
+
+  // step4b TTS：terminology 权威文本 → voiceover_full.mp3
+  // （TTS 用 script_v2_video 段落版，这里用权威文本简化）
+  nodes.push({
+    id: "tts",
+    toolName: "domain.tts",
+    params: { engine: params.language === "zh" ? "edge" : "edge" },
+    inputRefs: { "$.tasks.terminology.output.text": "script" },
+    dependsOn: ["terminology"],
+    requireConfirmation: false,
+    onNodeError: "skip",
+    contentPipeline: confirmed,
+  });
+
+  // step4a 生图：image_prompts.plan → images/*.png（与 tts 并行）
+  nodes.push({
+    id: "image_gen",
+    toolName: "domain.image_gen",
+    params: {},
+    inputRefs: { "$.tasks.image_prompts.output.plan": "imagePlan" },
+    dependsOn: ["image_prompts"],
+    requireConfirmation: false,
+    onNodeError: "skip",
+    contentPipeline: confirmed,
+  });
+
+  // step5 字幕对齐：tts 音频 → srt（依赖 tts）
+  nodes.push({
+    id: "subtitle",
+    toolName: "domain.subtitle",
+    params: {},
+    inputRefs: { "$.tasks.tts.output.audioPath": "audioPath" },
+    dependsOn: ["tts"],
+    requireConfirmation: false,
+    onNodeError: "skip",
+    contentPipeline: confirmed,
+  });
+
+  // step6 视频合成：tts + image_gen + subtitle → final.mp4（依赖三者）
+  nodes.push({
+    id: "video_build",
+    toolName: "domain.video_build",
+    params: {},
+    inputRefs: {
+      "$.tasks.tts.output.audioPath": "audioPath",
+      "$.tasks.image_gen.output.count": "imageCount",
+    },
+    dependsOn: ["tts", "image_gen", "subtitle"],
+    requireConfirmation: false,
+    onNodeError: "skip",
+    contentPipeline: confirmed,
+  });
+
+  // deliver：最终视频
   nodes.push({
     id: "deliver",
     toolName: "core.deliver",
-    params: { artifactType: "podcast_script", title: `podcast-${params.style}` },
-    inputRefs: { "$.tasks.rewrite.output": "items" },
-    dependsOn: ["rewrite"],
+    params: { artifactType: "podcast_video", title: `podcast-${params.style}` },
+    inputRefs: { "$.tasks.video_build.output.videoPath": "items" },
+    dependsOn: ["video_build"],
     requireConfirmation: false,
     onNodeError: "abort",
     contentPipeline: confirmed,
   });
 
-  return {
-    schemaVersion: "1.0",
-    nodes,
-    onNodeError: "abort",
-    retryAttempts: 0,
-  };
+  return { schemaVersion: "1.0", nodes, onNodeError: "skip", retryAttempts: 0 };
 }
 
 /** 模板骨架（供 planner LLM 上下文 + guardrail）。 */

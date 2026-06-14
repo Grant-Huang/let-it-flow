@@ -53,13 +53,14 @@ export async function plan(intent: string, config: PlannerConfig): Promise<PlanO
   }
 
   // proceed：抽取参数 + 构建 DAG + 校验
+  const fullPipeline = wantsFullPipeline(intent) && hasDomainTools(config.registry);
   const maxRetries = config.maxRetries ?? 3;
   let lastError: string | undefined;
 
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
       const params = await extractParams(intent, config, attempt, lastError);
-      const dag = buildPodcastDag(params);
+      const dag = buildPodcastDag(params, fullPipeline);
       const errors = validateDag(dag, config.registry);
       if (errors.length === 0) {
         return { kind: "proceed", dag };
@@ -173,4 +174,25 @@ function stripToTopic(intent: string): string {
     .replace(/把|做成|做一期|制作|生成|播客|podcast|关于|的|请/g, "")
     .replace(/https?:\/\/[^\s]+/gi, "")
     .trim() || "未命名主题";
+}
+
+/** 意图是否要求完整视频产物（含 TTS/生图/视频合成）。 */
+function wantsFullPipeline(intent: string): boolean {
+  return /视频|video|配音|完整|成片|mp4|生图|配图/.test(intent);
+}
+
+/** registry 是否已注册完整链所需的 domain 工具（否则降级为文本子链）。 */
+function hasDomainTools(registry: ToolRegistry): boolean {
+  const required = [
+    "domain.translate",
+    "domain.rewrite",
+    "domain.seam_repair",
+    "domain.terminology",
+    "domain.image_prompts",
+    "domain.tts",
+    "domain.image_gen",
+    "domain.subtitle",
+    "domain.video_build",
+  ];
+  return required.every((name) => registry.has(name));
 }

@@ -5,6 +5,19 @@ import { createLlmNodeTool } from "./builtin/llm-node.js";
 import { createDeliverTool } from "./builtin/deliver.js";
 import type { LlmService } from "../services/llm-service.js";
 import type { SearchProvider } from "./builtin/web-search.js";
+import { SubprocessAdapter } from "./heavy-io/subprocess-adapter.js";
+import { createTtsTool } from "./heavy-io/tts.js";
+import { createImageGenTool } from "./heavy-io/image-gen.js";
+import { createVideoBuildTool } from "./heavy-io/video-build.js";
+import { createRewriteTool } from "./heavy-io/rewrite.js";
+import {
+  createTranslateTool,
+  createSeamRepairTool,
+  createTerminologyTool,
+  createImagePromptsTool,
+  createSubtitleTool,
+} from "./builtin/text-steps.js";
+import type { HeavyIoConfig } from "./heavy-io/provider.js";
 
 /**
  * 注册全部 core 内置工具到 registry（见 04 §4.11）。
@@ -19,6 +32,34 @@ export function registerBuiltinTools(
   registry.register(createWebFetchTool());
   registry.register(createLlmNodeTool({ llm: opts.llm }));
   registry.register(createDeliverTool());
+  return registry;
+}
+
+/**
+ * 注册 podcast 完整链所需的 domain 工具（P5 重 IO）。
+ * 需要 SubprocessAdapter（调 ai-content-factory）+ LlmService（rewrite openai 路径）。
+ */
+export function registerHeavyIoTools(
+  registry: ToolRegistry,
+  opts: { adapter: SubprocessAdapter; llm: LlmService; config: HeavyIoConfig },
+): ToolRegistry {
+  const { adapter, llm, config } = opts;
+  registry.register(createTranslateTool(adapter));
+  registry.register(
+    createRewriteTool({
+      adapter,
+      llm,
+      backend: config.rewriteBackend ?? "ollama",
+      ollamaModel: config.ollamaRewriteModel,
+    }),
+  );
+  registry.register(createSeamRepairTool(adapter));
+  registry.register(createTerminologyTool(adapter));
+  registry.register(createImagePromptsTool(adapter));
+  registry.register(createTtsTool(adapter));
+  registry.register(createImageGenTool(adapter));
+  registry.register(createSubtitleTool(adapter));
+  registry.register(createVideoBuildTool(adapter));
   return registry;
 }
 
