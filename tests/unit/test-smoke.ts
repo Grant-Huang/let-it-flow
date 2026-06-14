@@ -32,14 +32,17 @@ describe("smoke", () => {
     expect(flow.config.searchProvider).toBe("native");
   });
 
-  it("execute() returns an async generator (placeholder)", async () => {
+  it("execute() returns an async generator streaming real events", async () => {
     const flow = new LetItFlow();
     const chunks: unknown[] = [];
-    for await (const chunk of flow.execute("test intent")) {
+    // 用越界意图（guardrail 立即 reject → 终态），避免网络/HITL 阻塞
+    for await (const chunk of flow.execute("帮点杯咖啡")) {
       chunks.push(chunk);
     }
-    // P0 占位：不产出事件。P3 后会产出真实事件流。
-    expect(chunks).toEqual([]);
+    // P6：execute() 产出真实事件流（reject 链路含 extension(rejected)，最终 failed）
+    expect(chunks.length).toBeGreaterThan(0);
+    const types = chunks.map((c) => (c as { type: string }).type);
+    expect(types).toContain("extension");
   });
 });
 

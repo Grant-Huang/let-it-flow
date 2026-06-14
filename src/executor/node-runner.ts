@@ -56,6 +56,7 @@ export async function runNode(
       detail: { params: node.params },
     });
     if (!decision.approved) {
+      // 用户拒绝：该节点跳过（HITL 拒绝不触发 onNodeError，见 P3 测试约定）
       await emitNodeDone(ctx, node, startedAt, "skipped");
       return { output: undefined, skipped: true, durationMs: Date.now() - startedAt };
     }
