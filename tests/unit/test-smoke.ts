@@ -1,0 +1,139 @@
+import { describe, it, expect } from "vitest";
+import { LetItFlow } from "../../src/index.js";
+import {
+  makeEvent,
+  toSSE,
+  serializeSSEData,
+  channelOf,
+  stagePayload,
+  textPayload,
+  toolCallPayload,
+  toolResultPayload,
+  workflowNodePayload,
+  errorPayload,
+  confirmGatePayload,
+} from "../../src/core/stream-events.js";
+import type { StreamEvent } from "../../src/core/stream-events.js";
+import { applyEvent, createInitialStreamState, parseSSELine } from "@meso.ai/types";
+
+describe("smoke", () => {
+  it("LetItFlow can be instantiated", () => {
+    const flow = new LetItFlow();
+    expect(flow).toBeInstanceOf(LetItFlow);
+    expect(flow.config.plannerModel).toBe("openai/gpt-4o");
+  });
+
+  it("LetItFlow accepts custom config", () => {
+    const flow = new LetItFlow({
+      plannerModel: "openai/gpt-4o-mini",
+      searchProvider: "native",
+    });
+    expect(flow.config.plannerModel).toBe("openai/gpt-4o-mini");
+    expect(flow.config.searchProvider).toBe("native");
+  });
+
+  it("execute() returns an async generator (placeholder)", async () => {
+    const flow = new LetItFlow();
+    const chunks: unknown[] = [];
+    for await (const chunk of flow.execute("test intent")) {
+      chunks.push(chunk);
+    }
+    // P0 占位：不产出事件。P3 后会产出真实事件流。
+    expect(chunks).toEqual([]);
+  });
+});
+
+describe("stream-events protocol alignment", () => {
+  it("channelOf maps text→content, done/error→meta, others→status", () => {
+    expect(channelOf("text")).toBe("content");
+    expect(channelOf("done")).toBe("meta");
+    expect(channelOf("error")).toBe("meta");
+    expect(channelOf("stage")).toBe("status");
+    expect(channelOf("tool_call")).toBe("status");
+    expect(channelOf("workflow_node")).toBe("status");
+  });
+
+  function withSeq(e: Omit<StreamEvent, "seq">, seq = 0): StreamEvent {
+    return { ...e, seq } as StreamEvent;
+  }
+
+  it("toSSE strips bookkeeping fields and produces protocol envelope", () => {
+    const ev = withSeq(
+      makeEvent("t1", "stage", stagePayload("检索文献", "active")),
+    );
+    const sse = toSSE(ev);
+    expect(sse).toEqual({
+      type: "stage",
+      schema_version: "1.0",
+      payload: { name: "检索文献", state: "active" },
+    });
+    // 簿记字段不出现在序列化结果里
+    const json = serializeSSEData(ev);
+    expect(json).not.toContain('"seq"');
+    expect(json).not.toContain('"taskId"');
+    expect(json).not.toContain('"channel"');
+  });
+
+  it("text event round-trips through @meso.ai/types parseSSELine", () => {
+    const ev = withSeq(makeEvent("t1", "text", textPayload("你好")));
+    const line = `data: ${serializeSSEData(ev)}`;
+    const parsed = parseSSELine(line);
+    expect(parsed).not.toBeNull();
+    expect(parsed?.type).toBe("text");
+  });
+
+  it("tool_call / tool_result / workflow_node / error produce valid SSEEvents", () => {
+    const callEv = withSeq(
+      makeEvent("t1", "tool_call", toolCallPayload({
+        id: "c1",
+        name: "web_search",
+        args: { query: "AI" },
+        risk: "safe",
+      })),
+    );
+    const resEv = withSeq(
+      makeEvent("t1", "tool_result", toolResultPayload({
+        tool_call_id: "c1",
+        output: "[]",
+      })),
+    );
+    const nodeEv = withSeq(
+      makeEvent("t1", "workflow_node", workflowNodePayload({
+        run_id: "r1",
+        node_id: "n1",
+        name: "web_search",
+        state: "active",
+      })),
+    );
+    const errEv = withSeq(
+      makeEvent("t1", "error", errorPayload("boom", "UPSTREAM_TIMEOUT")),
+    );
+    for (const ev of [callEv, resEv, nodeEv, errEv]) {
+      const sse = toSSE(ev);
+      expect(sse.schema_version).toBe("1.0");
+      expect(sse.type).toBe(ev.type);
+    }
+    expect(toSSE(errEv).payload).toMatchObject({ message: "boom", code: "UPSTREAM_TIMEOUT" });
+  });
+
+  it("HITL confirm gate uses extension event consumable by @meso.ai/types applyEvent", () => {
+    const gate = withSeq(
+      makeEvent(
+        "t1",
+        "extension",
+        confirmGatePayload({
+          gate_id: "g1",
+          node_id: "n1",
+          run_id: "r1",
+          prompt: "选择数据源",
+          options: ["url", "topic"],
+        }),
+      ),
+    );
+    const sse = toSSE(gate);
+    // applyEvent 必须能吃下这个事件而不抛错
+    const state = applyEvent(createInitialStreamState(), sse);
+    expect(state.extensionLog.length).toBe(1);
+    expect(state.extensions["confirm_gate"]).toHaveLength(1);
+  });
+});

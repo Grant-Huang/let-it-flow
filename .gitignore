@@ -1,53 +1,40 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-.venv/
-venv/
-env/
-.pytest_cache/
-.mypy_cache/
-*.egg-info/
-dist/
-build/
-
-# 环境与密钥
-.env
-.env.local
-.env.*.local
-*.key
-credentials.json
-
-# 运行时数据
-data/
-backend/data/
-*.db
-*.sqlite
-*.sqlite3
-
-# Node / 前端
+# 依赖
 node_modules/
-.next/
-out/
-.turbo/
+.pnpm-store/
+
+# 构建产物
+dist/
 *.tsbuildinfo
 
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-.DS_Store
-
-# 临时文件
+# 运行时数据（本地生成，不入库）
+data/
 .tmp/
 tmp/
+
+# 环境变量与密钥
+.env
+.env.*
+!.env.example
+
+# 日志
 *.log
+npm-debug.log*
+pnpm-debug.log*
 
-# Vercel
-.vercel/
+# 编辑器
+.vscode/
+.idea/
+.DS_Store
 
-# 参考项目（独立仓库，本次提交排除）
-reference/ai-content-factory/
+# Python（重 IO provider 子进程可能产生）
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# 参考仓库（嵌套 git，不入库）
+reference/
+
+# 测试覆盖率
+coverage/
+.vitest/

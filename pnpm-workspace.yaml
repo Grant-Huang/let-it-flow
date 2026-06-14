@@ -1,0 +1,5 @@
+allowBuilds:
+  esbuild: set this to true or false
+# 允许运行 install 脚本的依赖（vitest/eslint 依赖 esbuild 需要 postinstall）
+onlyBuiltDependencies:
+  - esbuild

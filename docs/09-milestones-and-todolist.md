@@ -2,6 +2,240 @@
 
 本文档把开发工作划分为**三个阶段**（采纳自详细设计文档 §6），每个阶段下含若干细粒度里程碑（便于 TDD 渐进）。每个里程碑包含：目标、输入、输出文件、验收标准、测试用例、TDD 策略、风险点。
 
+## 9.MVP Podcast MVP 里程碑
+
+面向"类似 LitPilot / ai-content-factory podcast 项目"的最小可用版本：**一轮完整生成**（URL → 7 步 → 视频），支持路径澄清与数据选择（HITL），但**不支持多轮修改/提问**。
+
+### MVP 范围决策
+
+| 维度 | MVP 取舍 | 完整设计对照 |
+|------|---------|-------------|
+| 产物 | 完整 podcast（7 步，含 TTS/生图/视频） | 同 |
+| DAG 生成 | 模板路由为主，LLM 只填参数 | 完整设计含 LLM 动态规划 |
+| 知识库 | **不做**（仅 web_search + web_fetch） | 完整设计含 IKnowledgeProvider（M6） |
+| 形态 | **SDK 优先**（进程内 async generator） | 完整设计含 HTTP/SSE |
+| 自定义工具 | 仅内置工具 | 完整设计含 flow-manifest/插件 |
+| HITL | 进程内 AsyncLatch（**不做快照持久化**） | 完整设计含 State Snapshot |
+| 流式粒度 | 阶段事件 + LLM token 级流式 | 完整设计含工具内 progress |
+| 重 IO 工具 | provider 抽象 + Python 子进程调用 ai-content-factory 脚本 | — |
+| 输入源 | URL 抓取（文章/讲稿），**不做音视频转录** | 完整设计可扩展 |
+| 模型 | 仅 native 结构化输出（GPT-4o） | 完整设计含弱模型平替 |
+
+### 砍掉的完整设计项（MVP 不实装）
+
+- M6 知识库（IKnowledgeProvider/ObsidianProvider/MCP 桥接）
+- M5 评测集（50 用例）/ RobustOutputGuard 弱模型路径 / Fallback DAG / Critic / few-shots
+- M7 多形态示例（仅保留单个 podcast SDK 示例）
+- HITL State Snapshot 持久化 / Serverless 冷启动恢复
+- 工具向量精排（top-K）/ AutonomousResearchTool / flow-manifest / http-tool-provider
+- onNodeError 的 retry 策略（仅 abort+skip）/ Content Pipeline summarize 阶段
+
+### MVP 里程碑总览
+
+```mermaid
+flowchart LR
+    subgraph phase1 [阶段一: 编排骨架]
+        P0["P0 项目骨架<br/>+ SDK 入口"] --> P1["P1 任务/流式<br/>+ HITL 闩锁"]
+        P0 --> P2["P2 工具协议<br/>+ 内置工具"]
+    end
+    subgraph phase2 [阶段二: 执行引擎]
+        P1 --> P3["P3 DAG Executor<br/>+ Content Pipeline"]
+        P2 --> P3
+        P3 --> P4["P4 Podcast 模板<br/>+ Planner 填参"]
+    end
+    subgraph phase3 [阶段三: 重IO集成]
+        P4 --> P5["P5 重IO Provider<br/>(TTS/生图/视频)"]
+        P5 --> P6["P6 端到端<br/>一轮完整生成"]
+    end
+    phase1 --> phase2 --> phase3
+```
+
+| 里程碑 | 目标 | 预估 | 依赖 |
+|--------|------|------|------|
+| P0 | 项目骨架 + SDK 入口 | 1 天 | 无 |
+| P1 | 任务/流式 + HITL 闩锁 | 2 天 | P0 |
+| P2 | 工具协议 + 内置工具 | 2 天 | P0 |
+| P3 | DAG Executor + Content Pipeline | 2.5 天 | P1, P2 |
+| P4 | Podcast 模板 + Planner 填参 | 2 天 | P3 |
+| P5 | 重 IO Provider（TTS/生图/视频） | 3 天 | P4 |
+| P6 | 端到端一轮完整生成 | 1.5 天 | P5 |
+
+P1 与 P2 可并行（都依赖 P0）。总计约 **14 个工作日**。
+
+### P0 - 项目骨架 + SDK 入口（1 天）
+
+**目标**：TS 项目可启动、可导入；`LetItFlow` 类骨架可实例化。
+
+**输出文件**：
+- `package.json` - 依赖（hono / zod / ai / @ai-sdk/openai / vitest / typescript / jsonpath-plus）
+- `tsconfig.json`（strict）、`vitest.config.ts`、`eslint.config.mjs`
+- `src/index.ts` - 导出 LetItFlow
+- `src/sdk/let-it-flow.ts` - LetItFlow 类骨架（装配 planner/executor/tools 的占位）
+- `src/core/config.ts` - DATA_DIR / 环境变量
+- `src/core/stream-events.ts` - 事件构造
+
+**验收标准**：
+- [ ] `pnpm typecheck` 通过
+- [ ] `pnpm test` 通过（冒烟测试）
+- [ ] `import { LetItFlow } from "./src"` 不报错
+
+**测试用例**：`tests/unit/test-smoke.ts::test LetItFlow instantiates`
+
+---
+
+### P1 - 任务/流式 + HITL 闩锁（2 天）
+
+**目标**：Task 创建 + 流式订阅（stub DAG）；AsyncLatch + `pending_confirmation` + `confirmation_required` 就绪（暂停点暂用 stub 触发）。
+
+**输出文件**：
+- `src/tasks/task-store.ts` - FileTaskStore（含 `pending_confirmation` 状态）
+- `src/tasks/latch.ts` - AsyncLatch（进程内，**不做快照持久化**）
+- `src/tasks/registry.ts` - TaskRegistry（stub runner + awaitConfirmation/confirm）
+- `src/tasks/coalescer.ts` - StreamCoalescer（content/status 通道分离）
+- `src/api/workflows.ts` - POST /api/workflows
+- `src/api/tasks.ts` - GET /stream + POST /confirm
+
+**验收标准**：
+- [ ] POST /workflows 返回 taskId
+- [ ] SSE 收到 stage/done 事件
+- [ ] 断线重连（since=N）续传
+- [ ] stub 暂停 → `confirmation_required` → confirm 恢复 running
+
+**砍掉的**：state-snapshot.ts、sweeper HITL 超时（进程内够用）。
+
+---
+
+### P2 - 工具协议 + 内置工具（2 天）
+
+**目标**：FlowConnector 接口 + 分层注册表 + 4 个内置工具可独立执行并产出事件。
+
+**输出文件**：
+- `src/tools/base.ts` - FlowConnector + StreamEvent（含 confirmation_required）
+- `src/tools/registry.ts` - 分层 ToolRegistry（**仅粗筛分层，不做向量精排**）
+- `src/tools/builtin/web-search.ts`、`web-fetch.ts`、`llm-node.ts`、`deliver.ts`
+- `src/services/llm-service.ts`
+
+**验收标准**：
+- [ ] 各工具 execute() 产出 stage/tool_call/tool_result 事件
+- [ ] llm-node 用 `streamText` 流式产出 text 事件
+- [ ] listByTier() 按分层过滤正确
+
+**砍掉的**：AutonomousResearchTool、http-tool-provider、tool-router 向量精排、工具契约 whenToUse（模板路由不需要）。
+
+---
+
+### P3 - DAG Executor + Content Pipeline（2.5 天）
+
+**目标**：多节点 DAG 端到端执行（mock 工具）；JSONPath 解析；数据清洗管道；HITL 暂停点集成。
+
+**输出文件**：
+- `src/planner/dag-schema.ts` - WorkflowDAG（含 requireConfirmation/onNodeError/contentPipeline）
+- `src/executor/executor.ts` - 拓扑分层 + 并发 + HITL + onNodeError（abort/skip）
+- `src/executor/context.ts` - ExecutionContext（jsonpath-plus）
+- `src/executor/content-pipeline.ts` - strip/truncate（**summarize 砍**）
+
+**验收标准**：
+- [ ] search→fetch→llm→deliver 顺序正确
+- [ ] JSONPath 引用（`$.tasks.id.output.field`）正确解析
+- [ ] web_fetch 大输出经 strip+truncate 压缩，不触发 400
+- [ ] requireConfirmation 节点暂停/恢复
+
+**砍掉的**：onNodeError retry 策略、state-snapshot、Content Pipeline summarize。
+
+---
+
+### P4 - Podcast 模板 + Planner 填参（2 天）
+
+**目标**：podcast 7 步模板骨架 + 模板路由 + LLM 填参 + Guardrail（路径澄清）。
+
+**输出文件**：
+- `src/planner/templates.ts` - **podcast 模板**（7 步骨架，见下方）
+- `src/planner/planner.ts` - 模板路由 + LLM 填参（`generateText` + `Output.object`，**仅 native 路径**）
+- `src/planner/guardrail.ts` - 规则层（proceed/clarify/reject）
+- `src/planner/validator.ts` - 基础校验（拓扑/工具/引用）
+- `src/api/tasks.ts`（扩展）- `/clarify` 端点
+
+**Podcast 模板骨架**（对应 ai-content-factory step 1c/2/3/3b/3c/3d/4a∥4b/5/6）：
+
+```
+fetch(URL)
+  → translate(分段初译, step2)
+  → rewrite(旁述改写, step3)
+  → seam_repair(接缝修复, step3b)
+  → terminology(术语统一, step3c)
+  → image_prompts(生图提示词, step3d)
+  → [tts(配音, step4b) ∥ image_gen(生图, step4a)]
+  → subtitle(字幕对齐, step5)
+  → video_build(视频合成, step6)
+  → deliver(final.mp4)
+```
+
+**HITL 触发点**（用户确认）：
+- `fetch` 后：用户选择/筛选抓取的内容片段（`requireConfirmation: true`）
+- `rewrite` 后：用户预览改写稿再继续配音（`requireConfirmation: true`）
+
+**验收标准**：
+- [ ] "把 https://... 做成播客" 命中 podcast 模板
+- [ ] LLM 填参产出合法 DAG（Zod 校验通过）
+- [ ] 模糊意图触发 `clarification_required`；clarify 后重跑
+- [ ] podcast 模板含上述 HITL 触发点
+
+**砍掉的**：RobustOutputGuard 弱模型路径、Fallback DAG、评测集、Critic、few-shots。
+
+---
+
+### P5 - 重 IO Provider：TTS/生图/视频（3 天，最重）
+
+**目标**：抽象重 IO provider 接口；Python 子进程调用 ai-content-factory 脚本；每步真实可用。
+
+**输出文件**：
+- `src/tools/heavy-io/provider.ts` - **HeavyIoProvider 接口**（abstract，本地/云端可接）
+- `src/tools/heavy-io/subprocess-adapter.ts` - Python 子进程适配（文件中转，调 `reference/ai-content-factory/tools/*.py`）
+- `src/tools/heavy-io/tts.ts` - TTS provider（step4b，Edge-TTS / Qwen-TTS）
+- `src/tools/heavy-io/image-gen.ts` - 生图 provider（step4a，Z-Image-Turbo）
+- `src/tools/heavy-io/video-build.ts` - 视频合成（step6，FFmpeg）
+- `src/tools/heavy-io/rewrite.ts` - LLM 改写（step3，调 Ollama 35B 或 TS 直连）
+- `src/tools/builtin/text-steps.ts` - translate/seam-repair/terminology/image-prompts（step2/3b/3c/3d，文本类）
+
+**数据传递约定**：TS 与 Python 子进程统一用**文件中转**（与 ai-content-factory 的 `scripts/` 目录约定一致），子进程读写 `workDir/scripts/*.txt`，TS 读结果文件。
+
+**验收标准**：
+- [ ] 每个重 IO 工具独立执行产出结果文件（mp3/png/mp4）
+- [ ] 子进程失败有明确错误事件
+- [ ] HeavyIoProvider 接口可替换为云端实现（mock 验证）
+
+**风险**：这是工作量最大里程碑——7 步脚本接入 + provider 抽象 + 环境依赖（Ollama/Qwen-TTS/FFmpeg/GPU）。
+
+---
+
+### P6 - 端到端一轮完整生成（1.5 天）
+
+**目标**：URL → 完整 7 步 → 视频，含 HITL 数据选择。
+
+**输出文件**：
+- `examples/podcast-generator/sdk-demo.ts` - SDK 形态端到端示例
+- `src/sdk/let-it-flow.ts`（完善）- 装配真实 planner/executor/tools
+- HITL 集成验证：fetch 后选内容、rewrite 后预览
+
+**验收标准**：
+- [ ] `flow.execute("把 https://... 做成播客")` 流式收到各阶段事件
+- [ ] HITL 暂停（fetch 选内容）→ 确认 → 继续
+- [ ] HITL 暂停（rewrite 预览）→ 确认 → 继续
+- [ ] 最终产出 `final.mp4`
+
+---
+
+### MVP 风险与缓解
+
+| 风险 | 影响 | 缓解 |
+|------|------|------|
+| **P5 重 IO 环境依赖重**（Ollama/Qwen-TTS/FFmpeg/GPU） | 最可能延期 | provider 抽象先 mock 验证编排；分步接入，先文本类（step2/3/3b/3c）后重IO（step4/5/6） |
+| Python 子进程与 TS 数据传递 | 数据丢失/格式错 | 统一文件中转（`workDir/scripts/`），与 ai-content-factory 约定一致 |
+| 7 步链路任一步失败致整链断 | 无法产出 | onNodeError=skip 兜底 + 每步产物落盘可断点续跑 |
+| podcast 模板 LLM 改写质量 | 产物差 | P4 先用简单 prompt，P5 接 35B 后迭代 |
+
+---
+
 ## 9.0 开发原则
 
 - **TDD**：每个里程碑先写测试（测试冻结后不改断言），再实现业务代码

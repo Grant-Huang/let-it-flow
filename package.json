@@ -1,0 +1,35 @@
+{
+  "name": "let-it-flow",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Intent-to-DAG Compiler — 开发者友好的、以意图为导向的流式任务编排框架",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "dev": "tsx watch src/index.ts",
+    "lint": "eslint .",
+    "smoke": "tsx -e \"import('./src/index.ts').then(m => console.log('import ok', typeof m.LetItFlow))\""
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "^2.0.0",
+    "@hono/node-server": "^1.13.0",
+    "@meso.ai/types": "^1.2.1",
+    "ai": "^6.0.0",
+    "hono": "^4.6.0",
+    "jsonpath-plus": "^10.1.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.13.0",
+    "@types/node": "^22.0.0",
+    "eslint": "^9.13.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "typescript-eslint": "^8.10.0",
+    "vitest": "^2.1.0"
+  }
+}
