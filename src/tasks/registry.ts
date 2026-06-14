@@ -12,6 +12,10 @@ import {
   type StreamEventType,
   type EventTypePayloadMap,
 } from "../core/stream-events.js";
+import type { LlmService } from "../services/llm-service.js";
+import type { ToolRegistry } from "../tools/registry.js";
+import { plan, type PlannerConfig } from "../planner/planner.js";
+import { executeDag } from "../executor/executor.js";
 
 /**
  * 用户在 HITL 确认门做的决策（POST /confirm 请求体）。
@@ -36,6 +40,21 @@ export interface ConfirmationResult {
   note?: string;
 }
 
+/** 用户在澄清门补充的信息（POST /clarify 请求体）。 */
+export interface ClarificationSubmission {
+  /** 用户补充的自由文本（合并进意图重跑 planner）。 */
+  message: string;
+}
+
+/**
+ * 运行时依赖：注入后任务走真实 planner + executor；缺省走 P1 stub runner。
+ */
+export interface TaskRuntime {
+  llm: LlmService;
+  toolRegistry: ToolRegistry;
+  plannerRole?: "planner" | "default";
+}
+
 /**
  * 任务注册表：进程内单例，统筹 TaskStore + AsyncLatch + 任务执行。
  *
@@ -44,20 +63,25 @@ export interface ConfirmationResult {
  *   - 维护 taskId → AsyncLatch<ConfirmationResult> 映射（HITL 暂停点）
  *   - awaitConfirmation(taskId, gateId)：executor 在确认节点调用，挂起等待
  *   - confirm(taskId, decision)：外部 POST /confirm 调用，释放闩锁
+ *   - submitClarification(taskId, msg)：外部 POST /clarify 调用，补充意图重跑
  *   - runner 负责把事件 append 到 store（含落库）
  *
- * MVP runner 是 stub：模拟一次"检索→暂停确认→完成"流程，验证 HITL 链路。
- * P3 接入真实 executor 后替换。
+ * 注入 runtime（llm + toolRegistry）后走真实 planner + executor；
+ * 缺省走 stub runner（保留供 P1 兼容测试）。
  */
 export class TaskRegistry {
   private readonly store: FileTaskStore;
+  private readonly runtime?: TaskRuntime;
   /** taskId → 当前活跃的确认闩锁 + 其 gateId（一次只允许一个暂停点）。 */
   private readonly latches = new Map<string, { latch: AsyncLatch<ConfirmationResult>; gateId: string }>();
   /** taskId → 运行中的 runner Promise（防止重复启动）。 */
   private readonly runners = new Map<string, Promise<void>>();
+  /** taskId → 当前活跃的澄清闩锁（guardrail clarify 暂停点）。 */
+  private readonly clarifyLatches = new Map<string, AsyncLatch<string>>();
 
-  constructor(store?: FileTaskStore) {
+  constructor(store?: FileTaskStore, runtime?: TaskRuntime) {
     this.store = store ?? new FileTaskStore();
+    this.runtime = runtime;
   }
 
   getStore(): FileTaskStore {
@@ -67,9 +91,11 @@ export class TaskRegistry {
   /** 创建并启动一个任务，返回 meta。 */
   start(intent: string, config: Record<string, unknown> = {}): TaskMeta {
     const meta = this.store.create(intent, config);
-    const runner = this.runStub(meta.id, intent).catch((err) => {
-      this.emitError(meta.id, err instanceof Error ? err.message : String(err));
-    });
+    const runner = (this.runtime ? this.runPlanned(meta.id, intent) : this.runStub(meta.id, intent)).catch(
+      (err) => {
+        this.emitError(meta.id, err instanceof Error ? err.message : String(err));
+      },
+    );
     this.runners.set(meta.id, runner);
     return meta;
   }
@@ -132,6 +158,19 @@ export class TaskRegistry {
     entry.latch.release(result);
   }
 
+  /**
+   * 外部澄清入口：guardrail 触发 pending_clarification 后，用户补充信息。
+   * 把 message 释放给挂起的 planner，合并进意图重跑。
+   * 无活跃澄清闩锁则抛错。
+   */
+  async submitClarification(taskId: string, submission: ClarificationSubmission): Promise<void> {
+    const latch = this.clarifyLatches.get(taskId);
+    if (!latch || !latch.isPending) {
+      throw new Error(`task ${taskId} has no pending clarification`);
+    }
+    latch.release(submission.message);
+  }
+
   /** 等待任务 runner 结束（测试用）。 */
   async join(taskId: string): Promise<void> {
     const runner = this.runners.get(taskId);
@@ -160,12 +199,98 @@ export class TaskRegistry {
     }
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // 真实 runner：planner（guardrail + LLM 填参）→ executor。
+  // ─────────────────────────────────────────────────────────────────────────
   /**
-   * Stub runner：模拟一轮完整流程。
-   *   stage(active) → text 流 → 暂停确认 → [confirm 后] stage(done) → done
-   * 用于 P1 验收：SSE 推送、断线重连、HITL 暂停/恢复全链路。
-   * P3 替换为真实 executor。
+   * 规划执行 runner：意图 → guardrail → LLM 填参 → DAG → executor → done。
+   * guardrail clarify 时挂起等 POST /clarify；reject 时置 failed。
    */
+  private async runPlanned(taskId: string, intent: string): Promise<void> {
+    const rt = this.runtime;
+    if (!rt) throw new Error("runtime not configured");
+    const plannerCfg: PlannerConfig = {
+      llm: rt.llm,
+      registry: rt.toolRegistry,
+      role: rt.plannerRole ?? "planner",
+    };
+
+    let currentIntent = intent;
+
+    // planner 带澄清循环（用户多次补充直到 proceed/reject）
+    while (true) {
+      this.store.setStatus(taskId, "running");
+      const outcome = await plan(currentIntent, plannerCfg);
+
+      if (outcome.kind === "reject") {
+        // 越界：置 failed，发 extension(rejected)
+        this.emit(taskId, "extension", {
+          name: "rejected",
+          version: "1.0",
+          data: { reason: outcome.reason, suggest_retry: outcome.suggestRetry },
+        });
+        this.store.setStatus(taskId, "failed", outcome.reason);
+        return;
+      }
+
+      if (outcome.kind === "clarify") {
+        // 模糊：挂起等 POST /clarify，合并意图后重跑
+        const latch = new AsyncLatch<string>();
+        this.clarifyLatches.set(taskId, latch);
+        this.store.setStatus(taskId, "pending_clarification");
+        this.emit(taskId, "extension", {
+          name: "clarification_required",
+          version: "1.0",
+          data: { questions: outcome.questions },
+        });
+        try {
+          const supplement = await latch.wait();
+          currentIntent = mergeIntent(currentIntent, supplement);
+        } finally {
+          this.clarifyLatches.delete(taskId);
+        }
+        // 重跑 planner（continue 循环）
+        continue;
+      }
+
+      // proceed：执行 DAG
+      const { dag } = outcome;
+      this.emit(taskId, "stage", stagePayload("执行工作流", "active"));
+      const result = await executeDag(dag, {
+        taskId,
+        runId: taskId,
+        intent: currentIntent,
+        registry: rt.toolRegistry,
+        hooks: {
+          emit: async (ev) => this.store.append(taskId, makeEvent(taskId, ev.type, ev.payload, ev.channel)),
+          requireConfirmation: (gate) =>
+            this.awaitConfirmation(taskId, {
+              nodeId: gate.detail?.node_id as string ?? "",
+              runId: taskId,
+              prompt: gate.prompt,
+              options: gate.options,
+              detail: gate.detail,
+            }),
+        },
+      });
+      this.emit(taskId, "stage", stagePayload("执行工作流", "done"));
+
+      if (!result.ok) {
+        // abort/skip：executor 已发 error 事件，这里只置终态
+        this.store.setStatus(taskId, "error", result.error ?? "执行失败");
+        return;
+      }
+      this.emit(taskId, "done", {});
+      this.store.setStatus(taskId, "done");
+      return;
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Stub runner：模拟一轮完整流程。
+  //   stage(active) → text 流 → 暂停确认 → [confirm 后] stage(done) → done
+  // 用于 P1 验收：SSE 推送、断线重连、HITL 暂停/恢复全链路。
+  // P3 替换为真实 executor。
   private async runStub(taskId: string, intent: string): Promise<void> {
     this.store.setStatus(taskId, "running");
     this.emit(taskId, "stage", stagePayload("理解意图", "active"));
@@ -199,4 +324,9 @@ export class TaskRegistry {
 
 function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/** 合并原始意图与用户补充信息（后置合并，见 06 §6.7）。 */
+function mergeIntent(original: string, supplement: string): string {
+  return `${original}\n（补充：${supplement}）`;
 }

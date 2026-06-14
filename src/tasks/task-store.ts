@@ -18,17 +18,22 @@ import type { StreamEvent, StreamEventType } from "../core/stream-events.js";
  *                    ↘ error
  *                    ↘ pending_confirmation → running（confirm 后）→ done
  *                                           ↘ aborted（拒绝确认）
+ *   pending → pending_clarification（guardrail clarify）→ running（clarify 后重跑）
+ *   pending → failed（guardrail reject）
  *
  * pending_confirmation 是 HITL 暂停态：executor 遇到 requireConfirmation 节点
  * 时进入，POST /confirm 决策后回到 running 或 aborted。
+ * pending_clarification 是 guardrail 澄清态：意图模糊，POST /clarify 补充后重跑 planner。
  */
 export const TASK_STATUSES = [
   "pending",
   "running",
   "pending_confirmation",
+  "pending_clarification",
   "done",
   "error",
   "aborted",
+  "failed",
 ] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 

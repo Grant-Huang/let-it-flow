@@ -17,14 +17,19 @@ import type { ToolEvent } from "../../core/stream-events.js";
  */
 
 const inputSchema = z.object({
-  /** executor 从 inputRefs 解析注入的片段列表（已 resolveRef 成字符串）。 */
-  items: z.array(z.string()).default([]).describe("待聚合的文稿片段"),
+  /** 待聚合的文稿片段；executor 从 inputRefs 注入。支持数组或单字符串（归一为单元素数组）。 */
+  items: z.union([z.array(z.string()), z.string()]).default([]).describe("待聚合的文稿片段（数组或单字符串）"),
   /** 聚合分隔符。 */
   separator: z.string().default("\n\n"),
   /** 产物类型标签（如 "podcast_script"）。 */
   artifactType: z.string().default("text"),
   title: z.string().optional(),
 });
+
+/** 把 items 归一为字符串数组。 */
+function normalizeItems(items: string[] | string): string[] {
+  return Array.isArray(items) ? items : [items];
+}
 
 export function createDeliverTool(): FlowConnector<{ type: string; title?: string; content: string }> {
   return {
@@ -35,6 +40,7 @@ export function createDeliverTool(): FlowConnector<{ type: string; title?: strin
 
     async *execute(params, ctx): AsyncGenerator<ToolEvent, ToolResult<{ type: string; title?: string; content: string }>> {
       const args = inputSchema.parse(params);
+      const items = normalizeItems(args.items);
       const callId = `c_${randomUUID().slice(0, 8)}`;
       yield {
         type: "tool_call",
@@ -42,13 +48,13 @@ export function createDeliverTool(): FlowConnector<{ type: string; title?: strin
         payload: toolCallPayload({
           id: callId,
           name: "core.deliver",
-          args: { artifactType: args.artifactType, itemCount: args.items.length },
+          args: { artifactType: args.artifactType, itemCount: items.length },
           risk: "safe",
           groupId: ctx.nodeId,
         }),
       };
 
-      const content = args.items.join(args.separator);
+      const content = items.join(args.separator);
       const artifact = { type: args.artifactType, title: args.title, content };
 
       yield {

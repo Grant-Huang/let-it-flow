@@ -11,6 +11,7 @@ import { StreamCoalescer } from "../tasks/coalescer.js";
  *   GET  /api/tasks/:id          —— 查询任务 meta + 状态
  *   GET  /api/tasks/:id/stream   —— SSE 订阅事件流（支持 ?since=N 断线重连）
  *   POST /api/tasks/:id/confirm  —— HITL 确认（释放闩锁）
+ *   POST /api/tasks/:id/clarify  —— Guardrail 澄清（补充意图，重跑 planner）
  *
  * SSE 协议信封由 @meso.ai/types 定义；serializeSSEData 把内部事件剥成信封。
  * 断线重连：客户端记录收到的最大 seq，重连时带 ?since=seq，服务端只推 seq 之后的事件，
@@ -123,11 +124,39 @@ export function createTasksApp(registry: TaskRegistry): Hono {
     return c.json({ status: "success", data: { confirmed: true } });
   });
 
+  // POST /api/tasks/:id/clarify —— Guardrail 澄清
+  app.post("/:id/clarify", async (c) => {
+    const taskId = c.req.param("id");
+    const meta = registry.getStore().get(taskId);
+    if (!meta) {
+      return c.json({ status: "error", message: "task not found" }, 404);
+    }
+    if (meta.status !== "pending_clarification") {
+      return c.json(
+        { status: "error", message: `task not awaiting clarification (status=${meta.status})` },
+        409,
+      );
+    }
+    const body = (await c.req.json().catch(() => ({}))) as { message?: string };
+    if (!body.message || typeof body.message !== "string") {
+      return c.json({ status: "error", message: "field 'message' (string) is required" }, 400);
+    }
+    try {
+      await registry.submitClarification(taskId, { message: body.message });
+    } catch (err) {
+      return c.json(
+        { status: "error", message: err instanceof Error ? err.message : String(err) },
+        409,
+      );
+    }
+    return c.json({ status: "success", data: { clarified: true } });
+  });
+
   return app;
 }
 
 function isTerminal(status: string): boolean {
-  return status === "done" || status === "error" || status === "aborted";
+  return status === "done" || status === "error" || status === "aborted" || status === "failed";
 }
 
 function sleep(ms: number): Promise<void> {

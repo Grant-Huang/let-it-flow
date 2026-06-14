@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { createApp } from "../../src/api/app.js";
+import { TaskRegistry } from "../../src/tasks/registry.js";
 import { serializeSSEData } from "../../src/core/stream-events.js";
 import { parseSSELine } from "@meso.ai/types";
 
@@ -12,6 +13,14 @@ beforeEach(() => {
   tmpRoot = mkdtempSync(join(tmpdir(), "lif-p1-api-"));
   process.env.LIF_DATA_DIR = tmpRoot;
 });
+
+/**
+ * 构造使用 stub runner 的 app（无 runtime 注入）。
+ * P1 API 测试验证 stub runner 的 HITL/SSE 协议，故显式用 stub registry。
+ */
+function createStubApp() {
+  return createApp(new TaskRegistry());
+}
 
 /**
  * 从 Response body 解析 SSE data 行，返回所有 parseSSELine 解析成功的事件。
@@ -65,7 +74,7 @@ async function json<T>(res: Response): Promise<ApiSuccess<T>> {
 
 describe("API end-to-end (Hono app)", () => {
   it("POST /api/workflows creates a task and returns taskId", async () => {
-    const app = createApp();
+    const app = createStubApp();
     const res = await app.request("/api/workflows", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -79,7 +88,7 @@ describe("API end-to-end (Hono app)", () => {
   });
 
   it("POST /api/workflows validates body (400 on empty)", async () => {
-    const app = createApp();
+    const app = createStubApp();
     const res = await app.request("/api/workflows", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -89,7 +98,7 @@ describe("API end-to-end (Hono app)", () => {
   });
 
   it("GET /api/tasks/:id returns meta", async () => {
-    const app = createApp();
+    const app = createStubApp();
     const createRes = await app.request("/api/workflows", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -104,13 +113,13 @@ describe("API end-to-end (Hono app)", () => {
   });
 
   it("GET /api/tasks/:id 404 for unknown", async () => {
-    const app = createApp();
+    const app = createStubApp();
     const res = await app.request("/api/tasks/unknown");
     expect(res.status).toBe(404);
   });
 
   it("full flow: create → SSE streams events → confirm → done", async () => {
-    const app = createApp();
+    const app = createStubApp();
     // 1) 创建
     const create = await json<TaskCreatedData>(
       await app.request("/api/workflows", {
@@ -144,7 +153,7 @@ describe("API end-to-end (Hono app)", () => {
   });
 
   it("reject leads to aborted, no done event", async () => {
-    const app = createApp();
+    const app = createStubApp();
     const create = await json<TaskCreatedData>(
       await app.request("/api/workflows", {
         method: "POST",
@@ -167,7 +176,7 @@ describe("API end-to-end (Hono app)", () => {
   });
 
   it("confirm 409 when not awaiting", async () => {
-    const app = createApp();
+    const app = createStubApp();
     const create = await json<TaskCreatedData>(
       await app.request("/api/workflows", {
         method: "POST",
