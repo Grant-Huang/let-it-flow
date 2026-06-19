@@ -4,13 +4,12 @@ import { TaskRegistry, type TaskRuntime } from "../tasks/registry.js";
 import { createDefaultToolRegistry } from "../executor/default-tools.js";
 import {
   registerBuiltinTools,
-  registerHeavyIoTools,
   createTavilyProvider,
 } from "../tools/index.js";
-import { SubprocessAdapter } from "../tools/heavy-io/subprocess-adapter.js";
-import type { HeavyIoConfig } from "../tools/heavy-io/provider.js";
 import { LlmService } from "../services/llm-service.js";
-import { getArtifactsDir } from "../core/config.js";
+import { loadConfig } from "../llm/config-loader.js";
+import { ensureSeedConfig } from "../llm/seed.js";
+import type { ConsumerTemplate } from "../planner/consumer-template.js";
 import {
   makeEvent,
   channelOf,
@@ -21,7 +20,9 @@ import {
 
 /**
  * Let-it-Flow SDK 配置（进程内形态）。
- * 默认装配真实 runtime（planner + executor + 内置工具 + 重 IO domain 工具）。
+ *
+ * 内核只装配 core.* 通用工具；业务工具（podcast 等）和业务模板由消费应用
+ * 显式注册（见 examples/podcast-generator/sdk-demo.ts）。
  */
 export interface LetItFlowConfig {
   /** Planner / LLM 节点用的模型标识（如 "openai/gpt-4o"；缺省由 LlmService 角色映射决定）。 */
@@ -30,10 +31,15 @@ export interface LetItFlowConfig {
   searchProvider?: string;
   /** OpenAI API Key（缺省从 OPENAI_API_KEY 读取；缺省时 planner 回退启发式抽取）。 */
   openaiApiKey?: string;
+  /** OpenAI 兼容 API 的 baseURL（如 DeepSeek https://api.deepseek.com；缺省从 OPENAI_BASE_URL 读）。 */
+  openaiBaseUrl?: string;
   /** 搜索 provider api key（Tavily；缺省走 native DuckDuckGo）。 */
   tavilyApiKey?: string;
-  /** 重 IO 配置：未提供则不注册 domain 工具（仅文本子链可用）。 */
-  heavyIo?: HeavyIoConfig;
+  /**
+   * 消费应用注入的兜底模板（如 podcast）。
+   * planner 在 LLM 选工具失败时回退这些模板；内核不内置任何业务模板。
+   */
+  consumerTemplates?: ConsumerTemplate[];
 }
 
 /**
@@ -57,21 +63,27 @@ export class LetItFlow {
   private readonly registry: TaskRegistry;
   private readonly store: FileTaskStore;
   private readonly toolRegistry = createDefaultToolRegistry();
-  private readonly llm: LlmService;
+  private readonly llmService: LlmService;
 
   constructor(config: LetItFlowConfig = {}) {
     ensureStorageDirs();
+    // P8.5：首次启动若 registry 为空，从 .env 派生 seed 配置
+    ensureSeedConfig();
     this.config = {
       plannerModel: "openai/gpt-4o",
       searchProvider: "native",
       ...config,
     };
     this.store = new FileTaskStore();
-    this.llm = new LlmService({ apiKey: config.openaiApiKey ?? process.env.OPENAI_API_KEY });
+    this.llmService = new LlmService({
+      apiKey: config.openaiApiKey ?? process.env.OPENAI_API_KEY,
+      baseURL: config.openaiBaseUrl ?? process.env.OPENAI_BASE_URL,
+      runtimeConfig: loadConfig(),
+    });
 
-    // 注册内置 core 工具
+    // 注册内置 core 工具（内核只装配 core.*）
     registerBuiltinTools(this.toolRegistry, {
-      llm: this.llm,
+      llm: this.llmService,
       searchProvider: config.tavilyApiKey
         ? createTavilyProvider(config.tavilyApiKey)
         : process.env.TAVILY_API_KEY
@@ -79,20 +91,22 @@ export class LetItFlow {
           : undefined,
     });
 
-    // 注册重 IO domain 工具（若配置了 heavyIo）
-    const heavy = config.heavyIo ?? buildHeavyIoConfigFromEnv();
-    if (heavy) {
-      const adapter = new SubprocessAdapter(heavy);
-      registerHeavyIoTools(this.toolRegistry, { adapter, llm: this.llm, config: heavy });
-    }
-
-    const runtime: TaskRuntime = { llm: this.llm, toolRegistry: this.toolRegistry };
+    const runtime: TaskRuntime = {
+      llm: this.llmService,
+      toolRegistry: this.toolRegistry,
+      consumerTemplates: config.consumerTemplates,
+    };
     this.registry = new TaskRegistry(this.store, runtime);
   }
 
   /** 工具注册表（高级用法：注册自定义工具）。 */
   get tools() {
     return this.toolRegistry;
+  }
+
+  /** LLM 服务（高级用法：消费应用注册 domain 工具时需要）。 */
+  get llm(): LlmService {
+    return this.llmService;
   }
 
   /**
@@ -167,20 +181,6 @@ export class LetItFlow {
   ): StreamEvent {
     return this.store.append(runId, makeEvent(runId, type, payload, channelOf(type)));
   }
-}
-
-/** 从环境变量构建 HeavyIoConfig（与 api/app.ts 一致）。 */
-function buildHeavyIoConfigFromEnv(): HeavyIoConfig | null {
-  const repoRoot = process.env.LIF_AICF_REPO_ROOT;
-  if (!repoRoot) return null;
-  return {
-    repoRoot,
-    pythonBin: process.env.LIF_PYTHON_BIN ?? "python3",
-    ttsPythonBin: process.env.LIF_TTS_PYTHON_BIN ?? process.env.LIF_PYTHON_BIN ?? "python3",
-    artifactsDir: getArtifactsDir(),
-    rewriteBackend: (process.env.LIF_REWRITE_BACKEND as "ollama" | "openai") ?? "ollama",
-    ollamaRewriteModel: process.env.LIF_OLLAMA_MODEL,
-  };
 }
 
 function isTerminalStatus(status: string): boolean {

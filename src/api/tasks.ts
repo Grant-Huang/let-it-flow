@@ -5,9 +5,11 @@ import type { TaskRegistry } from "../tasks/registry.js";
 import type { ConfirmationDecision } from "../tasks/registry.js";
 import { serializeSSEData } from "../core/stream-events.js";
 import { StreamCoalescer } from "../tasks/coalescer.js";
+import { loadSystemSettings } from "../core/system-settings.js";
 
 /**
  * 任务相关路由：
+ *   GET  /api/tasks              —— 任务列表（按 createdAt 降序）
  *   GET  /api/tasks/:id          —— 查询任务 meta + 状态
  *   GET  /api/tasks/:id/stream   —— SSE 订阅事件流（支持 ?since=N 断线重连）
  *   POST /api/tasks/:id/confirm  —— HITL 确认（释放闩锁）
@@ -19,6 +21,12 @@ import { StreamCoalescer } from "../tasks/coalescer.js";
  */
 export function createTasksApp(registry: TaskRegistry): Hono {
   const app = new Hono();
+
+  // GET /api/tasks —— 任务列表（按 createdAt 降序，轻量摘要）
+  app.get("/", (c) => {
+    const tasks = registry.getStore().listAll();
+    return c.json({ status: "success", data: tasks });
+  });
 
   // GET /api/tasks/:id —— meta
   app.get("/:id", (c) => {
@@ -39,10 +47,14 @@ export function createTasksApp(registry: TaskRegistry): Hono {
     const since = Number(c.req.query("since") ?? "0");
 
     return streamSSE(c, async (stream) => {
+      // 系统设置：SSE 流控参数（原为硬编码 8/50ms/5min/50ms）
+      const sys = loadSystemSettings();
       // 1) 先回放 since 之后的历史事件（断线重连）
       const buffered = registry.getStore().readSince(taskId, since);
       // 2) 用 coalescer 控制推送节奏（content 合并、status/meta 立即）
       const coalescer = new StreamCoalescer({
+        maxBuffer: sys.coalescerMaxBuffer,
+        maxDelayMs: sys.coalescerMaxDelayMs,
         emit: (event) => {
           // 写 SSE data 行：data: {信封}\n\n 由 stream.sendSSE 处理 id/event/data
           // 这里用 data 字段携带序列化信封
@@ -64,8 +76,8 @@ export function createTasksApp(registry: TaskRegistry): Hono {
       //    lastSent 从回放后的最大 seq 起算。
       let lastSent = buffered.length > 0 ? buffered[buffered.length - 1]!.seq : since;
 
-      // 超时保护：长连接最多挂 5 分钟，让客户端重连（避免僵尸连接）。
-      const deadline = Date.now() + 5 * 60 * 1000;
+      // 超时保护：长连接最多挂 sys.sseDeadlineMs，让客户端重连（避免僵尸连接）。
+      const deadline = Date.now() + sys.sseDeadlineMs;
       while (Date.now() < deadline) {
         const cur = registry.getStore().get(taskId);
         if (!cur) break;
@@ -79,8 +91,8 @@ export function createTasksApp(registry: TaskRegistry): Hono {
           await stream.writeSSE({ data: "[DONE]" });
           return;
         }
-        // 等待新事件（简单轮询；间隔 50ms 与 coalescer maxDelay 对齐）
-        await sleep(50);
+        // 等待新事件（简单轮询；间隔与 coalescer maxDelay 对齐）
+        await sleep(sys.ssePollIntervalMs);
       }
       // 到达 deadline：发注释行保持连接，客户端可重连继续
       await stream.writeSSE({ data: "[DONE]" });

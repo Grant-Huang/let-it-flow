@@ -1,5 +1,15 @@
+packages:
+  - "web"
+  - "apps/podcast-generator"
 allowBuilds:
   esbuild: set this to true or false
-# 允许运行 install 脚本的依赖（vitest/eslint 依赖 esbuild 需要 postinstall）
+minimumReleaseAgeExclude:
+  - '@meso.ai/client@0.1.0'
+  - '@meso.ai/types@2.0.0'
+  - '@meso.ai/ui@3.0.0'
+# 允许运行 install 脚本的依赖（vitest/esbuild 依赖 esbuild 需要 postinstall）
 onlyBuiltDependencies:
   - esbuild
+# @meso.ai/client@0.1.0 发布时残留了 workspace:* 协议，用 overrides 映射到实际版本
+overrides:
+  "@meso.ai/client>@meso.ai/types": "^2.0.0"

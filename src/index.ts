@@ -14,11 +14,14 @@ export {
   channelOf,
   toSSE,
   serializeSSEData,
-  stagePayload,
+  phasePayload,
   textPayload,
   toolCallPayload,
+  toolStatusPayload,
   toolResultPayload,
   workflowNodePayload,
   errorPayload,
   confirmGatePayload,
 } from "./core/stream-events.js";
+export type { FlowConnector, ToolResult, ToolTier, ToolTrigger, ExecutionContext } from "./tools/base.js";
+export type { ToolManifest } from "./tools/registry.js";

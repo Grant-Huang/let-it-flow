@@ -1,4 +1,6 @@
 import { routeTemplate, extractUrls } from "./templates.js";
+import type { ConsumerTemplate } from "./consumer-template.js";
+import { findTemplate } from "./consumer-template.js";
 
 /**
  * Guardrail —— 意图护栏（见 06 §6.7）。
@@ -29,9 +31,14 @@ export interface GuardrailResult {
 /**
  * 规则层 guardrail。
  * @param intent           用户意图
- * @param routedTemplate   模板路由结果（routeTemplate(intent)）
+ * @param routedTemplate   模板路由结果（routeTemplate / 消费模板 match）
+ * @param consumerTemplates  消费应用注入的模板（用于查 findMissingParams）
  */
-export function guardrailCheck(intent: string, routedTemplate: string | null): GuardrailResult {
+export function guardrailCheck(
+  intent: string,
+  routedTemplate: string | null,
+  consumerTemplates: ConsumerTemplate[] = [],
+): GuardrailResult {
   // 1) 越界：路由未命中 且 无可服务信号
   if (routedTemplate === null && !hasServiceableSignal(intent)) {
     return {
@@ -41,8 +48,8 @@ export function guardrailCheck(intent: string, routedTemplate: string | null): G
     };
   }
 
-  // 2) 模糊：命中模板但缺关键参数
-  const missing = findMissingParams(intent, routedTemplate);
+  // 2) 模糊：命中模板但缺关键参数（由消费模板自定义校验）
+  const missing = findMissingParams(intent, routedTemplate, consumerTemplates);
   if (missing.length > 0) {
     return {
       decision: "clarify",
@@ -57,19 +64,17 @@ export function guardrailCheck(intent: string, routedTemplate: string | null): G
 
 /**
  * 检测命中模板的意图是否缺关键参数。
- * podcast：必须有 topic 或 url（缺主体 → clarify）
+ * 通过消费模板的 findMissingParams 校验（内核不硬编码业务规则）。
  */
 function findMissingParams(
   intent: string,
   templateId: string | null,
+  consumerTemplates: ConsumerTemplate[],
 ): Array<{ field: string; prompt: string }> {
-  if (templateId === "podcast") {
-    const hasUrl = extractUrls(intent).length > 0;
-    // 简单启发：若既无 URL 又无明显主题词（仅"做播客"三个字），要求补充主题
-    const hasTopicSignal = intent.length > 8 || /关于|主题|topic|的/.test(intent);
-    if (!hasUrl && !hasTopicSignal) {
-      return [{ field: "topic", prompt: "请提供播客主题或素材 URL（如：把 https://... 做成播客，或 做一期关于 AI 的播客）。" }];
-    }
+  if (!templateId) return [];
+  const tmpl = findTemplate(templateId, consumerTemplates);
+  if (tmpl?.findMissingParams) {
+    return tmpl.findMissingParams(intent);
   }
   return [];
 }
@@ -82,4 +87,4 @@ function hasServiceableSignal(intent: string): boolean {
 }
 
 /** 重新导出 routeTemplate 便于 planner 单点导入。 */
-export { routeTemplate };
+export { routeTemplate, extractUrls };

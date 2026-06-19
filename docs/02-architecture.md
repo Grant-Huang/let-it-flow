@@ -80,7 +80,7 @@ flowchart TB
 | `core/` | 配置、统一响应、SSE 协议、流式事件构造 |
 | `llm/` | LLM 抽象层：provider 注册表、AI Gateway 封装 |
 | `tools/` | 工具协议层：FlowConnector 接口、分层注册表、内置工具 |
-| `planner/` | DAG 规划：Zod schema、planner、模板库、校验 |
+| `planner/` | DAG 规划：Zod schema、planner、模板库、校验；通过 `ConsumerTemplate` 接口接收消费应用注入的业务模板（内核不内置 podcast 等业务模板） |
 | `executor/` | DAG 执行：拓扑分层、并发执行、上下文传递、HITL 暂停点 |
 | `tasks/` | 任务管理：TaskStore、可暂停 Registry、SSE 合并 |
 | `storage/` | 存储后端：file/可扩展切换 |
@@ -173,11 +173,12 @@ let-it-flow/
 │   │       └── deliver.ts          # 产物聚合
 │   ├── planner/
 │   │   ├── dag-schema.ts           # WorkflowDAG/Task Zod schema（含 requireConfirmation/contentPipeline）
-│   │   ├── planner.ts              # planner + prompt 装配
+│   │   ├── planner.ts              # planner + prompt 装配（LLM 选工具优先，消费模板兜底）
+│   │   ├── consumer-template.ts    # ConsumerTemplate 接口（内核/消费应用扩展点边界，内核不内置业务模板）
 │   │   ├── tool-router.ts          # 两阶段动态工具检索（粗筛分层 + 精排向量 top-K，见 04 §4.7）
 │   │   ├── guardrail.ts            # Guardrail 可行性判断（见 06 §6.7）
 │   │   ├── fallback.ts             # Fallback DAG 降级（见 06 §6.6）
-│   │   ├── templates.ts            # 模板库（research/content/qa）
+│   │   ├── templates.ts            # 通用模板辅助（extractUrls / research·summary 兜底路由）
 │   │   ├── validator.ts            # DAG 校验
 │   │   └── prompts/
 │   │       ├── system-prompt.md
@@ -209,9 +210,12 @@ let-it-flow/
 │   └── report.ts                   # 报告生成
 ├── docs/                           # 设计文档集
 ├── reference/                      # LitPilot 设计理念参照（只读，不复用代码）
-├── examples/                       # 示例消费应用
+├── examples/                       # 示例消费应用（显式装配业务工具 + 模板）
 │   ├── stock-analysis/             # HTTP 形态示例
-│   ├── podcast-generator/          # HTTP 形态示例
+│   ├── podcast-generator/          # SDK 形态示例（显式注册 domain.* 工具 + 注入 podcastTemplate）
+│   │   ├── sdk-demo.ts             # 消费应用入口：new LetItFlow + registerPodcastTools + consumerTemplates
+│   │   ├── toolkit.ts              # podcast 工具包入口（聚合 registerPodcastTools + buildPodcastConfigFromEnv）
+│   │   └── template.ts             # podcastTemplate（实现 ConsumerTemplate 接口：PodcastParams/buildPodcastDag）
 │   ├── obsidian-kb-server/         # ObsidianProvider 远程部署示例（HTTP 线协议）
 │   └── sdk-embedded/               # SDK 形态示例（进程内 LetItFlow）
 └── scripts/
@@ -405,6 +409,12 @@ for await (const chunk of stream) {
 
 11. **换行符 LF / 编码 UTF-8**：`.gitattributes` 强制 `* text=auto eol=lf`。
 
+12. **平台与消费应用边界分离**：内核（`src/`）只装配通用 `core.*` 工具 + 通用 planner 骨架，**不内置任何业务模板/工具**（如 podcast）。业务代码（`PodcastParams`/`buildPodcastDag`/domain.* 工具注册）归属消费应用（`examples/podcast-generator/`）。消费应用通过两处注入：
+    - **工具注册**：`registerPodcastTools(flow.tools, opts)` 显式注册 domain.* 工具（内核 `LetItFlow` 构造函数不再调用 `registerHeavyIoTools`）
+    - **模板注入**：`new LetItFlow({ consumerTemplates: [podcastTemplate] })` 注入业务兜底模板；planner 在 LLM 选工具失败时回退这些模板（见 §2.11）
+    
+    内核 planner 通过 `ConsumerTemplate` 接口（`src/planner/consumer-template.ts`）与消费应用解耦：接口声明 `match/extractParams/build` 等方法，内核不感知具体业务。
+
 ## 2.8 多模型平替与结构化输出鲁棒性（Model Agnostic）
 
 ### 痛点
@@ -506,7 +516,82 @@ export function robustJsonParse<T>(raw: string, schema: ZodSchema<T>): T | null 
 
 > 多模型平替的结构化输出守卫（`RobustOutputGuard`）见 §2.8，它包在上述 `generateText({output})` 外，不替代 AI SDK 调用。
 
-## 2.10 相关文档
+## 2.11 平台与消费应用边界分离
+
+### 设计动机
+
+早期实现中，podcast 消费应用的业务代码（`PodcastParams`/`buildPodcastDag`/9 个 domain.* 工具）被焊进平台内核默认装配（`LetItFlow` 构造函数 + `createDefaultRegistry` 都调用 `registerHeavyIoTools`；planner 硬编码 `buildPodcastDag` 兜底）。这导致：
+
+- 内核被单一业务污染，无法复用于其他消费场景（研究分析、笔记增强等）
+- 消费应用零注册即可工作，耦合隐式且难以测试隔离
+- 业务模板变更迫使内核代码改动
+
+### 分离后的边界
+
+```mermaid
+flowchart TB
+    subgraph kernel ["平台内核 src/（纯净，无 podcast 业务耦合）"]
+        LetItFlow["LetItFlow<br/>只装配 core.*"]
+        Planner["Planner<br/>LLM选工具 + ConsumerTemplate扩展点"]
+        CoreTools["core.* 工具<br/>web_search/web_fetch/llm_node/deliver"]
+    end
+    subgraph consumer ["消费应用 examples/podcast-generator/"]
+        Toolkit["toolkit.ts<br/>registerPodcastTools()"]
+        Template["template.ts<br/>podcastTemplate"]
+        Demo["sdk-demo.ts<br/>显式装配"]
+    end
+    Demo -->|"import + register"| Toolkit
+    Demo -->|"consumerTemplates 注入"| Template
+    Toolkit -->|"注册 domain.* 工具"| LetItFlow
+    Template -->|"实现 ConsumerTemplate 接口"| Planner
+```
+
+### ConsumerTemplate 接口（内核/消费应用扩展点）
+
+内核 `src/planner/consumer-template.ts` 定义通用接口，消费应用实现并注入：
+
+```typescript
+export interface ConsumerTemplate {
+  templateId: string;
+  description: string;
+  matchPattern: RegExp;
+  match(intent: string, registry: ToolRegistry): boolean;
+  extractParams(intent: string, llm: LlmService): Promise<unknown>;
+  build(params: unknown, fullPipeline: boolean): WorkflowDAG;
+  wantsFullPipeline?(intent: string): boolean;
+  hasRequiredTools?(registry: ToolRegistry): boolean;
+  findMissingParams?(intent: string): Array<{ field: string; prompt: string }>;
+}
+```
+
+planner 的兜底逻辑从硬编码 `buildPodcastDag` 改为遍历 `config.consumerTemplates`，内核不内置任何业务模板。
+
+### 消费应用装配模式
+
+```typescript
+import { LetItFlow } from "let-it-flow";
+import { registerPodcastTools, buildPodcastConfigFromEnv } from "./toolkit.js";
+import { podcastTemplate } from "./template.js";
+
+const flow = new LetItFlow({
+  openaiApiKey: process.env.OPENAI_API_KEY,
+  consumerTemplates: [podcastTemplate],  // 注入业务兜底模板
+});
+
+// 显式注册业务 domain 工具（内核不再默认装配）
+const config = buildPodcastConfigFromEnv();
+if (config) {
+  registerPodcastTools(flow.tools, { runtime: new SubprocessAdapter(config), llm: flow.llm, config });
+}
+```
+
+### 不做的事（当前边界）
+
+- **不拆 monorepo**：保持单 `tsconfig.json` + 单 `package.json`，工具实现保留在 `src/tools/heavy-io/`（只是注册权移交）
+- **不做 per-app 配置隔离**：P8 的 model_registry / call_site_bindings 仍全局共享
+- **不动工具实现**：`src/tools/heavy-io/*.ts` 的工具代码保留原位，消费应用通过 `registerPodcastTools` 聚合调用
+
+## 2.12 相关文档
 
 - [01-overview.md](01-overview.md) - 项目定位
 - [03-dag-schema.md](03-dag-schema.md) - DAG 规范

@@ -10,15 +10,21 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx watch src/server.ts",
+    "dev:sdk": "tsx watch src/index.ts",
     "lint": "eslint .",
     "smoke": "tsx -e \"import('./src/index.ts').then(m => console.log('import ok', typeof m.LetItFlow))\""
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.84",
+    "@ai-sdk/azure": "^3.0.74",
     "@ai-sdk/openai": "^2.0.0",
     "@hono/node-server": "^1.13.0",
-    "@meso.ai/types": "^1.2.1",
+    "@meso.ai/client": "^0.1.0",
+    "@meso.ai/types": "^2.0.0",
+    "@meso.ai/ui": "^3.0.0",
     "ai": "^6.0.0",
+    "dotenv": "^17.4.2",
     "hono": "^4.6.0",
     "jsonpath-plus": "^10.1.0",
     "zod": "^3.23.0"

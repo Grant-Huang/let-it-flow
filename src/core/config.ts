@@ -39,9 +39,11 @@ export function ensureStorageDirs(): void {
 /** 运行时配置（从环境变量读取，带默认值）。 */
 export const RUNTIME = {
   /** LLM 默认模型标识，如 "openai/gpt-4o" */
-  defaultModel: process.env.LIF_MODEL ?? "openai/gpt-4o",
+  defaultModel: process.env.LIF_MODEL ?? process.env.OPENAI_MODEL ?? "openai/gpt-4o",
   /** OpenAI API Key */
   openaiApiKey: process.env.OPENAI_API_KEY ?? "",
+  /** OpenAI 兼容 API 的 baseURL（如 DeepSeek: https://api.deepseek.com）。缺省走 OpenAI 官方。 */
+  openaiBaseUrl: process.env.OPENAI_BASE_URL ?? "",
   /** Tavily 搜索 API Key（web_search 用） */
   tavilyApiKey: process.env.TAVILY_API_KEY ?? "",
   /** 端口 */

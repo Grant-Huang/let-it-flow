@@ -3,7 +3,7 @@ import { topologicalLayers } from "../planner/dag-schema.js";
 import { ExecutionContext } from "./context.js";
 import { runNode } from "./node-runner.js";
 import type { ToolRegistry } from "../tools/registry.js";
-import { stagePayload, errorPayload } from "../core/stream-events.js";
+import { phasePayload, errorPayload } from "../core/stream-events.js";
 import type { StreamEvent } from "../core/stream-events.js";
 
 /**
@@ -74,8 +74,8 @@ export async function executeDag(
     }
   }
 
-  // 完成 stage（可选：让前端显示整体完成）
-  await ctx.emit({ type: "stage", channel: "status", payload: stagePayload("工作流执行", "done") });
+  // 完成 phase（可选：让前端显示整体完成）
+  await ctx.emit({ type: "phase", channel: "status", payload: phasePayload("workflow", "工作流执行", "done") });
   return { ok: true };
 }
 
@@ -85,16 +85,16 @@ async function runLayerNode(
   ctx: ExecutionContext,
   registry: ToolRegistry,
 ): Promise<void> {
-  // 节点开始 stage（粗粒度进度）
+  // 节点开始 phase（粗粒度进度，v2.0：phase 替代 stage）
   await ctx.emit({
-    type: "stage",
+    type: "phase",
     channel: "status",
-    payload: stagePayload(node.id, "active"),
+    payload: phasePayload(node.id, node.id, "running"),
   });
   const res = await runNode(node, dag, ctx, { registry });
   await ctx.emit({
-    type: "stage",
+    type: "phase",
     channel: "status",
-    payload: stagePayload(node.id, res.skipped ? "error" : "done"),
+    payload: phasePayload(node.id, node.id, res.skipped ? "error" : "done"),
   });
 }

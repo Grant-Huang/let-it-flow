@@ -4,11 +4,14 @@ import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import {
   routeTemplate,
-  isPodcastIntent,
   extractUrls,
+} from "../../src/planner/templates.js";
+import {
+  isPodcastIntent,
   buildPodcastDag,
   PodcastParams,
-} from "../../src/planner/templates.js";
+  podcastTemplate,
+} from "../../examples/podcast-generator/template.js";
 import { guardrailCheck } from "../../src/planner/guardrail.js";
 import { validateDag } from "../../src/planner/validator.js";
 import { plan } from "../../src/planner/planner.js";
@@ -33,6 +36,9 @@ function fakeTool(name: string): FlowConnector<unknown> {
     tier: "core",
     description: `fake ${name}`,
     inputSchema: {},
+    whenToUse: { triggers: [], notFor: [] },
+    outputSchema: { type: "object" },
+    outputExample: {},
     async *execute(params): AsyncGenerator<ToolEvent, ToolResult> {
       return { output: params };
     },
@@ -52,7 +58,8 @@ function registryWithCoreTools(): ToolRegistry {
 // ─────────────────────────────────────────────────────────────────────────────
 describe("P4 template routing", () => {
   it("命中 podcast 模板：含「播客」关键词", () => {
-    expect(routeTemplate("把 https://example.com/a 做成播客")).toBe("podcast");
+    // podcast 路由由消费模板 podcastTemplate.match() 负责（内核 routeTemplate 不识别业务模板）
+    expect(podcastTemplate.match("把 https://example.com/a 做成播客", new ToolRegistry())).toBe(true);
     expect(isPodcastIntent("做一期 podcast")).toBe(true);
   });
 
@@ -130,22 +137,25 @@ describe("P4 buildPodcastDag", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 describe("P4 guardrail", () => {
   it("proceed：命中 podcast + 有 URL", () => {
-    const tid = routeTemplate("把 https://example.com 做成播客");
-    const r = guardrailCheck("把 https://example.com 做成播客", tid);
+    // podcast 路由由消费模板负责；guardrailCheck 接收 consumerTemplates 查 findMissingParams
+    const tid = podcastTemplate.match("把 https://example.com 做成播客", new ToolRegistry())
+      ? "podcast"
+      : routeTemplate("把 https://example.com 做成播客");
+    const r = guardrailCheck("把 https://example.com 做成播客", tid, [podcastTemplate]);
     expect(r.decision).toBe("proceed");
     expect(r.templateId).toBe("podcast");
   });
 
   it("clarify：命中 podcast 但无主体（仅「做播客」）", () => {
-    const tid = routeTemplate("做播客");
-    const r = guardrailCheck("做播客", tid);
+    const tid = podcastTemplate.match("做播客", new ToolRegistry()) ? "podcast" : routeTemplate("做播客");
+    const r = guardrailCheck("做播客", tid, [podcastTemplate]);
     expect(r.decision).toBe("clarify");
     expect(r.questions?.length).toBeGreaterThan(0);
   });
 
   it("reject：未命中 + 无可服务信号（「点咖啡」）", () => {
     const tid = routeTemplate("帮点杯咖啡");
-    const r = guardrailCheck("帮点杯咖啡", tid);
+    const r = guardrailCheck("帮点杯咖啡", tid, [podcastTemplate]);
     expect(r.decision).toBe("reject");
     expect(r.reason).toBeTruthy();
     expect(r.suggestRetry).toBeTruthy();
@@ -217,9 +227,10 @@ describe("P4 validator", () => {
 describe("P4 planner (heuristic fallback)", () => {
   it("url 意图 → proceed，产出合法 podcast DAG", async () => {
     const outcome = await plan("把 https://example.com/a 做成播客", {
-      llm: { model: () => ({ specificationVersion: "v1" }) } as never,
+      llm: { model: () => ({ specificationVersion: "v1" }), compatModeFor: () => false, resolveEndpoint: () => undefined } as never,
       registry: registryWithCoreTools(),
       maxRetries: 1,
+      consumerTemplates: [podcastTemplate],
     });
     expect(outcome.kind).toBe("proceed");
     if (outcome.kind === "proceed") {
@@ -231,9 +242,10 @@ describe("P4 planner (heuristic fallback)", () => {
 
   it("topic 意图 → proceed，产出 search→fetch→rewrite→deliver", async () => {
     const outcome = await plan("做一期关于 AI 趋势的播客", {
-      llm: { model: () => ({ specificationVersion: "v1" }) } as never,
+      llm: { model: () => ({ specificationVersion: "v1" }), compatModeFor: () => false, resolveEndpoint: () => undefined } as never,
       registry: registryWithCoreTools(),
       maxRetries: 1,
+      consumerTemplates: [podcastTemplate],
     });
     expect(outcome.kind).toBe("proceed");
     if (outcome.kind === "proceed") {
@@ -243,9 +255,10 @@ describe("P4 planner (heuristic fallback)", () => {
 
   it("越界意图 → reject", async () => {
     const outcome = await plan("帮点杯咖啡", {
-      llm: { model: () => ({ specificationVersion: "v1" }) } as never,
+      llm: { model: () => ({ specificationVersion: "v1" }), compatModeFor: () => false, resolveEndpoint: () => undefined } as never,
       registry: registryWithCoreTools(),
       maxRetries: 1,
+      consumerTemplates: [podcastTemplate],
     });
     expect(outcome.kind).toBe("reject");
     if (outcome.kind === "reject") {
@@ -255,9 +268,10 @@ describe("P4 planner (heuristic fallback)", () => {
 
   it("style 推断：含「总结」→ summary", async () => {
     const outcome = await plan("把 https://example.com 总结成播客", {
-      llm: { model: () => ({ specificationVersion: "v1" }) } as never,
+      llm: { model: () => ({ specificationVersion: "v1" }), compatModeFor: () => false, resolveEndpoint: () => undefined } as never,
       registry: registryWithCoreTools(),
       maxRetries: 1,
+      consumerTemplates: [podcastTemplate],
     });
     expect(outcome.kind).toBe("proceed");
     if (outcome.kind === "proceed") {

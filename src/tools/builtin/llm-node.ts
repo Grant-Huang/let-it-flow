@@ -2,6 +2,7 @@ import { z } from "zod";
 import { streamText } from "ai";
 import type { FlowConnector, ToolResult } from "../base.js";
 import type { LlmService, LlmRole } from "../../services/llm-service.js";
+import type { CallSite } from "../../llm/call-sites.js";
 import { textPayload, toolCallPayload, toolResultPayload } from "../../core/stream-events.js";
 import type { ToolEvent } from "../../core/stream-events.js";
 import { randomUUID } from "node:crypto";
@@ -41,16 +42,38 @@ export interface LlmNodeToolOptions {
 }
 
 export function createLlmNodeTool(opts: LlmNodeToolOptions): FlowConnector<string> {
+  /** role → callSite 映射，用于 per-callSite compatMode 查询。 */
+  const ROLE_TO_CALLSITE: Record<LlmRole, CallSite> = {
+    planner: "planner",
+    writer: "rewrite",
+    summarizer: "rewrite",
+    default: "rewrite",
+  };
   return {
     name: "core.llm_node",
     tier: "core",
     description:
       "LLM 生成节点：streamText 流式产出 text。rewrite 形式经 params.style 拼入 systemPrompt（dialogue/narration/summary）。",
     inputSchema: inputSchema.shape,
+    whenToUse: {
+      triggers: ["文本改写", "总结", "翻译", "扩写", "摘要生成", "播客文稿生成", "通用 LLM 生成"],
+      notFor: ["需要外部检索（先 web_search/web_fetch）", "交付产物（走 deliver）", "TTS/生图/视频（用 domain 工具）"],
+    },
+    outputSchema: {
+      type: "object",
+      description: "LLM 生成的文本（字符串）",
+      properties: {
+        text: { type: "string", description: "完整生成文本，下游节点可经 inputRefs 引用" },
+      },
+    },
+    outputExample: { text: "生成的播客文稿内容..." },
 
     async *execute(params, ctx): AsyncGenerator<ToolEvent, ToolResult<string>> {
       const args = inputSchema.parse(params);
       const model = args.model ? opts.llm.modelById(args.model) : opts.llm.model(args.role as LlmRole);
+      // P8.5：compatMode 按 role 对应的 callSite 解析（per-callSite）
+      const callSite = ROLE_TO_CALLSITE[args.role as LlmRole] ?? "rewrite";
+      const foldSystem = opts.llm.compatModeFor(callSite);
       const system = composeSystem(args.systemPrompt, args.style);
       const callId = `c_${randomUUID().slice(0, 8)}`;
 
@@ -66,7 +89,7 @@ export function createLlmNodeTool(opts: LlmNodeToolOptions): FlowConnector<strin
         }),
       };
 
-      const messages = buildMessages(system, args.prompt, args.context);
+      const messages = buildMessages(system, args.prompt, args.context, foldSystem);
       const result = streamText({
         model,
         messages,
@@ -113,11 +136,24 @@ function composeSystem(base?: string, style?: RewriteStyle): string | undefined 
   return parts.length > 0 ? parts.join("\n\n") : undefined;
 }
 
-function buildMessages(system: string | undefined, prompt: string, context?: string): Array<{ role: "system" | "user"; content: string }> {
+function buildMessages(
+  system: string | undefined,
+  prompt: string,
+  context?: string,
+  foldSystem = false,
+): Array<{ role: "system" | "user"; content: string }> {
   const msgs: Array<{ role: "system" | "user"; content: string }> = [];
-  if (system) msgs.push({ role: "system", content: system });
   const userContent = context ? `${prompt}\n\n---\n素材正文：\n${context}` : prompt;
-  msgs.push({ role: "user", content: userContent });
+  if (system && !foldSystem) {
+    msgs.push({ role: "system", content: system });
+    msgs.push({ role: "user", content: userContent });
+  } else if (system && foldSystem) {
+    // 兼容模式（DeepSeek 等）：SDK 会把 system 映射成不支持的 `developer` 角色，
+    // 故把指令折叠进 user 消息开头。
+    msgs.push({ role: "user", content: `${system}\n\n---\n${userContent}` });
+  } else {
+    msgs.push({ role: "user", content: userContent });
+  }
   return msgs;
 }
 

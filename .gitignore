@@ -5,6 +5,8 @@ node_modules/
 # 构建产物
 dist/
 *.tsbuildinfo
+web/dist/
+web/node_modules/
 
 # 运行时数据（本地生成，不入库）
 data/

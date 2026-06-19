@@ -8,6 +8,7 @@ import { createDefaultToolRegistry } from "../../src/executor/default-tools.js";
 import { registerBuiltinTools } from "../../src/tools/index.js";
 import { LlmService } from "../../src/services/llm-service.js";
 import type { TaskRuntime } from "../../src/tasks/registry.js";
+import { podcastTemplate } from "../../examples/podcast-generator/template.js";
 
 let tmpRoot: string;
 beforeEach(() => {
@@ -17,12 +18,13 @@ beforeEach(() => {
 
 /**
  * 构造真实 runtime 的 app（planner 走启发式兜底，无需 OPENAI_API_KEY）。
+ * 显式注入 podcast 消费模板（内核不再默认装配业务模板）。
  */
 function createRuntimeApp() {
   const toolRegistry = createDefaultToolRegistry();
   const llm = new LlmService({ apiKey: "sk-test-fake" });
   registerBuiltinTools(toolRegistry, { llm });
-  const runtime: TaskRuntime = { llm, toolRegistry };
+  const runtime: TaskRuntime = { llm, toolRegistry, consumerTemplates: [podcastTemplate] };
   return createApp(new TaskRegistry(undefined, runtime));
 }
 

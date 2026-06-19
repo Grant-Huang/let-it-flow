@@ -47,7 +47,12 @@ flowchart LR
         P4 --> P5["P5 重IO Provider<br/>(TTS/生图/视频)"]
         P5 --> P6["P6 端到端<br/>一轮完整生成"]
     end
-    phase1 --> phase2 --> phase3
+    subgraph phase4 [阶段四: 工程化]
+        P6 --> P7["P7 LLM Router<br/>+ 工具契约加固"]
+        P7 --> P8["P8 配置化+可观测性<br/>+ 全量回归"]
+        P8 --> P9["P9 平台/消费应用<br/>边界分离"]
+    end
+    phase1 --> phase2 --> phase3 --> phase4
 ```
 
 | 里程碑 | 目标 | 预估 | 依赖 |
@@ -59,8 +64,11 @@ flowchart LR
 | P4 | Podcast 模板 + Planner 填参 | 2 天 | P3 |
 | P5 | 重 IO Provider（TTS/生图/视频） | 3 天 | P4 |
 | P6 | 端到端一轮完整生成 | 1.5 天 | P5 |
+| P7 | LLM Router + 工具契约加固（已实现） | 1 天 | P6 |
+| P8 | 配置化 + 可观测性 + 全量回归（见 [13](13-p8-config-and-observability.md)） | 4.5 天 | P7 |
+| P9 | 平台与消费应用边界分离（见 [§P9](#p9---平台与消费应用边界分离)） | 1 天 | P8 |
 
-P1 与 P2 可并行（都依赖 P0）。总计约 **14 个工作日**。
+P1 与 P2 可并行（都依赖 P0）。总计约 **20.5 个工作日**。
 
 ### P0 - 项目骨架 + SDK 入口（1 天）
 
@@ -222,6 +230,112 @@ fetch(URL)
 - [ ] HITL 暂停（fetch 选内容）→ 确认 → 继续
 - [ ] HITL 暂停（rewrite 预览）→ 确认 → 继续
 - [ ] 最终产出 `final.mp4`
+
+---
+
+### P7 - LLM Router + 工具契约加固（1 天，已实现）
+
+**目标**：planner 从"模板路由"升级为"LLM 自主选工具编排 DAG"（注入 `forPlanner()` 工具契约清单，LLM 据 `whenToUse`/`outputExample` 选工具并编排依赖）；同时加固全部工具的契约字段（`whenToUse`/`outputSchema`/`outputExample`），让 planner 能基于契约做合理选择。
+
+**输入**：P6 端到端可产出 final.mp4（模板路由路径）
+
+**输出文件**（已实现）：
+- `src/planner/planner.ts`（扩展）— `planWithLlmRouter()` LLM 选工具路径，模板路由作兜底
+- `src/tools/registry.ts`（扩展）— `forPlanner()` 返回完整契约清单
+- `tests/unit/test-p7-llm-router.ts` — LLM router 路径测试（mock LLM 返回 DAG）
+- `tests/unit/test-p7-tool-contract.ts` — 全部工具契约字段完整性测试
+
+**验收标准**（已通过）：
+- [x] planner 优先走 LLM 选工具路径；LLM 不可用时回退模板路由
+- [x] 所有 core + domain 工具含完整契约（`whenToUse`/`outputSchema`/`outputExample`）
+- [x] `forPlanner(["core","domain"])` 返回带契约字段的清单
+- [x] LLM router 产出的 DAG 经 `validateDag` 校验通过
+
+**注**：v4 全量测试与质量回归（原计划放在此里程碑）已挪入 P8.0 作为前置门禁，与配置化/可观测性一起闭环。
+
+---
+
+### P8 - 配置化 + 可观测性 + 全量回归（见 [13-p8-config-and-observability.md](13-p8-config-and-observability.md)，4.5 天）
+
+**目标**：三件事闭环：
+1. **全量回归基线**（P8.0，前置门禁）：跑通 v4 全量链路，建立可对照的基线产物 + 测试
+2. **配置化**：把"哪个调用点用哪个模型"从代码硬编码升级为**两层可配置体系**（模型接入 + 调用点绑定）
+3. **可观测性**：每次 LLM 调用产出结构化日志（token/latency/cost/error），按 day/callSite/model 聚合
+4. **TS 直连迁移**：step2/3/3b/3c/3d 这 5 个 LLM 步骤从 Python 子进程迁移到 TS 直连（step4a/4b/5/6 非 LLM，永久保留 Python）
+
+**输入**：P7 完成态（planner LLM router + 工具契约就位；step2/3b/3c/3d 仍走 Python 子进程）
+
+**输出文件**：
+- `tests/e2e/test-v4-baseline.ts`（@e2e，默认排除）— v4 全量基线测试（P8.0）
+- `src/llm/model-registry.ts` - ModelEndpoint 注册表（第一层）
+- `src/llm/call-sites.ts` - CALL_SITES 枚举 + CallSiteBinding schema（第二层）
+- `src/llm/call-log.ts` - LlmCallEvent 结构化日志
+- `src/llm/call-tracer.ts` - tracedGenerateText/tracedStreamText 包装（自动埋点）
+- `src/llm/cost-compute.ts` - token → 美元换算
+- `src/llm/config-loader.ts` - 配置加载 + env 回退
+- `src/api/config-models.ts` - 页面 A 后端（CRUD /api/config/models）
+- `src/api/config-bindings.ts` - 页面 B 后端（GET/PUT /api/config/bindings）
+- `src/tools/heavy-io/prompts/{translate,seam-repair,terminology,image-prompts}.md` - 从 ai-content-factory 逐字移植的 prompt
+- `src/tools/builtin/text-steps.ts`（修改）— 5 个 LLM 工具改 TS 直连，保留 `backend: "ts"|"python"` 应急切换
+- `data/config/{model_registry,call_site_bindings}.json` - 默认配置（从 .env seed）
+
+**Python 保留范围**（不迁移，永久保留子进程）：step4a 生图（扩散模型 torch）、step4b TTS（Qwen3-TTS torch）、step5 字幕（WhisperX torch）、step6 视频合成（FFmpeg）。这些不是 LLM 调用，依赖重量级 native 运行时。
+
+**验收标准**（详见 [13-p8-config-and-observability.md](13-p8-config-and-observability.md) §13.8）：
+- [ ] P8.0：v4 全量跑通，final.mp4 画质正常（无尺寸拉伸），基线产物归档
+- [ ] 新增模型只在前端填表，不动业务代码
+- [ ] 6 个调用点（planner/rewrite/translate/seam_repair/terminology/image_prompts）每个独立绑定模型 + 参数
+- [ ] 5 个 LLM 步骤走 TS 直连后 v4 产物质量不下降（与 P8.0 基线对照）
+- [ ] step4a/4b/5/6 仍走 Python 子进程，行为不变
+- [ ] 每次 LLM 调用产出 LlmCallEvent（含 token/latency/cost/errorKind）
+- [ ] 按 day/callSite/model 聚合成本统计正确
+- [ ] 敏感信息（prompt 文本/API key）不出现在日志
+
+**子阶段**（见 §13.10）：
+- P8.0 全量回归基线（0.5 天，前置门禁）
+- P8.1 两层配置基础设施（1.5 天）
+- P8.2 调用级可观测性（1 天，可与 P8.3 并行）
+- P8.3 5 个 LLM 步骤迁移 TS 直连（1 天，可与 P8.2 并行）
+- P8.4 前端两个配置页面 + 热加载（1 天）
+
+**后续里程碑占位**（仅列名，不展开）：
+- P10 前端消费应用完善
+- P11 评测体系与多租户
+- P12 部署与生产化
+
+---
+
+### P9 - 平台与消费应用边界分离（1 天，已实现）
+
+**目标**：将 podcast 消费应用特定代码从平台内核默认装配中解耦：内核只装配 `core.*` 通用工具 + 通用 planner 骨架；podcast 工具/模板/兜底逻辑移到消费应用侧（`examples/podcast-generator/`）显式注册。配置保持全局共享（不做 per-app 隔离）。
+
+**背景问题**（分离前）：
+- `LetItFlow` 构造函数 + `createDefaultRegistry` 默认调用 `registerHeavyIoTools`，把 9 个 podcast domain 工具焊进内核
+- `src/planner/planner.ts` import 并调用 `buildPodcastDag`/`PodcastParams`，兜底路径写死 podcast
+- `examples/podcast-generator/sdk-demo.ts` 直接 `new LetItFlow()` 不注册任何工具，全靠内核默认装配
+
+**输出文件**：
+- `src/planner/consumer-template.ts`（新建）— `ConsumerTemplate` 接口（内核/消费应用扩展点边界）
+- `src/planner/planner.ts`（改造）— 兜底逻辑从 `buildPodcastDag` 改为遍历 `config.consumerTemplates`，新增 `consumerTemplates` 配置项
+- `src/planner/templates.ts`（精简）— 移除 podcast 特定代码，只保留通用 `extractUrls` + research/summary 兜底路由
+- `src/planner/guardrail.ts`（改造）— `findMissingParams` 改为通过消费模板注入校验
+- `src/sdk/let-it-flow.ts`（改造）— 移除 `registerHeavyIoTools` 默认调用，新增 `consumerTemplates` 配置项 + `llm` getter
+- `src/api/app.ts`（改造）— `createDefaultRegistry` 只装配 core.*
+- `src/tasks/registry.ts`（改造）— `TaskRuntime` 新增 `consumerTemplates` 透传给 planner
+- `examples/podcast-generator/toolkit.ts`（新建）— `registerPodcastTools` + `buildPodcastConfigFromEnv`
+- `examples/podcast-generator/template.ts`（新建）— `podcastTemplate`（实现 ConsumerTemplate，含 `PodcastParams`/`buildPodcastDag`/参数抽取）
+- `examples/podcast-generator/sdk-demo.ts`（改造）— 显式 import toolkit + template 并注册
+
+**不动**：`src/tools/heavy-io/*`、`src/tools/builtin/text-steps.ts`（工具实现保留原位，只是注册权移交）、P8 配置层（全局共享，不改作用域）。
+
+**验收标准**（全部通过 ✅）：
+- [x] `npx tsc --noEmit` 全绿（无新增类型错误）
+- [x] `npx eslint src/ examples/` 全绿（无 warning）
+- [x] `pnpm test` 全量 **197/197** 通过（16 个测试文件）
+- [x] 内核纯净：`rg "buildPodcastDag|PodcastParams|isPodcastIntent|podcastTemplate|registerHeavyIoTools\("` 在 `src/` 仅剩 `registerHeavyIoTools` 的函数定义（在 `src/tools/index.ts`，供消费应用 import），无任何内核调用
+- [x] 受影响测试（test-p4-planner / test-p5-heavy-io / test-p6-sdk / test-p7-* / test-p4-api）改为显式装配 podcast 工具/模板，断言逻辑不变（TDD 冻结规则）
+
+**架构详情**：见 [02-architecture.md](02-architecture.md) §2.11 平台与消费应用边界分离。
 
 ---
 

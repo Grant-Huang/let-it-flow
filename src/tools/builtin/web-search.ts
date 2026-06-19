@@ -4,6 +4,7 @@ import { RUNTIME } from "../../core/config.js";
 import { toolCallPayload, toolResultPayload } from "../../core/stream-events.js";
 import type { ToolEvent } from "../../core/stream-events.js";
 import { randomUUID } from "node:crypto";
+import { getSearchMaxResults } from "../../core/system-settings.js";
 
 /**
  * web_search —— 网络检索（见 04 §4.4 内置工具，podcast MVP 数据源双路径之一）。
@@ -110,7 +111,7 @@ function stripTags(s: string): string {
 
 const inputSchema = z.object({
   query: z.string().min(1).describe("检索查询词"),
-  maxResults: z.number().int().positive().max(20).default(5).describe("最大结果数"),
+  maxResults: z.number().int().positive().max(20).default(() => getSearchMaxResults()).describe("最大结果数"),
   provider: z.enum(["tavily", "native"]).optional().describe("指定 provider；缺省读环境变量"),
 });
 
@@ -125,6 +126,30 @@ export function createWebSearchTool(opts: WebSearchToolOptions = {}): FlowConnec
     tier: "core",
     description: "网络检索：根据查询词返回搜索结果（title/url/snippet），供 web_fetch 抓取正文。",
     inputSchema: inputSchema.shape,
+    whenToUse: {
+      triggers: ["最新新闻", "财报", "股票", "行情", "实时客观事实", "未知事实", "需要查资料", "主题检索"],
+      notFor: ["已有 URL 的网页（走 web_fetch）", "本地笔记（走 knowledge_base）", "需要生成文本（走 llm_node）"],
+    },
+    outputSchema: {
+      type: "object",
+      description: "搜索结果（数组），供 web_fetch 节点引用其 url 字段",
+      properties: {
+        results: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              title: { type: "string", description: "页面标题" },
+              url: { type: "string", description: "结果页 URL" },
+              snippet: { type: "string", description: "内容摘要" },
+            },
+          },
+        },
+      },
+    },
+    outputExample: {
+      results: [{ title: "Q1 财报", url: "https://example.com/report", snippet: "营收同比增长..." }],
+    },
 
     async *execute(params, ctx: ExecutionContext): AsyncGenerator<ToolEvent, ToolResult<SearchResult[]>> {
       const args = inputSchema.parse(params);

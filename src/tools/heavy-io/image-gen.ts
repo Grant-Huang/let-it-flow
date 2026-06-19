@@ -5,7 +5,8 @@ import { z } from "zod";
 import type { FlowConnector, ToolResult } from "../base.js";
 import type { ToolEvent } from "../../core/stream-events.js";
 import { toolCallPayload, toolResultPayload } from "../../core/stream-events.js";
-import type { SubprocessAdapter } from "./subprocess-adapter.js";
+import { getHeavyIoTimeoutMs } from "../../core/system-settings.js";
+import type { ImageGenRuntime } from "./runtime-interfaces.js";
 
 /**
  * 生图工具（step4a，见 09 P5）。
@@ -27,22 +28,35 @@ export interface ImageGenOutput {
   count: number;
 }
 
-export function createImageGenTool(adapter: SubprocessAdapter): FlowConnector<ImageGenOutput> {
+export function createImageGenTool(runtime: ImageGenRuntime): FlowConnector<ImageGenOutput> {
   return {
     name: "domain.image_gen",
     tier: "domain",
     description: "批量生图（Z-Image-Turbo）：按场景提示词生成封面+段落配图 PNG。",
     inputSchema: inputSchema.shape,
+    whenToUse: {
+      triggers: ["批量生图", "配图生成", "封面图", "Z-Image-Turbo"],
+      notFor: ["生成提示词（走 image_prompts）", "配音（走 tts）", "视频合成（走 video_build）"],
+    },
+    outputSchema: {
+      type: "object",
+      description: "生图产物",
+      properties: {
+        imageDir: { type: "string", description: "images 目录绝对路径" },
+        count: { type: "integer", description: "生成的 PNG 数量" },
+      },
+    },
+    outputExample: { imageDir: "/data/tasks/xxx/images", count: 5 },
 
     async *execute(params, ctx): AsyncGenerator<ToolEvent, ToolResult<ImageGenOutput>> {
       const args = inputSchema.parse(params);
-      const workDir = adapter.workDirOf(ctx.taskId);
-      await adapter.ensureWorkDir(workDir);
+      const workDir = runtime.workDirOf(ctx.taskId);
+      await runtime.ensureWorkDir(workDir);
 
       // image_generator.py 读 work_dir/scripts/image_plan.json
       const planJson =
         typeof args.imagePlan === "string" ? args.imagePlan : JSON.stringify(args.imagePlan);
-      await adapter.writeScript(workDir, "image_plan.json", planJson);
+      await runtime.writeScript(workDir, "image_plan.json", planJson);
 
       const callId = `c_${randomUUID().slice(0, 8)}`;
       yield {
@@ -58,7 +72,7 @@ export function createImageGenTool(adapter: SubprocessAdapter): FlowConnector<Im
         }),
       };
 
-      const res = await adapter.runStep("4a", workDir, { timeoutMs: 900_000 });
+      const res = await runtime.runStep("4a", workDir, { timeoutMs: getHeavyIoTimeoutMs() });
 
       const imageDir = join(workDir, "images");
       let count = 0;

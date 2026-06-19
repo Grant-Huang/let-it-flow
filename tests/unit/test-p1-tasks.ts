@@ -140,11 +140,11 @@ describe("FileTaskStore", () => {
     const store = new FileTaskStore();
     const meta = store.create("intent");
     const e1 = store.append(meta.id, {
-      type: "stage",
+      type: "phase",
       taskId: meta.id,
       ts: Date.now(),
       channel: "status",
-      payload: { name: "s", state: "active" },
+      payload: { id: "s", name: "s", state: "running" },
     });
     const e2 = store.append(meta.id, {
       type: "done",
@@ -164,7 +164,7 @@ describe("FileTaskStore", () => {
 });
 
 describe("TaskRegistry stub runner", () => {
-  it("runs stub to done after approval, emitting stage/text/done events", async () => {
+  it("runs stub to done after approval, emitting phase/text/done events", async () => {
     const reg = new TaskRegistry();
     const meta = reg.start("做一期关于 AI 的播客");
     // stub 必然在确认点暂停，需 approve 才能跑到 done
@@ -173,7 +173,7 @@ describe("TaskRegistry stub runner", () => {
     await reg.join(meta.id);
     const events = reg.getStore().readAll(meta.id);
     const types = events.map((e) => e.type);
-    expect(types).toContain("stage");
+    expect(types).toContain("phase");
     expect(types).toContain("text");
     expect(types).toContain("done");
     expect(reg.getStore().get(meta.id)?.status).toBe("done");
@@ -224,12 +224,12 @@ describe("TaskRegistry stub runner", () => {
 type TestChannel = "content" | "status" | "meta";
 function makeEv(seq: number, channel: TestChannel): StreamEvent {
   return {
-    type: channel === "content" ? "text" : "stage",
+    type: channel === "content" ? "text" : "phase",
     seq,
     taskId: "t",
     ts: 0,
     channel,
-    payload: channel === "content" ? { delta: "x" } : { name: "s", state: "active" },
+    payload: channel === "content" ? { delta: "x" } : { id: "s", name: "s", state: "running" },
   } as StreamEvent;
 }
 

@@ -15,16 +15,34 @@
  *   3. 遇到 clarification_required 时用预设补充信息释放
  *   4. 打印各阶段事件，最终展示产物路径
  */
+import "dotenv/config";
 import { LetItFlow } from "../../src/index.js";
 import type { StreamEvent } from "../../src/index.js";
+import { registerPodcastTools, buildPodcastConfigFromEnv, SubprocessAdapter } from "./toolkit.js";
+import { podcastTemplate } from "./template.js";
 
 const intent = process.argv[2] ?? "把 https://example.com/a 做成播客";
 console.log(`\n=== Let-it-Flow 端到端示例 ===\n意图：${intent}\n`);
 
 const flow = new LetItFlow({
   openaiApiKey: process.env.OPENAI_API_KEY,
+  openaiBaseUrl: process.env.OPENAI_BASE_URL,
   tavilyApiKey: process.env.TAVILY_API_KEY,
+  consumerTemplates: [podcastTemplate],
 });
+
+// 显式注册 podcast domain 工具（内核不再默认装配）
+const heavyConfig = buildPodcastConfigFromEnv();
+if (heavyConfig) {
+  registerPodcastTools(flow.tools, {
+    runtime: new SubprocessAdapter(heavyConfig),
+    llm: flow.llm,
+    config: heavyConfig,
+  });
+  console.log(`已注册 podcast domain 工具（repo: ${heavyConfig.repoRoot}）`);
+} else {
+  console.log(`未配置 LIF_AICF_REPO_ROOT，仅文本子链可用`);
+}
 
 let runId = "";
 const artifacts: string[] = [];
@@ -47,9 +65,15 @@ for await (const ev of flow.execute(intent)) {
     await flow.clarify(runId, "主题是 AI 技术趋势");
   }
 
-  // 收集产物
+  // 收集产物（output 可能是 JSON 对象也可能是纯文本，防御性解析）
   if (ev.type === "tool_result") {
-    const out = JSON.parse(String(p.output)) as { ok?: boolean; videoPath?: string; audioPath?: string };
+    const raw = String(p.output ?? "");
+    let out: { ok?: boolean; videoPath?: string; audioPath?: string } = {};
+    try {
+      out = JSON.parse(raw) as typeof out;
+    } catch {
+      // 非 JSON 输出（如纯文本文稿），忽略——无文件路径可收集
+    }
     if (out.videoPath) artifacts.push(out.videoPath);
     if (out.audioPath) artifacts.push(out.audioPath);
   }

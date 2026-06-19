@@ -32,15 +32,15 @@
 ```bash
 # 后端（M1 实现后可用）
 pnpm install
-pnpm dev   # Hono app on :8000
+pnpm dev   # Hono app on :8787
 
 # 提交工作流
-curl -X POST http://localhost:8000/api/workflows \
+curl -X POST http://localhost:8787/api/workflows \
   -H "Content-Type: application/json" \
   -d '{"intent": "分析宁德时代的新能源电池行业地位"}'
 
 # 订阅 SSE 流
-curl -N http://localhost:8000/api/tasks/{task_id}/stream
+curl -N http://localhost:8787/api/tasks/{task_id}/stream
 ```
 
 或 SDK 形态（进程内）：
@@ -56,8 +56,8 @@ for await (const chunk of stream) { /* 处理流式事件 */ }
 
 ```
 let-it-flow/
-├── src/              # TS 内核（planner/executor/tools/tasks/sdk/core）
-├── frontend/         # 最小演示 UI（待实现）
+├── src/              # TS 内核（planner/executor/tools/tasks/sdk/core/llm/api）
+├── web/              # 配置页面前端（Vite + React，三个配置页面）
 ├── docs/             # 设计文档（13 篇）
 ├── reference/        # LitPilot 参考代码（设计参照，不复用）
 ├── examples/         # 示例消费应用（SDK + HTTP 形态）

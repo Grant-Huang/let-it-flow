@@ -1,18 +1,15 @@
 /**
- * HeavyIoProvider —— 重 IO 能力抽象（见 09 P5）。
+ * HeavyIo 配置 + 子进程执行结果（见 09 P5）。
  *
- * MVP 提供本地子进程实现（调 ai-content-factory 的 run_step.py）；
- * 接口设计允许后续替换为云端实现（mock / 远程 API）。
+ * 重 IO 能力的**接口抽象**在 runtime-interfaces.ts（按能力拆分：
+ * TtsRuntime / ImageGenRuntime / VideoBuildRuntime / ...）。
+ * 工具依赖能力接口而非具体类 SubprocessAdapter，便于替换为云端/mock 实现。
  *
- * 每个 provider 封装一类重 IO 能力：
- *   - 文件中转：TS 把输入写入 workDir/scripts/*.txt，调 Python 子进程，
+ * 数据传递约定（文件中转）：
+ *   - TS 把输入写入 workDir/scripts/*.txt，调 Python 子进程，
  *     读 workDir/{audio,images,video}/* 结果文件。
  *   - workDir：每任务独立的工作目录（ARTIFACTS_DIR/<taskId>）。
  */
-export interface HeavyIoProvider {
-  /** provider 唯一名（如 "tts"、"image-gen"）。 */
-  readonly name: string;
-}
 
 /**
  * 子进程执行结果。
@@ -45,6 +42,10 @@ export interface HeavyIoConfig {
   rewriteBackend?: "ollama" | "openai";
   /** ollama rewrite 模型名（缺省 huihui-qwen3.6-35b-a3b-abliterated:latest）。 */
   ollamaRewriteModel?: string;
+  /** openai rewrite 模型 id（如 deepseek-v4-flash）；不指定则用 writer 角色。 */
+  rewriteOpenaiModel?: string;
+  /** P8.3：image_prompts 后端切换。ts=TS 直连 LLM；python=子进程（默认）。 */
+  imagePromptsBackend?: "ts" | "python";
 }
 
 export const DEFAULT_OLLAMA_REWRITE_MODEL = "huihui-qwen3.6-35b-a3b-abliterated:latest";

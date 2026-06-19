@@ -1,0 +1,94 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --bg: 248 250 252;
+    --fg: 15 23 42;
+    --card: 255 255 255;
+    --border: 226 232 240;
+    --muted: 100 116 139;
+    --primary: 37 99 235;
+    --primary-fg: 255 255 255;
+    --danger: 220 38 38;
+    --success: 22 163 74;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: 2 6 23;
+      --fg: 226 232 240;
+      --card: 15 23 42;
+      --border: 30 41 59;
+      --muted: 148 163 184;
+      --primary: 59 130 246;
+      --primary-fg: 255 255 255;
+    }
+    body {
+      color-scheme: dark;
+    }
+  }
+
+  body {
+    background-color: rgb(var(--bg));
+    color: rgb(var(--fg));
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+      "Helvetica Neue", Arial, "Noto Sans SC", sans-serif;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-lg border p-5 shadow-sm;
+    background-color: rgb(var(--card));
+    border-color: rgb(var(--border));
+  }
+  .label {
+    @apply block text-sm font-medium mb-1;
+    color: rgb(var(--fg));
+  }
+  .input {
+    @apply w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2;
+    background-color: rgb(var(--card));
+    border-color: rgb(var(--border));
+    color: rgb(var(--fg));
+  }
+  .input:focus {
+    --tw-ring-color: rgb(var(--primary));
+  }
+  .btn {
+    @apply inline-flex items-center justify-center rounded-md px-3 py-1.5 text-sm font-medium transition-colors disabled:opacity-50;
+  }
+  .btn-primary {
+    background-color: rgb(var(--primary));
+    color: rgb(var(--primary-fg));
+  }
+  .btn-ghost {
+    @apply border;
+    border-color: rgb(var(--border));
+    color: rgb(var(--fg));
+  }
+  .btn-danger {
+    background-color: rgb(var(--danger));
+    color: rgb(var(--primary-fg));
+  }
+  .badge {
+    @apply inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium;
+  }
+  .badge-muted {
+    background-color: rgb(var(--border));
+    color: rgb(var(--muted));
+  }
+  .badge-success {
+    background-color: rgb(var(--success) / 0.15);
+    color: rgb(var(--success));
+  }
+  .badge-danger {
+    background-color: rgb(var(--danger) / 0.15);
+    color: rgb(var(--danger));
+  }
+  .text-muted {
+    color: rgb(var(--muted));
+  }
+}

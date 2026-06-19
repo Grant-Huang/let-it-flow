@@ -4,7 +4,8 @@ import { z } from "zod";
 import type { FlowConnector, ToolResult } from "../base.js";
 import type { ToolEvent } from "../../core/stream-events.js";
 import { toolCallPayload, toolResultPayload } from "../../core/stream-events.js";
-import type { SubprocessAdapter } from "./subprocess-adapter.js";
+import { getHeavyIoTimeoutMs } from "../../core/system-settings.js";
+import type { VideoBuildRuntime } from "./runtime-interfaces.js";
 
 /**
  * 视频合成工具（step6，见 09 P5）。
@@ -25,17 +26,27 @@ export interface VideoBuildOutput {
   videoPath: string;
 }
 
-export function createVideoBuildTool(adapter: SubprocessAdapter): FlowConnector<VideoBuildOutput> {
+export function createVideoBuildTool(runtime: VideoBuildRuntime): FlowConnector<VideoBuildOutput> {
   return {
     name: "domain.video_build",
     tier: "domain",
     description: "视频合成（FFmpeg）：配音+配图+字幕 → final.mp4。需上游 tts/image_gen/字幕就绪。",
     inputSchema: inputSchema.shape,
+    whenToUse: {
+      triggers: ["视频合成", "final.mp4", "FFmpeg 合成", "配音+配图+字幕"],
+      notFor: ["生成配音（走 tts）", "生图（走 image_gen）", "字幕（走 subtitle）"],
+    },
+    outputSchema: {
+      type: "object",
+      description: "视频合成产物",
+      properties: { videoPath: { type: "string", description: "final.mp4 的绝对路径" } },
+    },
+    outputExample: { videoPath: "/data/tasks/xxx/video/final.mp4" },
 
     async *execute(params, ctx): AsyncGenerator<ToolEvent, ToolResult<VideoBuildOutput>> {
       const args = inputSchema.parse(params);
-      const workDir = adapter.workDirOf(ctx.taskId);
-      await adapter.ensureWorkDir(workDir);
+      const workDir = runtime.workDirOf(ctx.taskId);
+      await runtime.ensureWorkDir(workDir);
 
       const callId = `c_${randomUUID().slice(0, 8)}`;
       yield {
@@ -52,7 +63,7 @@ export function createVideoBuildTool(adapter: SubprocessAdapter): FlowConnector<
       };
 
       // step6 依赖 step5（字幕对齐）已产出 scenes 数据；step5 在模板里先于 step6 执行
-      const res = await adapter.runStep("6", workDir, { timeoutMs: 900_000 });
+      const res = await runtime.runStep("6", workDir, { timeoutMs: getHeavyIoTimeoutMs() });
       const videoPath = join(workDir, "video", "final.mp4");
 
       if (!res.ok) {

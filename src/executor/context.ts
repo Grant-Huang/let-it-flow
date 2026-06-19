@@ -2,6 +2,7 @@ import { JSONPath } from "jsonpath-plus";
 import type { ContentPipelineConfig, WorkflowNode } from "../planner/dag-schema.js";
 import { applyContentPipeline } from "./content-pipeline.js";
 import type { StreamEvent } from "../core/stream-events.js";
+import { loadSystemSettings } from "../core/system-settings.js";
 
 /**
  * 执行上下文（见 07 §7.x）：每个节点执行时由 executor 注入。
@@ -33,8 +34,11 @@ export class ExecutionContext {
   nodeId: string;
   /** 用户原始意图。 */
   intent = "";
-  /** contentPipeline 配置（当前节点）。 */
-  private contentPipeline: ContentPipelineConfig = { maxTokens: 4000, strip: true, summarize: false };
+  /** contentPipeline 配置（当前节点）。bindNode 前的兜底值，从系统设置读取。 */
+  private contentPipeline: ContentPipelineConfig = (() => {
+    const s = loadSystemSettings();
+    return { maxTokens: s.contentMaxTokens, strip: s.contentStrip, summarize: s.contentSummarize };
+  })();
   /** nodeId → 节点 output。 */
   private readonly outputs = new Map<string, unknown>();
 

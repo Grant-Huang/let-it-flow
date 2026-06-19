@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { getContentMaxTokens, getContentStrip, getContentSummarize } from "../core/system-settings.js";
 
 /**
  * WorkflowDAG Zod schema（见 03 §3.x）。
@@ -8,15 +9,18 @@ import { z } from "zod";
  *   - requireConfirmation：HITL 暂停点（见 12）
  *   - onNodeError：节点级容错策略 abort/skip（retry 砍）
  *   - contentPipeline：数据清洗管道配置（见 07 §7.6）
+ *
+ * contentPipeline 默认值从系统设置读取（见 system-settings.ts），
+ * 使用 Zod lazy default 在解析时读取，使页面2 修改可生效。
  */
 
 export const ContentPipelineConfig = z.object({
-  /** 注入到本节点前的最大 token 数（粗略按 4 字符/token 估算）。默认 4000。 */
-  maxTokens: z.number().int().positive().default(4000),
-  /** HTML/Markdown 结构净化（剥离标签、导航噪声）。默认 true。 */
-  strip: z.boolean().default(true),
+  /** 注入到本节点前的最大 token 数（粗略按 4 字符/token 估算）。默认从系统设置读取。 */
+  maxTokens: z.number().int().positive().default(() => getContentMaxTokens()),
+  /** HTML/Markdown 结构净化（剥离标签、导航噪声）。默认从系统设置读取。 */
+  strip: z.boolean().default(() => getContentStrip()),
   /** 滚动窗口摘要化 —— MVP 砍（永远 false）。P5+ 接小模型摘要时再启用。 */
-  summarize: z.boolean().default(false),
+  summarize: z.boolean().default(() => getContentSummarize()),
   /** summarize 用的模型 id（summarize=true 时必填）。 */
   summarizeModel: z.string().optional(),
   /** 仅保留指定字段（对结构化对象按 key 裁剪）。 */

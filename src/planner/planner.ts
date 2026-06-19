@@ -1,26 +1,24 @@
 import { generateText, Output } from "ai";
 import type { LlmService } from "../services/llm-service.js";
-import type { ToolRegistry } from "../tools/registry.js";
-import type { WorkflowDAG } from "./dag-schema.js";
-import {
-  PodcastParams,
-  buildPodcastDag,
-  extractUrls,
-  type RewriteStyle,
-} from "./templates.js";
-import { guardrailCheck, routeTemplate } from "./guardrail.js";
+import type { ToolRegistry, ToolManifest } from "../tools/registry.js";
+import { WorkflowDAG } from "./dag-schema.js";
+import { routeTemplate } from "./templates.js";
+import type { ConsumerTemplate } from "./consumer-template.js";
+import { routeConsumerTemplate, findTemplate } from "./consumer-template.js";
+import { guardrailCheck } from "./guardrail.js";
 import { validateDag } from "./validator.js";
 
 /**
  * Planner —— 意图 → DAG（见 06 §6.1 两层规划）。
  *
- * MVP 流程（精简，仅 native 路径）：
- *   1. Guardrail（规则层）：proceed / clarify / reject
- *   2. 模板路由：podcast 命中 → 用 podcast 模板
- *   3. LLM 填参：generateText + Output.object 抽取 PodcastParams
- *   4. 构建 DAG：buildPodcastDag(params)
- *   5. 校验：validateDag（拓扑/工具/引用）
- *   6. 失败重试 ≤ MAX_RETRIES 次；耗尽则抛错（P4 砍 Fallback DAG）
+ * 两层规划（LLM 优先，消费应用模板兜底）：
+ *   0. Guardrail（规则层）：proceed / clarify / reject
+ *   1. LLM 选工具（优先）：注入 forPlanner() 工具清单，LLM 据 whenToUse/outputExample
+ *      自主选择工具并编排依赖，直接产出 WorkflowDAG。
+ *   2. 消费应用模板兜底：LLM 不可用/失败/超时时，回退到注入的 consumerTemplates
+ *      （内核不内置任何业务模板；消费应用如 podcast-generator 通过 ConsumerTemplate 注入）。
+ *   3. 校验：validateDag（拓扑/工具/引用）
+ *   4. 失败重试 ≤ MAX_RETRIES 次；耗尽则抛错
  *
  * 砍掉的：RobustOutputGuard 弱模型路径、Fallback DAG、Critic、few-shots、评测集。
  */
@@ -31,6 +29,16 @@ export interface PlannerConfig {
   role?: "planner" | "default";
   /** 校验失败重试次数。 */
   maxRetries?: number;
+  /**
+   * 是否优先用 LLM 选工具（缺省 true）。
+   * 关闭后纯走消费应用模板兜底（向后兼容/测试用）。
+   */
+  useLlmRouter?: boolean;
+  /**
+   * 消费应用注入的兜底模板（如 podcast）。
+   * 内核不内置任何业务模板；消费应用通过此字段注入自定义模板。
+   */
+  consumerTemplates?: ConsumerTemplate[];
 }
 
 export type PlanOutcome =
@@ -42,8 +50,11 @@ export type PlanOutcome =
  * 规划入口：意图 → DAG / clarify / reject。
  */
 export async function plan(intent: string, config: PlannerConfig): Promise<PlanOutcome> {
-  const templateId = routeTemplate(intent);
-  const guard = guardrailCheck(intent, templateId);
+  const consumerTemplates = config.consumerTemplates ?? [];
+  // 路由：优先消费应用模板，其次内核通用兜底（research/summary）
+  const consumerMatch = routeConsumerTemplate(intent, consumerTemplates, config.registry);
+  const templateId = consumerMatch ?? routeTemplate(intent);
+  const guard = guardrailCheck(intent, templateId, consumerTemplates);
 
   if (guard.decision === "reject") {
     return { kind: "reject", reason: guard.reason ?? "不可服务", suggestRetry: guard.suggestRetry };
@@ -52,72 +63,204 @@ export async function plan(intent: string, config: PlannerConfig): Promise<PlanO
     return { kind: "clarify", questions: guard.questions ?? [] };
   }
 
-  // proceed：抽取参数 + 构建 DAG + 校验
-  const fullPipeline = wantsFullPipeline(intent) && hasDomainTools(config.registry);
+  // proceed：先尝试 LLM 选工具路径，失败则回退消费应用模板
+  const useLlmRouter = config.useLlmRouter ?? true;
   const maxRetries = config.maxRetries ?? 3;
   let lastError: string | undefined;
 
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
-      const params = await extractParams(intent, config, attempt, lastError);
-      const dag = buildPodcastDag(params, fullPipeline);
-      const errors = validateDag(dag, config.registry);
-      if (errors.length === 0) {
-        return { kind: "proceed", dag };
+      // 优先：LLM 选工具路径（注入工具清单，LLM 自主编排 DAG）
+      if (useLlmRouter) {
+        const dag = await planWithLlmRouter(intent, config, attempt, lastError);
+        if (dag) {
+          const errors = validateDag(dag, config.registry);
+          if (errors.length === 0) {
+            return { kind: "proceed", dag };
+          }
+          lastError = `LLM 路由 DAG 校验失败：${errors.join("; ")}`;
+          continue;
+        }
       }
-      lastError = errors.join("; ");
+
+      // 兜底：消费应用模板（extractParams + build）
+      const matchedTemplate = templateId
+        ? findTemplate(templateId, consumerTemplates)
+        : undefined;
+      if (matchedTemplate) {
+        const params = await matchedTemplate.extractParams(intent, config.llm);
+        const wantsFull = matchedTemplate.wantsFullPipeline?.(intent) ?? false;
+        const hasTools = matchedTemplate.hasRequiredTools?.(config.registry) ?? true;
+        const dag = matchedTemplate.build(params, wantsFull && hasTools);
+        const errors = validateDag(dag, config.registry);
+        if (errors.length === 0) {
+          return { kind: "proceed", dag };
+        }
+        lastError = errors.join("; ");
+      } else {
+        // 无消费模板命中 → 内核无法兜底业务 DAG
+        lastError = "无匹配的消费应用模板，且 LLM 路由未产出有效 DAG";
+        break;
+      }
     } catch (e) {
       lastError = e instanceof Error ? e.message : String(e);
     }
   }
 
-  // P4：重试耗尽抛错（不降级 Fallback DAG）
+  // 重试耗尽抛错（不降级 Fallback DAG）
   throw new Error(`planner 重试 ${maxRetries} 次仍失败：${lastError ?? "未知错误"}`);
 }
 
 /**
- * LLM 抽取 podcast 模板参数（generateText + Output.object）。
- * 失败时回退到启发式抽取（保证无 key/网络异常时也能产出可执行 DAG）。
+ * LLM 工具选择路径：注入 forPlanner() 清单，LLM 据 whenToUse/outputExample
+ * 自主选工具并编排依赖，产出 WorkflowDAG。
+ *
+ * 返回 null 表示 LLM 不可用/拒绝路由（调用方回退模板路径）。
+ *
+ * 按 provider 能力分两条路径（见 docs/02 §2.8 多模型平替）：
+ *   - native（OpenAI 官方等）：AI SDK Output.object 原生 json_schema 约束
+ *   - weak（openai-compatible/ollama，如 DeepSeek）：纯文本 prompt + 鲁棒 JSON 提取，
+ *     避免发送 provider 不支持的 response_format: json_schema
  */
-async function extractParams(
+async function planWithLlmRouter(
   intent: string,
   config: PlannerConfig,
   attempt: number,
   prevError?: string,
-): Promise<PodcastParams> {
+): Promise<WorkflowDAG | null> {
+  const manifests = config.registry.forPlanner(["core", "domain"]);
+  if (manifests.length === 0) return null;
+
   const model = config.llm.model(config.role ?? "planner");
-  const system = buildPlannerSystemPrompt();
-  const user = buildPlannerUserMsg(intent, attempt, prevError);
+  const system = buildToolRouterSystemPrompt(manifests);
+  const user = buildToolRouterUserMsg(intent, attempt, prevError);
+  // P8.5：compatMode 改 per-callSite（按 planner 调用点解析 provider）
+  const isWeakProvider = config.llm.compatModeFor("planner");
+  const callArgs = llmCallArgs(system, user, isWeakProvider);
 
   try {
+    if (isWeakProvider) {
+      // weak 路径：纯文本 prompt，让 LLM 返回 JSON 文本，手动提取解析
+      const weakUser = buildWeakProviderUserMsg(intent, manifests, attempt, prevError);
+      const weakSystem = buildWeakProviderSystemPrompt(manifests);
+      const { text } = await generateText({
+        model,
+        ...llmCallArgs(weakSystem, weakUser, true),
+        temperature: 0.2,
+      });
+      const parsed = extractAndParseDag(text);
+      return parsed;
+    }
+
+    // native 路径：AI SDK Output.object 原生约束
     const { output } = await generateText({
       model,
-      system,
-      messages: [{ role: "user", content: user }],
-      output: Output.object({ schema: PodcastParams }),
+      ...callArgs,
+      output: Output.object({ schema: WorkflowDAG }),
       temperature: 0.2,
     });
-    if (output) {
-      // 校验 sourceMode 与配套字段一致性，补默认值
-      return normalizeParams(output, intent);
-    }
-    throw new Error("LLM 未返回结构化对象");
-  } catch (e) {
-    // 回退到启发式（无 API key / 网络异常时仍可规划）
-    return heuristicParams(intent, e instanceof Error ? e.message : String(e));
+    if (!output) return null;
+    return WorkflowDAG.parse(output);
+  } catch {
+    // LLM 不可用 / 输出不合法 → 返回 null，由调用方回退模板路由
+    return null;
   }
 }
 
-function buildPlannerSystemPrompt(): string {
+/**
+ * weak provider 的系统提示：注入工具清单 + JSON 输出约束。
+ * 与 native 路径的 buildToolRouterSystemPrompt 类似，但显式要求纯 JSON 文本输出。
+ */
+function buildWeakProviderSystemPrompt(manifests: ToolManifest[]): string {
+  return buildToolRouterSystemPrompt(manifests) +
+    "\n\n## 重要：输出格式\n" +
+    "你只能输出一个合法的 JSON 对象，不要输出任何解释、markdown 代码块标记或额外文本。\n" +
+    "JSON 必须符合上述 WorkflowDAG 结构（schemaVersion / nodes / onNodeError / retryAttempts）。\n" +
+    '示例骨架：{"schemaVersion":"1.0","nodes":[{"id":"search_1","toolName":"core.web_search","params":{},"inputRefs":{},"dependsOn":[]}],"onNodeError":"skip","retryAttempts":0}';
+}
+
+function buildWeakProviderUserMsg(
+  intent: string,
+  manifests: ToolManifest[],
+  attempt: number,
+  prevError?: string,
+): string {
+  const toolNames = manifests.map((m) => m.name).join("、");
+  const parts = [
+    `## 用户意图\n${intent}`,
+    `## 可用工具\n${toolNames}`,
+    "请直接输出 WorkflowDAG 的 JSON 对象。",
+  ];
+  if (attempt > 0 && prevError) {
+    parts.push(`## 上次错误（请修正）\n${prevError}`);
+  }
+  return parts.join("\n\n");
+}
+
+/**
+ * 从 LLM 文本响应中鲁棒提取并解析 WorkflowDAG。
+ * 处理 ```json 包裹、前导废话、尾逗号等常见 weak 模型输出问题。
+ * 解析或 schema 校验失败返回 null。
+ */
+function extractAndParseDag(text: string): WorkflowDAG | null {
+  if (!text) return null;
+  // 1) 尝试直接提取最大的 {...} 块
+  let jsonStr = text.trim();
+  // 剥离 markdown 代码块包裹
+  const fenceMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fenceMatch?.[1]) {
+    jsonStr = fenceMatch[1].trim();
+  }
+  // 定位首个 { 到末尾 } 的范围
+  const start = jsonStr.indexOf("{");
+  const end = jsonStr.lastIndexOf("}");
+  if (start === -1 || end === -1 || end <= start) return null;
+  jsonStr = jsonStr.slice(start, end + 1);
+
+  try {
+    const obj = JSON.parse(jsonStr);
+    return WorkflowDAG.parse(obj);
+  } catch {
+    return null;
+  }
+}
+
+/** 构造 LLM 工具路由的系统提示：注入全部工具契约清单。 */
+function buildToolRouterSystemPrompt(manifests: ToolManifest[]): string {
+  const toolList = manifests
+    .map((t) => {
+      const triggers = t.whenToUse.triggers.join("、");
+      const notFor = t.whenToUse.notFor.join("、");
+      return [
+        `### ${t.name}（${t.tier}层）`,
+        `功能：${t.description}`,
+        `适用场景：${triggers}`,
+        `不适用：${notFor}`,
+        `输入参数：${JSON.stringify(t.inputSchema)}`,
+        `输出：${JSON.stringify(t.outputSchema)}`,
+        `输出示例：${JSON.stringify(t.outputExample)}`,
+      ].join("\n");
+    })
+    .join("\n\n");
+
   return [
-    "你是 Let-it-Flow 的规划参数抽取器。从用户意图抽取播客生成所需的模板参数。",
-    "只输出符合 schema 的结构化对象，不要输出解释。",
-    "数据源判定：意图含 URL → sourceMode=url；否则 → sourceMode=topic 并提取主题词作为 topic。",
-    "style 判定：明确要求「对话/对谈」→ dialogue；「转述/叙述」→ narration；「总结/摘要」→ summary；未指定默认 dialogue。",
+    "你是 Let-it-Flow 的工具编排规划器。根据用户意图，从下列已注册工具中选择合适的工具，",
+    "编排成一个有向无环图（DAG）的 WorkflowDAG。",
+    "",
+    "## 可用工具清单",
+    toolList,
+    "",
+    "## 规划规则",
+    "1. 只能使用上述工具清单中的 toolName（如 core.web_search）。",
+    "2. 节点间通过 dependsOn 声明依赖顺序；通过 inputRefs（JSONPath → 参数键）串联上游输出。",
+    "3. 第一个节点通常是数据获取（web_search/web_fetch），末尾通常是 core.deliver 交付产物。",
+    "4. contentPipeline 每个节点必填（含 maxTokens/strip/summarize 字段，summarize 固定 false）。",
+    "5. 只输出符合 schema 的结构化对象，不要输出解释。",
+    '6. schemaVersion 固定 "1.0"，onNodeError 默认 "skip"，retryAttempts 默认 0。',
   ].join("\n");
 }
 
-function buildPlannerUserMsg(intent: string, attempt: number, prevError?: string): string {
+function buildToolRouterUserMsg(intent: string, attempt: number, prevError?: string): string {
   const parts = [`## 用户意图\n${intent}`];
   if (attempt > 0 && prevError) {
     parts.push(`## 上次错误（请修正）\n${prevError}`);
@@ -125,74 +268,18 @@ function buildPlannerUserMsg(intent: string, attempt: number, prevError?: string
   return parts.join("\n\n");
 }
 
-/** 规范化 LLM 抽取结果：保证 sourceMode 与配套字段一致。 */
-function normalizeParams(raw: PodcastParams, intent: string): PodcastParams {
-  const urls = extractUrls(intent);
-  // 若意图含 URL 但 LLM 判为 topic，纠正为 url 模式
-  if (urls.length > 0 && raw.sourceMode === "topic") {
-    return { ...raw, sourceMode: "url", urls };
+/**
+ * 构造 generateText 的 system/messages 参数。
+ * 兼容模式（DeepSeek 等）下把 system 折叠进 user 消息，规避 SDK 把 system
+ * 映射成不支持的 `developer` 角色。
+ */
+function llmCallArgs(
+  system: string,
+  user: string,
+  compatMode: boolean,
+): { system?: string; messages: Array<{ role: "user"; content: string }> } {
+  if (compatMode) {
+    return { messages: [{ role: "user", content: `${system}\n\n---\n${user}` }] };
   }
-  if (raw.sourceMode === "url" && (!raw.urls || raw.urls.length === 0) && urls.length > 0) {
-    return { ...raw, urls };
-  }
-  if (raw.sourceMode === "topic" && !raw.topic) {
-    return { ...raw, topic: stripToTopic(intent) };
-  }
-  return raw;
-}
-
-/** 启发式抽取（LLM 不可用时的兜底）。 */
-function heuristicParams(intent: string, _err: string): PodcastParams {
-  const urls = extractUrls(intent);
-  if (urls.length > 0) {
-    return {
-      sourceMode: "url",
-      urls,
-      style: inferStyle(intent),
-      language: "zh",
-      maxSearchResults: 5,
-    };
-  }
-  return {
-    sourceMode: "topic",
-    topic: stripToTopic(intent),
-    style: inferStyle(intent),
-    language: "zh",
-    maxSearchResults: 5,
-  };
-}
-
-function inferStyle(intent: string): RewriteStyle {
-  if (/总结|摘要|概括|summary/.test(intent)) return "summary";
-  if (/转述|叙述|narration|第三人称/.test(intent)) return "narration";
-  return "dialogue";
-}
-
-/** 从意图剥离关键词，提取主题。 */
-function stripToTopic(intent: string): string {
-  return intent
-    .replace(/把|做成|做一期|制作|生成|播客|podcast|关于|的|请/g, "")
-    .replace(/https?:\/\/[^\s]+/gi, "")
-    .trim() || "未命名主题";
-}
-
-/** 意图是否要求完整视频产物（含 TTS/生图/视频合成）。 */
-function wantsFullPipeline(intent: string): boolean {
-  return /视频|video|配音|完整|成片|mp4|生图|配图/.test(intent);
-}
-
-/** registry 是否已注册完整链所需的 domain 工具（否则降级为文本子链）。 */
-function hasDomainTools(registry: ToolRegistry): boolean {
-  const required = [
-    "domain.translate",
-    "domain.rewrite",
-    "domain.seam_repair",
-    "domain.terminology",
-    "domain.image_prompts",
-    "domain.tts",
-    "domain.image_gen",
-    "domain.subtitle",
-    "domain.video_build",
-  ];
-  return required.every((name) => registry.has(name));
+  return { system, messages: [{ role: "user", content: user }] };
 }

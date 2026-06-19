@@ -5,9 +5,10 @@ import {
   toSSE,
   serializeSSEData,
   channelOf,
-  stagePayload,
+  phasePayload,
   textPayload,
   toolCallPayload,
+  toolStatusPayload,
   toolResultPayload,
   workflowNodePayload,
   errorPayload,
@@ -51,7 +52,7 @@ describe("stream-events protocol alignment", () => {
     expect(channelOf("text")).toBe("content");
     expect(channelOf("done")).toBe("meta");
     expect(channelOf("error")).toBe("meta");
-    expect(channelOf("stage")).toBe("status");
+    expect(channelOf("phase")).toBe("status");
     expect(channelOf("tool_call")).toBe("status");
     expect(channelOf("workflow_node")).toBe("status");
   });
@@ -62,13 +63,13 @@ describe("stream-events protocol alignment", () => {
 
   it("toSSE strips bookkeeping fields and produces protocol envelope", () => {
     const ev = withSeq(
-      makeEvent("t1", "stage", stagePayload("检索文献", "active")),
+      makeEvent("t1", "phase", phasePayload("search", "检索文献", "running")),
     );
     const sse = toSSE(ev);
     expect(sse).toEqual({
-      type: "stage",
+      type: "phase",
       schema_version: "1.0",
-      payload: { name: "检索文献", state: "active" },
+      payload: { id: "search", name: "检索文献", state: "running" },
     });
     // 簿记字段不出现在序列化结果里
     const json = serializeSSEData(ev);
@@ -85,7 +86,7 @@ describe("stream-events protocol alignment", () => {
     expect(parsed?.type).toBe("text");
   });
 
-  it("tool_call / tool_result / workflow_node / error produce valid SSEEvents", () => {
+  it("tool_call / tool_status / tool_result / workflow_node / error produce valid SSEEvents", () => {
     const callEv = withSeq(
       makeEvent("t1", "tool_call", toolCallPayload({
         id: "c1",
@@ -93,6 +94,9 @@ describe("stream-events protocol alignment", () => {
         args: { query: "AI" },
         risk: "safe",
       })),
+    );
+    const statusEv = withSeq(
+      makeEvent("t1", "tool_status", toolStatusPayload({ id: "c1", status: "running" })),
     );
     const resEv = withSeq(
       makeEvent("t1", "tool_result", toolResultPayload({
@@ -111,12 +115,13 @@ describe("stream-events protocol alignment", () => {
     const errEv = withSeq(
       makeEvent("t1", "error", errorPayload("boom", "UPSTREAM_TIMEOUT")),
     );
-    for (const ev of [callEv, resEv, nodeEv, errEv]) {
+    for (const ev of [callEv, statusEv, resEv, nodeEv, errEv]) {
       const sse = toSSE(ev);
       expect(sse.schema_version).toBe("1.0");
       expect(sse.type).toBe(ev.type);
     }
     expect(toSSE(errEv).payload).toMatchObject({ message: "boom", code: "UPSTREAM_TIMEOUT" });
+    expect(toSSE(statusEv).payload).toMatchObject({ id: "c1", status: "running" });
   });
 
   it("HITL confirm gate uses extension event consumable by @meso.ai/types applyEvent", () => {

@@ -5,7 +5,8 @@ import { join } from "node:path";
 import {
   buildPodcastDag,
   PodcastParams,
-} from "../../src/planner/templates.js";
+  podcastTemplate,
+} from "../../examples/podcast-generator/template.js";
 import { validateDag } from "../../src/planner/validator.js";
 import { plan } from "../../src/planner/planner.js";
 import { ToolRegistry } from "../../src/tools/registry.js";
@@ -36,6 +37,9 @@ function fakeDomainTool(name: string): FlowConnector {
     tier: "domain",
     description: `fake ${name}`,
     inputSchema: {},
+    whenToUse: { triggers: [], notFor: [] },
+    outputSchema: { type: "object" },
+    outputExample: {},
     async *execute(params): AsyncGenerator<ToolEvent, ToolResult> {
       return { output: params };
     },
@@ -154,9 +158,10 @@ describe("P5 full pipeline DAG", () => {
 describe("P5 planner full-pipeline detection", () => {
   it("含「视频」+ domain 工具齐全 → 完整链 DAG", async () => {
     const outcome = await plan("把 https://example.com 做成播客视频", {
-      llm: { model: () => ({ specificationVersion: "v1" }) } as never,
+      llm: { model: () => ({ specificationVersion: "v1" }), compatModeFor: () => false, resolveEndpoint: () => undefined } as never,
       registry: fullRegistry(),
       maxRetries: 1,
+      consumerTemplates: [podcastTemplate],
     });
     expect(outcome.kind).toBe("proceed");
     if (outcome.kind === "proceed") {
@@ -167,9 +172,10 @@ describe("P5 planner full-pipeline detection", () => {
 
   it("无「视频」关键词 → 文本子链（无 video_build）", async () => {
     const outcome = await plan("把 https://example.com 做成播客", {
-      llm: { model: () => ({ specificationVersion: "v1" }) } as never,
+      llm: { model: () => ({ specificationVersion: "v1" }), compatModeFor: () => false, resolveEndpoint: () => undefined } as never,
       registry: fullRegistry(),
       maxRetries: 1,
+      consumerTemplates: [podcastTemplate],
     });
     expect(outcome.kind).toBe("proceed");
     if (outcome.kind === "proceed") {
@@ -184,9 +190,10 @@ describe("P5 planner full-pipeline detection", () => {
       coreReg.register(fakeDomainTool(name));
     }
     const outcome = await plan("把 https://example.com 做成播客视频", {
-      llm: { model: () => ({ specificationVersion: "v1" }) } as never,
+      llm: { model: () => ({ specificationVersion: "v1" }), compatModeFor: () => false, resolveEndpoint: () => undefined } as never,
       registry: coreReg,
       maxRetries: 1,
+      consumerTemplates: [podcastTemplate],
     });
     expect(outcome.kind).toBe("proceed");
     if (outcome.kind === "proceed") {
@@ -209,7 +216,7 @@ describe("P5 tool registration", () => {
     };
     const adapter = new SubprocessAdapter(config);
     registerHeavyIoTools(reg, {
-      adapter,
+      runtime: adapter,
       llm: { model: () => ({}) } as unknown as LlmService,
       config,
     });

@@ -1,0 +1,11 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 业务专属覆盖：podcast 生成页的微调 */
+.podcast-live-trace {
+  margin: 8px 0;
+}
+.podcast-welcome h1 {
+  color: var(--color-accent);
+}

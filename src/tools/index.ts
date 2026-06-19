@@ -37,29 +37,37 @@ export function registerBuiltinTools(
 
 /**
  * 注册 podcast 完整链所需的 domain 工具（P5 重 IO）。
- * 需要 SubprocessAdapter（调 ai-content-factory）+ LlmService（rewrite openai 路径）。
+ * runtime 需实现各能力接口（SubprocessAdapter / 云端 / mock 均可）；llm 用于 rewrite openai 路径。
  */
 export function registerHeavyIoTools(
   registry: ToolRegistry,
-  opts: { adapter: SubprocessAdapter; llm: LlmService; config: HeavyIoConfig },
+  opts: {
+    runtime: SubprocessAdapter;
+    llm: LlmService;
+    config: HeavyIoConfig;
+  },
 ): ToolRegistry {
-  const { adapter, llm, config } = opts;
-  registry.register(createTranslateTool(adapter));
+  const { runtime, llm, config } = opts;
+  registry.register(createTranslateTool(runtime));
   registry.register(
     createRewriteTool({
-      adapter,
+      runtime,
       llm,
       backend: config.rewriteBackend ?? "ollama",
       ollamaModel: config.ollamaRewriteModel,
+      openaiModel: config.rewriteOpenaiModel,
     }),
   );
-  registry.register(createSeamRepairTool(adapter));
-  registry.register(createTerminologyTool(adapter));
-  registry.register(createImagePromptsTool(adapter));
-  registry.register(createTtsTool(adapter));
-  registry.register(createImageGenTool(adapter));
-  registry.register(createSubtitleTool(adapter));
-  registry.register(createVideoBuildTool(adapter));
+  registry.register(createSeamRepairTool(runtime));
+  registry.register(createTerminologyTool(runtime));
+  registry.register(createImagePromptsTool(runtime, {
+    llm,
+    backend: config.imagePromptsBackend ?? "python",
+  }));
+  registry.register(createTtsTool(runtime));
+  registry.register(createImageGenTool(runtime));
+  registry.register(createSubtitleTool(runtime));
+  registry.register(createVideoBuildTool(runtime));
   return registry;
 }
 

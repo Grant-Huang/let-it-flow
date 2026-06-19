@@ -146,7 +146,7 @@ describe("API end-to-end (Hono app)", () => {
     const res = await ssePromise;
     const events = await collectSSEEvents(res);
     const types = events.map((e) => e.type);
-    expect(types).toContain("stage");
+    expect(types).toContain("phase");
     expect(types).toContain("text");
     expect(types).toContain("extension"); // confirm_gate
     expect(types).toContain("done");

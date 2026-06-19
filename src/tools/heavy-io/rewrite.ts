@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { generateText } from "ai";
 import type { FlowConnector, ToolResult } from "../base.js";
 import type { ToolEvent } from "../../core/stream-events.js";
 import {
@@ -8,9 +7,12 @@ import {
   toolResultPayload,
   textPayload,
 } from "../../core/stream-events.js";
-import type { SubprocessAdapter } from "./subprocess-adapter.js";
+import { getHeavyIoTimeoutMs } from "../../core/system-settings.js";
+import type { RewriteRuntime } from "./runtime-interfaces.js";
 import type { LlmService } from "../../services/llm-service.js";
 import { DEFAULT_OLLAMA_REWRITE_MODEL } from "./provider.js";
+import { tracedGenerateText } from "../../llm/call-tracer.js";
+import type { LlmCallEvent } from "../../llm/call-log.js";
 
 /**
  * Rewrite 工具（step3，见 09 P5）。
@@ -38,10 +40,12 @@ export interface RewriteOutput {
 }
 
 export interface RewriteToolDeps {
-  adapter: SubprocessAdapter;
+  runtime: RewriteRuntime;
   llm: LlmService;
   backend?: "ollama" | "openai";
   ollamaModel?: string;
+  /** openai 路径用的模型 id（如 deepseek-v4-flash）；不指定则用 writer 角色。 */
+  openaiModel?: string;
 }
 
 export function createRewriteTool(deps: RewriteToolDeps): FlowConnector<RewriteOutput> {
@@ -52,11 +56,21 @@ export function createRewriteTool(deps: RewriteToolDeps): FlowConnector<RewriteO
     tier: "domain",
     description: "播客改写（step3）：把译稿改写成播客旁述文稿。支持本地 35B（ollama）与 OpenAI。",
     inputSchema: inputSchema.shape,
+    whenToUse: {
+      triggers: ["播客改写", "译稿转旁述", "对话/叙述/摘要风格", "step3 改写"],
+      notFor: ["翻译（走 translate）", "通用 LLM 生成（走 llm_node）"],
+    },
+    outputSchema: {
+      type: "object",
+      description: "改写后的播客文稿",
+      properties: { script: { type: "string", description: "改写后的旁述文稿" } },
+    },
+    outputExample: { script: "改写后的播客旁述文稿..." },
 
     async *execute(params, ctx): AsyncGenerator<ToolEvent, ToolResult<RewriteOutput>> {
       const args = inputSchema.parse(params);
-      const workDir = deps.adapter.workDirOf(ctx.taskId);
-      await deps.adapter.ensureWorkDir(workDir);
+      const workDir = deps.runtime.workDirOf(ctx.taskId);
+      await deps.runtime.ensureWorkDir(workDir);
 
       const callId = `c_${randomUUID().slice(0, 8)}`;
       yield {
@@ -74,9 +88,9 @@ export function createRewriteTool(deps: RewriteToolDeps): FlowConnector<RewriteO
 
       let script: string;
       if (backend === "ollama") {
-        script = await runOllamaRewrite(deps.adapter, workDir, args, ctx, ollamaModel);
+        script = await runOllamaRewrite(deps.runtime, workDir, args, ctx, ollamaModel);
       } else {
-        script = await runOpenaiRewrite(deps.llm, args, ctx);
+        script = await runOpenaiRewrite(deps.llm, args, ctx, deps.openaiModel);
       }
 
       const output: RewriteOutput = { script, backend };
@@ -95,34 +109,38 @@ export function createRewriteTool(deps: RewriteToolDeps): FlowConnector<RewriteO
 
 /** ollama 路径：写译稿 → run_step 3 → 读 script_v2_raw.txt。 */
 async function runOllamaRewrite(
-  adapter: SubprocessAdapter,
+  runtime: RewriteRuntime,
   workDir: string,
   args: z.infer<typeof inputSchema>,
   ctx: { emit: (e: ToolEvent) => Promise<unknown> },
   ollamaModel: string,
 ): Promise<string> {
   // ai-content-factory step3 读 scripts/translated.txt（step2 产物名）
-  await adapter.writeScript(workDir, "translated.txt", args.translatedText);
+  await runtime.writeScript(workDir, "translated.txt", args.translatedText);
   // 透传 ollama 模型名给 Python 脚本（供将来 run_35b_rewrite.py 读取覆盖 MODEL_35B）
-  const res = await adapter.runStep("3", workDir, {
-    timeoutMs: 900_000,
+  const res = await runtime.runStep("3", workDir, {
+    timeoutMs: getHeavyIoTimeoutMs(),
     extraEnv: { LIF_OLLAMA_MODEL: ollamaModel },
   });
   if (!res.ok) {
     await ctx.emit({ type: "text", channel: "content", payload: textPayload(`改写失败：${res.stderr.slice(-200)}`) });
     return "";
   }
-  const out = await adapter.readScript(workDir, "script_v2_raw.txt");
+  const out = await runtime.readScript(workDir, "script_v2_raw.txt");
   return out ?? "";
 }
 
-/** openai 路径：直连 LlmService streamText 生成。 */
+/** openai 路径：直连 LlmService（P8.3 改走 callSite=rewrite 统一解析 + tracedGenerateText 埋点）。 */
 async function runOpenaiRewrite(
   llm: LlmService,
   args: z.infer<typeof inputSchema>,
-  ctx: { emit: (e: ToolEvent) => Promise<unknown> },
+  ctx: { emit: (e: ToolEvent) => Promise<unknown>; taskId: string; nodeId?: string },
+  openaiModel?: string,
+  onLlmCall?: (event: LlmCallEvent) => void,
 ): Promise<string> {
-  const model = llm.model("writer");
+  // P8.3：优先用 callSite=rewrite 解析（走两层配置体系）；
+  // 若显式指定了 openaiModel（向后兼容），则用具体模型绕过配置
+  const model = openaiModel ? llm.modelById(openaiModel) : llm.model("rewrite");
   const styleGuide: Record<string, string> = {
     dialogue: "改写成两人对谈式播客（A/B 轮流发言）。",
     narration: "改写成第三方转述的叙述体旁述。",
@@ -135,12 +153,24 @@ async function runOpenaiRewrite(
   ].join("\n");
 
   try {
-    const { text } = await generateText({
+    // P8.5：compatMode + provider + pricing 全部从 endpoint 读（per-callSite）
+    const ep = llm.resolveEndpoint("rewrite");
+    const { text } = await tracedGenerateText(
       model,
-      system,
-      prompt: args.translatedText,
-      temperature: 0.7,
-    });
+      llm.compatModeFor("rewrite")
+        ? { prompt: `${system}\n\n---\n${args.translatedText}`, temperature: 0.7 }
+        : { system, prompt: args.translatedText, temperature: 0.7 },
+      {
+        callSite: "rewrite",
+        modelAlias: openaiModel ?? ep?.alias ?? "rewrite",
+        provider: ep?.provider ?? "openai",
+        ...(ep?.pricing ? { pricing: ep.pricing } : {}),
+        taskId: ctx.taskId,
+        nodeId: ctx.nodeId,
+        params: { temperature: 0.7 },
+      },
+      onLlmCall ?? (() => {}),
+    );
     return text;
   } catch (e) {
     await ctx.emit({

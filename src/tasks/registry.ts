@@ -4,7 +4,7 @@ import { AsyncLatch } from "./latch.js";
 import {
   makeEvent,
   channelOf,
-  stagePayload,
+  phasePayload,
   textPayload,
   confirmGatePayload,
   errorPayload,
@@ -15,6 +15,7 @@ import {
 import type { LlmService } from "../services/llm-service.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import { plan, type PlannerConfig } from "../planner/planner.js";
+import type { ConsumerTemplate } from "../planner/consumer-template.js";
 import { executeDag } from "../executor/executor.js";
 
 /**
@@ -53,6 +54,8 @@ export interface TaskRuntime {
   llm: LlmService;
   toolRegistry: ToolRegistry;
   plannerRole?: "planner" | "default";
+  /** 消费应用注入的兜底模板（如 podcast）；内核不内置任何业务模板。 */
+  consumerTemplates?: ConsumerTemplate[];
 }
 
 /**
@@ -86,6 +89,11 @@ export class TaskRegistry {
 
   getStore(): FileTaskStore {
     return this.store;
+  }
+
+  /** 暴露工具注册表（供 /api/tools 端点查询工具清单）。 */
+  getToolRegistry(): ToolRegistry | undefined {
+    return this.runtime?.toolRegistry;
   }
 
   /** 创建并启动一个任务，返回 meta。 */
@@ -213,6 +221,7 @@ export class TaskRegistry {
       llm: rt.llm,
       registry: rt.toolRegistry,
       role: rt.plannerRole ?? "planner",
+      consumerTemplates: rt.consumerTemplates,
     };
 
     let currentIntent = intent;
@@ -255,7 +264,7 @@ export class TaskRegistry {
 
       // proceed：执行 DAG
       const { dag } = outcome;
-      this.emit(taskId, "stage", stagePayload("执行工作流", "active"));
+      this.emit(taskId, "phase", phasePayload("execute", "执行工作流", "running"));
       const result = await executeDag(dag, {
         taskId,
         runId: taskId,
@@ -273,7 +282,7 @@ export class TaskRegistry {
             }),
         },
       });
-      this.emit(taskId, "stage", stagePayload("执行工作流", "done"));
+      this.emit(taskId, "phase", phasePayload("execute", "执行工作流", "done"));
 
       if (!result.ok) {
         // abort/skip：executor 已发 error 事件，这里只置终态
@@ -293,13 +302,13 @@ export class TaskRegistry {
   // P3 替换为真实 executor。
   private async runStub(taskId: string, intent: string): Promise<void> {
     this.store.setStatus(taskId, "running");
-    this.emit(taskId, "stage", stagePayload("理解意图", "active"));
+    this.emit(taskId, "phase", phasePayload("understand", "理解意图", "running"));
     // 模拟一点 LLM 思考输出
     for (const delta of ["正在分析：", intent, " …"]) {
       this.emit(taskId, "text", textPayload(delta));
       await delay(5);
     }
-    this.emit(taskId, "stage", stagePayload("理解意图", "done"));
+    this.emit(taskId, "phase", phasePayload("understand", "理解意图", "done"));
 
     // HITL 暂停点：等用户确认
     const result = await this.awaitConfirmation(taskId, {
@@ -314,9 +323,9 @@ export class TaskRegistry {
     }
 
     this.store.setStatus(taskId, "running");
-    this.emit(taskId, "stage", stagePayload("生成结果", "active"));
+    this.emit(taskId, "phase", phasePayload("generate", "生成结果", "running"));
     await delay(5);
-    this.emit(taskId, "stage", stagePayload("生成结果", "done"));
+    this.emit(taskId, "phase", phasePayload("generate", "生成结果", "done"));
     this.emit(taskId, "done", {});
     this.store.setStatus(taskId, "done");
   }

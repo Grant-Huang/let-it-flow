@@ -37,6 +37,20 @@ export function createDeliverTool(): FlowConnector<{ type: string; title?: strin
     tier: "core",
     description: "产物聚合：把上游节点输出片段拼成最终文稿，标记产物类型。",
     inputSchema: inputSchema.shape,
+    whenToUse: {
+      triggers: ["流程末端交付产物", "聚合成最终文稿", "输出最终结果"],
+      notFor: ["中间步骤", "生成文本（走 llm_node）", "抓取/检索"],
+    },
+    outputSchema: {
+      type: "object",
+      description: "聚合后的最终产物",
+      properties: {
+        type: { type: "string", description: "产物类型标签（如 podcast_script）" },
+        title: { type: "string", description: "产物标题（可选）" },
+        content: { type: "string", description: "聚合后的完整正文" },
+      },
+    },
+    outputExample: { type: "podcast_script", title: "播客脚本", content: "聚合后的完整文稿..." },
 
     async *execute(params, ctx): AsyncGenerator<ToolEvent, ToolResult<{ type: string; title?: string; content: string }>> {
       const args = inputSchema.parse(params);

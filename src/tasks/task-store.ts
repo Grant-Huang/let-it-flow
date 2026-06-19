@@ -9,6 +9,7 @@ import {
   taskMetaPath,
   taskEventsPath,
   ensureStorageDirs,
+  listTaskIds,
 } from "../storage/file-store.js";
 import type { StreamEvent, StreamEventType } from "../core/stream-events.js";
 
@@ -126,7 +127,28 @@ export class FileTaskStore {
   readByType(taskId: string, type: StreamEventType): StreamEvent[] {
     return this.readAll(taskId).filter((e) => e.type === type);
   }
+
+  /**
+   * 列出所有任务摘要，按 createdAt 降序。
+   * 扫描 data/tasks/<id>/meta.json，返回轻量摘要（不含事件流）。
+   */
+  listAll(): TaskSummary[] {
+    return listTaskIds()
+      .map((id) => this.get(id))
+      .filter((m): m is TaskMeta => m != null)
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .map((m) => ({
+        id: m.id,
+        intent: m.intent,
+        status: m.status,
+        createdAt: m.createdAt,
+        updatedAt: m.updatedAt,
+      }));
+  }
 }
+
+/** 任务列表摘要（listAll 返回的轻量形态）。 */
+export type TaskSummary = Pick<TaskMeta, "id" | "intent" | "status" | "createdAt" | "updatedAt">;
 
 /** 生成短随机 id（前缀 t = task）。 */
 function cryptoRandomId(): string {

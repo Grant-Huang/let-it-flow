@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { FlowConnector, ToolResult } from "../base.js";
 import { toolCallPayload, toolResultPayload } from "../../core/stream-events.js";
 import type { ToolEvent } from "../../core/stream-events.js";
+import { getFetchMaxBytes } from "../../core/system-settings.js";
 
 /**
  * web_fetch —— 网页抓取（见 04 §4.4，podcast MVP 数据源双路径之二）。
@@ -30,8 +31,8 @@ const inputSchema = z.object({
     .array(z.object({ url: z.string(), title: z.string().optional() }))
     .optional()
     .describe("由 executor 从 inputRefs 解析注入；优先于 urls"),
-  /** 单页最大抓取字节数（兜底，避免超大页撑爆内存）。默认 1MB。 */
-  maxBytes: z.number().int().positive().default(1_000_000),
+  /** 单页最大抓取字节数（兜底，避免超大页撑爆内存）。默认从系统设置读取。 */
+  maxBytes: z.number().int().positive().default(() => getFetchMaxBytes()),
 });
 
 export function createWebFetchTool(): FlowConnector<FetchedDoc[]> {
@@ -40,6 +41,37 @@ export function createWebFetchTool(): FlowConnector<FetchedDoc[]> {
     tier: "core",
     description: "网页抓取：fetch URL 列表，提取正文为纯文本/markdown。content 由下游 Content Pipeline 再压缩。",
     inputSchema: inputSchema.shape,
+    whenToUse: {
+      triggers: ["已有 URL 的网页", "PDF", "YouTube 链接", "已知地址抓正文"],
+      notFor: ["需要先搜索找 URL（走 web_search）", "生成文本（走 llm_node）"],
+    },
+    outputSchema: {
+      type: "object",
+      description: "抓取文档（数组），下游 llm/rewrite 节点引用其 content 字段",
+      properties: {
+        docs: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              url: { type: "string", description: "抓取的 URL" },
+              title: { type: "string", description: "页面标题" },
+              content: { type: "string", description: "粗提取的正文（纯文本/markdown）" },
+              error: { type: "string", description: "抓取失败时的错误信息" },
+            },
+          },
+        },
+      },
+    },
+    outputExample: {
+      docs: [
+        {
+          url: "https://example.com/article",
+          title: "文章标题",
+          content: "提取出的正文内容...",
+        },
+      ],
+    },
 
     async *execute(params, ctx): AsyncGenerator<ToolEvent, ToolResult<FetchedDoc[]>> {
       const args = inputSchema.parse(params);

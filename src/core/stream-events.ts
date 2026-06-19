@@ -1,9 +1,10 @@
 import type {
   SSEEvent,
-  StagePayload,
+  PhasePayload,
   TextPayload,
   ToolCallPayload,
   ToolResultPayload,
+  ToolStatusPayload,
   WorkflowNodePayload,
   ErrorPayload,
   ExtensionPayload,
@@ -22,14 +23,16 @@ export type EventChannel = "content" | "status" | "meta";
  * 内部事件 → 对应 @meso.ai/types payload 的映射表。
  * 这是 toSSE() 类型安全的依据：每个 type 严格绑定一种 payload 形状。
  *
- * HITL 确认：协议无原生 confirmation 类型。
- *  - 风险工具门控用 tool_call(risk=write/destructive) + 延后的 tool_result
- *    （前端 ToolCallStatus 含 'awaiting_confirm'）
- *  - 通用确认门用 extension(name="confirm_gate")
+ * HITL 确认（v2.0 协议）：
+ *  - 风险工具门控用 tool_call(risk=write/destructive 或 requires_confirm=true)
+ *    + tool_status(awaiting_confirm) + 延后的 tool_result
+ *    （前端 ToolCallStatus 含 'awaiting_confirm'，ConfirmGate 自动渲染）
+ *  - 通用节点确认门用 extension(name="confirm_gate")（节点级确认，非工具级）
  */
 export interface EventTypePayloadMap {
-  stage: StagePayload;
+  phase: PhasePayload;
   tool_call: ToolCallPayload;
+  tool_status: ToolStatusPayload;
   tool_result: ToolResultPayload;
   text: TextPayload;
   workflow_node: WorkflowNodePayload;
@@ -41,8 +44,9 @@ export interface EventTypePayloadMap {
 export type StreamEventType = keyof EventTypePayloadMap;
 
 export const STREAM_EVENT_TYPES: readonly StreamEventType[] = [
-  "stage",
+  "phase",
   "tool_call",
+  "tool_status",
   "tool_result",
   "text",
   "workflow_node",
@@ -109,14 +113,23 @@ export function makeEvent<T extends StreamEventType>(
 // 类型化的 payload 构造 helper —— 保证 payload 形状与 @meso.ai/types 协议一致
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const stagePayload = (name: string, state: "active" | "done" | "error"): StagePayload => ({
-  name,
-  state,
-});
+/**
+ * 构造 phase payload（v2.0：替代旧 stage）。
+ * state 映射：旧 active → 新 running；done/error 不变。
+ */
+export function phasePayload(
+  id: string,
+  name: string,
+  state: "running" | "done" | "error" | "pending",
+): PhasePayload {
+  return { id, name, state };
+}
 
 export const textPayload = (delta: string): TextPayload => ({ delta });
 
 export const toolCallPayload = (p: ToolCallPayload): ToolCallPayload => p;
+
+export const toolStatusPayload = (p: ToolStatusPayload): ToolStatusPayload => p;
 
 export const toolResultPayload = (p: ToolResultPayload): ToolResultPayload => p;
 
@@ -125,7 +138,12 @@ export const workflowNodePayload = (p: WorkflowNodePayload): WorkflowNodePayload
 export const errorPayload = (message: string, code?: string): ErrorPayload =>
   code ? { message, code } : { message };
 
-/** HITL 确认门：用 extension 事件携带 confirm_gate 数据（协议无原生 confirmation 类型）。 */
+/**
+ * HITL 节点确认门：用 extension 事件携带 confirm_gate 数据。
+ *
+ * v2.0 协议中工具级确认已标准化为 tool_call.requires_confirm + tool_status(awaiting_confirm)，
+ * 但 podcast DAG 的节点级确认（如 fetch 节点抓取前确认）不是工具调用，仍需 extension 承载。
+ */
 export const confirmGatePayload = (p: {
   gate_id: string;
   node_id: string;
@@ -168,14 +186,16 @@ export function serializeSSEData(event: InternalEvent): string {
 // 重新导出常用协议类型，供 api / tools / executor 层直接引用
 export type {
   SSEEvent,
-  StageEvent,
-  StagePayload,
+  PhaseEvent,
+  PhasePayload,
   TextEvent,
   TextPayload,
   ToolCallEvent,
   ToolCallPayload,
   ToolResultEvent,
   ToolResultPayload,
+  ToolStatusEvent,
+  ToolStatusPayload,
   WorkflowNodeEvent,
   WorkflowNodePayload,
   WorkflowNodeState,

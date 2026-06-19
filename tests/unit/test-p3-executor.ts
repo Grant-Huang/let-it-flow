@@ -31,6 +31,9 @@ function passthroughTool(name: string, opts?: { text?: string }): FlowConnector<
     tier: "core",
     description: `fake ${name}`,
     inputSchema: {},
+    whenToUse: { triggers: [], notFor: [] },
+    outputSchema: { type: "object" },
+    outputExample: {},
     async *execute(params): AsyncGenerator<ToolEvent, ToolResult> {
       if (opts?.text) {
         yield { type: "text", channel: "content", payload: { delta: opts.text } };
@@ -211,6 +214,9 @@ describe("executeDag end-to-end", () => {
         tier: "core",
         description: "",
         inputSchema: {},
+        whenToUse: { triggers: [], notFor: [] },
+        outputSchema: { type: "object" },
+        outputExample: {},
         async *execute() {
           return { output: [{ url: "u1", title: "T1", snippet: "S1" }] };
         },
@@ -221,6 +227,9 @@ describe("executeDag end-to-end", () => {
         tier: "core",
         description: "",
         inputSchema: {},
+        whenToUse: { triggers: [], notFor: [] },
+        outputSchema: { type: "object" },
+        outputExample: {},
         async *execute(params) {
           // executor 应把 inputRefs 解析后的结果注入 params.context
           return { output: { content: String((params as { upstream?: unknown }).upstream ?? "") + " 正文" } };
@@ -234,6 +243,9 @@ describe("executeDag end-to-end", () => {
         tier: "core",
         description: "",
         inputSchema: {},
+        whenToUse: { triggers: [], notFor: [] },
+        outputSchema: { type: "object" },
+        outputExample: {},
         async *execute(params) {
           return { output: { final: (params as { script?: unknown }).script } };
         },
@@ -281,6 +293,9 @@ describe("executeDag end-to-end", () => {
         tier: "core",
         description: "",
         inputSchema: {},
+        whenToUse: { triggers: [], notFor: [] },
+        outputSchema: { type: "object" },
+        outputExample: {},
         async *execute() {
           return { output: { content: bigHtml } };
         },
@@ -291,6 +306,9 @@ describe("executeDag end-to-end", () => {
         tier: "core",
         description: "",
         inputSchema: {},
+        whenToUse: { triggers: [], notFor: [] },
+        outputSchema: { type: "object" },
+        outputExample: {},
         async *execute(params) {
           return { output: { received: (params as { context?: string }).context ?? "", len: ((params as { context?: string }).context ?? "").length } };
         },
@@ -375,6 +393,9 @@ describe("executeDag end-to-end", () => {
         tier: "core",
         description: "",
         inputSchema: {},
+        whenToUse: { triggers: [], notFor: [] },
+        outputSchema: { type: "object" },
+        outputExample: {},
         async *execute() {
           throw new Error("boom");
         },
@@ -405,6 +426,9 @@ describe("executeDag end-to-end", () => {
         tier: "core",
         description: "",
         inputSchema: {},
+        whenToUse: { triggers: [], notFor: [] },
+        outputSchema: { type: "object" },
+        outputExample: {},
         async *execute() {
           throw new Error("soft fail");
         },

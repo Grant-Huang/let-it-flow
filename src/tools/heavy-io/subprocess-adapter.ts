@@ -1,7 +1,17 @@
 import { spawn } from "node:child_process";
-import { mkdir, writeFile, readFile, access } from "node:fs/promises";
+import { mkdir, writeFile, readFile, access, readdir } from "node:fs/promises";
 import { join } from "node:path";
+import { getSubprocessDefaultTimeoutMs } from "../../core/system-settings.js";
 import type { HeavyIoConfig, SubprocessResult } from "./provider.js";
+import type {
+  TtsRuntime,
+  ImageGenRuntime,
+  VideoBuildRuntime,
+  TextStepRuntime,
+  SubtitleRuntime,
+  ImagePromptsRuntime,
+  RewriteRuntime,
+} from "./runtime-interfaces.js";
 
 /**
  * Python 子进程适配（见 09 P5）。
@@ -16,8 +26,20 @@ import type { HeavyIoConfig, SubprocessResult } from "./provider.js";
  *   workDir/video/*.mp4    视频合成产物
  *
  * 每个 podcast 任务用独立 workDir（artifactsDir/<taskId>）。
+ *
+ * 实现全部重 IO 能力接口：工具按能力（TtsRuntime 等）声明依赖，
+ * SubprocessAdapter 作为本地子进程实现，可被云端/mock 实现替换。
  */
-export class SubprocessAdapter {
+export class SubprocessAdapter
+  implements
+    TtsRuntime,
+    ImageGenRuntime,
+    VideoBuildRuntime,
+    TextStepRuntime,
+    SubtitleRuntime,
+    ImagePromptsRuntime,
+    RewriteRuntime
+{
   constructor(private readonly config: HeavyIoConfig) {}
 
   get pythonBin(): string {
@@ -59,6 +81,37 @@ export class SubprocessAdapter {
     }
   }
 
+  /** 列出 workDir/scripts/ 下匹配 glob 的文件名（按名排序）。glob 支持 * 通配。 */
+  async listScripts(workDir: string, glob: string): Promise<string[]> {
+    const dir = join(workDir, "scripts");
+    try {
+      const all = await readdir(dir);
+      const re = new RegExp("^" + glob.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*") + "$");
+      return all.filter((f) => re.test(f)).sort();
+    } catch {
+      return [];
+    }
+  }
+
+  /** 写任意文件到 workDir 根（非 scripts/），如 transcript_meta.json。 */
+  async writeWorkFile(workDir: string, name: string, content: string): Promise<string> {
+    const path = join(workDir, name);
+    await mkdir(workDir, { recursive: true });
+    await writeFile(path, content, "utf8");
+    return path;
+  }
+
+  /** 读 workDir 根下的任意文件；不存在返回 null。 */
+  async readWorkFile(workDir: string, name: string): Promise<string | null> {
+    const path = join(workDir, name);
+    try {
+      await access(path);
+      return await readFile(path, "utf8");
+    } catch {
+      return null;
+    }
+  }
+
   /**
    * 运行一个 ai-content-factory 步骤。
    * @param step     步骤号（如 "2"、"3"、"4b"、"6"）
@@ -77,7 +130,7 @@ export class SubprocessAdapter {
 
     return runChild(bin, args, {
       cwd: this.config.repoRoot,
-      timeoutMs: opts.timeoutMs ?? 600_000, // 重 IO 默认 10 分钟超时
+      timeoutMs: opts.timeoutMs ?? getSubprocessDefaultTimeoutMs(), // 重 IO 默认超时（可配）
       extraEnv: opts.extraEnv,
     });
   }
@@ -91,7 +144,7 @@ export class SubprocessAdapter {
   ): Promise<SubprocessResult> {
     return runChild(opts.pythonBin ?? this.pythonBin, scriptArgs, {
       cwd: opts.cwd ?? this.config.repoRoot,
-      timeoutMs: opts.timeoutMs ?? 600_000,
+      timeoutMs: opts.timeoutMs ?? getSubprocessDefaultTimeoutMs(),
       extraEnv: opts.extraEnv,
     });
   }

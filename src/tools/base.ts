@@ -13,6 +13,17 @@ export type { ToolEvent } from "../core/stream-events.js";
 export type ToolTier = "core" | "domain" | "custom";
 
 /**
+ * 结构化调用时机（见 04 §4.6 工具契约）：面向 planner LLM 的"工具手册"，
+ * 决定 planner 能否选对工具、避免乱猜。
+ */
+export interface ToolTrigger {
+  /** 触发关键词/场景：意图涉及这些时优先选此工具。 */
+  triggers: string[];
+  /** 不适用场景：意图属于这些时不要选此工具。 */
+  notFor: string[];
+}
+
+/**
  * 工具执行上下文：执行器在调用工具时注入的能力。
  *   - emit：发射事件（落库 + 流式）。工具产出 stage/tool_call/tool_result/text 等。
  *   - requireConfirmation：HITL 暂停点（requireConfirmation 节点用）。
@@ -64,7 +75,26 @@ export interface FlowConnector<TOutput = unknown> {
   readonly description: string;
   /** 输入参数 JSON Schema（Zod 或原生 schema）。MVP 用 Zod schema 对象描述。 */
   readonly inputSchema: Record<string, unknown>;
-  /** 输出形状描述（仅文档/校验用，MVP 不强制运行期校验）。 */
+
+  // ── 面向 planner LLM 的工具手册（Tool Contract，见 04 §4.6）──
+
+  /**
+   * 调用时机（必填）。结构化 Trigger：何时调用此工具。
+   * 让 planner 明确在什么意图下选这个工具，避免乱猜。
+   */
+  readonly whenToUse: ToolTrigger;
+  /**
+   * 输出 JSON Schema（Zod schema 转），描述 ToolResult.output 的结构，
+   * 字段含 description。让 planner 知道"产出长什么样"。
+   */
+  readonly outputSchema: Record<string, unknown>;
+  /**
+   * 输出示例（必填）。给 planner 看的真实输出样例，让它知道
+   * "下一步能引用哪些字段"。
+   */
+  readonly outputExample: Record<string, unknown>;
+
+  /** @deprecated 改用 outputSchema（JSON Schema，结构更完整）。保留向后兼容。 */
   readonly outputShape?: string;
 
   /**

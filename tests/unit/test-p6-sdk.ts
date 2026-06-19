@@ -4,6 +4,7 @@ import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { LetItFlow } from "../../src/sdk/let-it-flow.js";
 import type { StreamEvent } from "../../src/core/stream-events.js";
+import { podcastTemplate } from "../../examples/podcast-generator/template.js";
 
 let tmpRoot: string;
 beforeEach(() => {
@@ -57,7 +58,7 @@ describe("P6 SDK: execute() streaming", () => {
 
 describe("P6 SDK: HITL approve/reject", () => {
   it("confirm_gate → approve 释放后继续到终态", async () => {
-    const flow = new LetItFlow();
+    const flow = new LetItFlow({ consumerTemplates: [podcastTemplate] });
     // podcast url 意图 → fetch 节点 requireConfirmation → confirm_gate
     // approve 后继续（可能因网络失败，但关键是闩锁被释放、不挂死）
     const { events, types } = await collect(
@@ -73,7 +74,7 @@ describe("P6 SDK: HITL approve/reject", () => {
   }, 20000);
 
   it("confirm_gate → reject 后该节点跳过（HITL 拒绝不中止 DAG，下游按 onNodeError 处理）", async () => {
-    const flow = new LetItFlow();
+    const flow = new LetItFlow({ consumerTemplates: [podcastTemplate] });
     const { events } = await collect(
       flow,
       "把 https://example.com 做成播客",
@@ -100,7 +101,7 @@ describe("P6 SDK: HITL approve/reject", () => {
 
 describe("P6 SDK: clarify", () => {
   it("模糊意图 → clarification_required → clarify() 释放闩锁后重跑 planner", async () => {
-    const flow = new LetItFlow();
+    const flow = new LetItFlow({ consumerTemplates: [podcastTemplate] });
     const events: StreamEvent[] = [];
     let clarified = false;
     let gateCount = 0;
