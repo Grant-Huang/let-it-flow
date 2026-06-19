@@ -1,0 +1,49 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* NexusOps 业务专属覆盖 */
+.nexus-live-trace {
+  margin: 8px 0;
+}
+.nexus-welcome h1 {
+  color: var(--color-accent);
+}
+
+/* 证据徽章颜色映射（EvidenceEnvelope freshness / confidence） */
+.nexus-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+/* ReAct 步骤时间线 */
+.nexus-step-trace {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0;
+}
+.nexus-step-item {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 13px;
+}
+.nexus-step-num {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--color-accent);
+  color: #fff;
+}

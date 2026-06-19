@@ -107,4 +107,14 @@ export interface FlowConnector<TOutput = unknown> {
     params: Record<string, unknown>,
     ctx: ExecutionContext,
   ): AsyncGenerator<ToolEvent, ToolResult<TOutput>>;
+
+  /**
+   * 工具风险评级（可选，T 层 HITL 门用）。
+   *   safe         — 只读/无副作用，直接执行（缺省）
+   *   write        — 有副作用（写 MES/改排产），ReAct harness 默认走 HITL 确认门
+   *   destructive  — 不可逆（删数据/停线），必须 HITL 确认 + governance 链放行
+   *
+   * 向后兼容：老工具不带此字段时按 "safe" 处理。
+   */
+  readonly risk?: "safe" | "write" | "destructive";
 }

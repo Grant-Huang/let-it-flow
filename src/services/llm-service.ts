@@ -4,6 +4,7 @@ import { createAzure } from "@ai-sdk/azure";
 import type { LanguageModel } from "ai";
 import { RUNTIME } from "../core/config.js";
 import type { CallSite } from "../llm/call-sites.js";
+import { CALL_SITES } from "../llm/call-sites.js";
 import { loadConfig, type RuntimeConfig } from "../llm/config-loader.js";
 import type { ModelEndpoint } from "../llm/model-registry.js";
 
@@ -44,6 +45,8 @@ const CALLSITE_TO_ROLE: Record<CallSite, LlmRole> = {
   seam_repair: "writer",
   terminology: "writer",
   image_prompts: "writer",
+  nexus_agent: "planner",
+  nexus_advise: "planner",
 };
 
 /** per-callSite Chat Completions 兼容标志的判定 provider 集合。 */
@@ -179,15 +182,8 @@ export class LlmService {
   /** 旧重载：取某角色的 LanguageModel（向后兼容）。 */
   model(role: LlmRole): LanguageModel;
   model(callSiteOrRole: CallSite | LlmRole): LanguageModel {
-    // 判断是 CallSite 还是旧 LlmRole
-    const isCallSite = [
-      "planner",
-      "rewrite",
-      "translate",
-      "seam_repair",
-      "terminology",
-      "image_prompts",
-    ].includes(callSiteOrRole as string);
+    // 判断是 CallSite 还是旧 LlmRole（直接用权威枚举，避免字面量散落）
+    const isCallSite = (CALL_SITES as readonly string[]).includes(callSiteOrRole as string);
     if (isCallSite) {
       const cs = callSiteOrRole as CallSite;
       // P8.5：先尝试 registry 完整路径
@@ -210,14 +206,7 @@ export class LlmService {
   /** 旧 role 体系兜底：alias 作 modelId 直接给单 openai 实例（向后兼容）。 */
   private legacyModel(callSiteOrRole: CallSite | LlmRole): LanguageModel {
     let modelId: string;
-    const isCallSite = [
-      "planner",
-      "rewrite",
-      "translate",
-      "seam_repair",
-      "terminology",
-      "image_prompts",
-    ].includes(callSiteOrRole as string);
+    const isCallSite = (CALL_SITES as readonly string[]).includes(callSiteOrRole as string);
     if (isCallSite) {
       const cs = callSiteOrRole as CallSite;
       const alias = this.cfg.resolveAlias(cs);

@@ -1,6 +1,8 @@
 packages:
   - "web"
   - "apps/podcast-generator"
+  - "apps/nexusops"
+  - "apps/nexusops/web"
 allowBuilds:
   esbuild: set this to true or false
 minimumReleaseAgeExclude:

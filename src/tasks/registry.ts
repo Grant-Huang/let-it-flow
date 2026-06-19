@@ -56,6 +56,31 @@ export interface TaskRuntime {
   plannerRole?: "planner" | "default";
   /** 消费应用注入的兜底模板（如 podcast）；内核不内置任何业务模板。 */
   consumerTemplates?: ConsumerTemplate[];
+  /**
+   * 自定义 runner（应用可注入，绕过 planner+DAG 走自己的执行范式）。
+   * 例：NexusOps 注入 ReAct Harness runner（runReactHarness）。
+   * 注入后 start() 会优先调用它而非 runPlanned。
+   */
+  customRunner?: (taskId: string, intent: string, hooks: TaskRunnerHooks) => Promise<void>;
+}
+
+/** 传给 customRunner 的 hooks（与内核 runner 对齐的事件/HITL 接口）。 */
+export interface TaskRunnerHooks {
+  /** 发射事件（落库 + SSE 出口）。 */
+  emit: <T extends StreamEventType>(
+    type: T,
+    payload: EventTypePayloadMap[T],
+  ) => StreamEvent;
+  /** 置任务状态。 */
+  setStatus: (status: TaskMeta["status"], message?: string) => void;
+  /** HITL 确认门（挂起等待 POST /confirm）。 */
+  awaitConfirmation: (gate: {
+    nodeId: string;
+    runId: string;
+    prompt: string;
+    options?: string[];
+    detail?: Record<string, unknown>;
+  }) => Promise<ConfirmationResult>;
 }
 
 /**
@@ -99,13 +124,33 @@ export class TaskRegistry {
   /** 创建并启动一个任务，返回 meta。 */
   start(intent: string, config: Record<string, unknown> = {}): TaskMeta {
     const meta = this.store.create(intent, config);
-    const runner = (this.runtime ? this.runPlanned(meta.id, intent) : this.runStub(meta.id, intent)).catch(
-      (err) => {
-        this.emitError(meta.id, err instanceof Error ? err.message : String(err));
-      },
-    );
+    const runner = this.pickRunner(meta.id, intent).catch((err) => {
+      this.emitError(meta.id, err instanceof Error ? err.message : String(err));
+    });
     this.runners.set(meta.id, runner);
     return meta;
+  }
+
+  /** 选择 runner：注入 customRunner 优先；否则 runtime → runPlanned；缺省 stub。 */
+  private pickRunner(taskId: string, intent: string): Promise<void> {
+    const rt = this.runtime;
+    if (rt?.customRunner) {
+      const hooks: TaskRunnerHooks = {
+        emit: (type, payload) => this.emit(taskId, type, payload),
+        setStatus: (status, message) => this.store.setStatus(taskId, status, message),
+        awaitConfirmation: (gate) =>
+          this.awaitConfirmation(taskId, {
+            nodeId: gate.nodeId,
+            runId: gate.runId,
+            prompt: gate.prompt,
+            options: gate.options,
+            detail: gate.detail,
+          }),
+      };
+      return rt.customRunner(taskId, intent, hooks);
+    }
+    if (rt) return this.runPlanned(taskId, intent);
+    return this.runStub(taskId, intent);
   }
 
   /**

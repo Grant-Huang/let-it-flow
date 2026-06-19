@@ -26,6 +26,8 @@ const CALL_SITE_ENV: Record<CallSite, string> = {
   seam_repair: "LIF_SEAM_REPAIR_MODEL",
   terminology: "LIF_TERMINOLOGY_MODEL",
   image_prompts: "LIF_IMAGE_PROMPTS_MODEL",
+  nexus_agent: "LIF_NEXUS_AGENT_MODEL",
+  nexus_advise: "LIF_NEXUS_ADVISE_MODEL",
 };
 
 /** 兜底默认绑定（优先级 4）。alias 值仅作占位，实际解析由 LlmService 处理。 */
@@ -36,6 +38,8 @@ const DEFAULT_BINDINGS: Record<CallSite, string> = {
   seam_repair: "default-seam-repair",
   terminology: "default-terminology",
   image_prompts: "default-image-prompts",
+  nexus_agent: "default-nexus-agent",
+  nexus_advise: "default-nexus-advise",
 };
 
 /** 已加载的运行时配置视图。 */

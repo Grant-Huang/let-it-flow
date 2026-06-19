@@ -145,7 +145,7 @@ describe("P8.1 ModelRegistry", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("P8.1 CallSiteBinding", () => {
-  it("CALL_SITES 包含 6 个调用点", () => {
+  it("CALL_SITES 包含全部调用点（P8 基础 6 + S3 nexus 扩展 2）", () => {
     expect(CALL_SITES).toEqual([
       "planner",
       "rewrite",
@@ -153,6 +153,9 @@ describe("P8.1 CallSiteBinding", () => {
       "seam_repair",
       "terminology",
       "image_prompts",
+      // S3 平台扩展：ReAct harness / NexusOps 应用调用点
+      "nexus_agent",
+      "nexus_advise",
     ]);
   });
 
