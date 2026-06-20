@@ -13,6 +13,7 @@
     "dev": "tsx watch src/server.ts",
     "dev:sdk": "tsx watch src/index.ts",
     "dev:nexus": "tsx watch apps/nexusops/server/index.ts",
+    "dev:podcast-skill": "tsx watch apps/podcast-skill/server/index.ts",
     "dev:nexus:web": "pnpm --filter @let-it-flow/nexusops-web dev",
     "lint": "eslint .",
     "smoke": "tsx -e \"import('./src/index.ts').then(m => console.log('import ok', typeof m.LetItFlow))\""

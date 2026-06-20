@@ -28,6 +28,7 @@ const CALL_SITE_ENV: Record<CallSite, string> = {
   image_prompts: "LIF_IMAGE_PROMPTS_MODEL",
   nexus_agent: "LIF_NEXUS_AGENT_MODEL",
   nexus_advise: "LIF_NEXUS_ADVISE_MODEL",
+  podcast_skill_agent: "LIF_PODCAST_SKILL_AGENT_MODEL",
 };
 
 /** 兜底默认绑定（优先级 4）。alias 值仅作占位，实际解析由 LlmService 处理。 */
@@ -40,6 +41,7 @@ const DEFAULT_BINDINGS: Record<CallSite, string> = {
   image_prompts: "default-image-prompts",
   nexus_agent: "default-nexus-agent",
   nexus_advise: "default-nexus-advise",
+  podcast_skill_agent: "default-podcast-skill-agent",
 };
 
 /** 已加载的运行时配置视图。 */
