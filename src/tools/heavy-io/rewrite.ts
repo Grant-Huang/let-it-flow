@@ -26,8 +26,8 @@ import type { LlmCallEvent } from "../../llm/call-log.js";
 const inputSchema = z.object({
   /** 上游 translate 译稿（executor 注入）。 */
   translatedText: z.string().describe("待改写的译稿"),
-  /** rewrite 形式（透传 system prompt）。 */
-  style: z.enum(["dialogue", "narration", "summary"]).default("dialogue"),
+  /** rewrite 形式（透传 system prompt）。新增 briefing/dual_line 见 podcast-generator 改进 #2。 */
+  style: z.enum(["dialogue", "narration", "summary", "briefing", "dual_line"]).default("dialogue"),
   /** 目标语言。 */
   language: z.string().default("zh"),
   /** 额外指令。 */

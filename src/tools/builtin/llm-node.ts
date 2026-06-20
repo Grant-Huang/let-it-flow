@@ -22,14 +22,15 @@ import { randomUUID } from "node:crypto";
  *   - model：直接指定模型 id（覆盖 role）
  */
 
-export type RewriteStyle = "dialogue" | "narration" | "summary";
+// 新增 briefing / dual_line 见 podcast-generator 改进 #2
+export type RewriteStyle = "dialogue" | "narration" | "summary" | "briefing" | "dual_line";
 
 const inputSchema = z.object({
   prompt: z.string().min(1).describe("用户 prompt / 指令"),
   systemPrompt: z.string().optional().describe("系统提示词；与 style 模板拼接"),
   /** 由 executor 从 inputRefs 解析注入的上游正文（字符串）。 */
   context: z.string().optional().describe("上游节点输出经 Content Pipeline 压缩后的正文"),
-  style: z.enum(["dialogue", "narration", "summary"]).optional().describe("rewrite 形式（podcast）"),
+  style: z.enum(["dialogue", "narration", "summary", "briefing", "dual_line"]).optional().describe("rewrite 形式（podcast）"),
   role: z.enum(["planner", "writer", "summarizer", "default"]).optional().default("writer"),
   model: z.string().optional().describe("直接指定模型 id（覆盖 role）"),
   /** 生成温度等透传给 streamText。 */
@@ -131,6 +132,8 @@ function composeSystem(base?: string, style?: RewriteStyle): string | undefined 
     dialogue: "以两人对话形式改写（主持人/嘉宾，交替发言）。",
     narration: "以第三方转述的叙述形式改写。",
     summary: "以客观、简洁的要点总结形式改写。",
+    briefing: "以简报体改写：开场列 3-5 条热点 → 深度展开 2 条 → 趋势观察 → 收尾预告。",
+    dual_line: "以双线对照体改写：抛出对立观点 → 各自论据 → 交叉对比 → 综合判断。",
   };
   const parts = [base, style ? styleHint[style] : undefined].filter(Boolean);
   return parts.length > 0 ? parts.join("\n\n") : undefined;

@@ -10,6 +10,9 @@ import { createTtsTool } from "./heavy-io/tts.js";
 import { createImageGenTool } from "./heavy-io/image-gen.js";
 import { createVideoBuildTool } from "./heavy-io/video-build.js";
 import { createRewriteTool } from "./heavy-io/rewrite.js";
+import { createSentenceValidatorTool } from "./heavy-io/sentence-validator.js";
+import { createWechatArticleTool } from "./heavy-io/wechat-article.js";
+import { createThreadFocuserTool } from "./heavy-io/thread-focuser.js";
 import {
   createTranslateTool,
   createSeamRepairTool,
@@ -68,6 +71,10 @@ export function registerHeavyIoTools(
   registry.register(createImageGenTool(runtime));
   registry.register(createSubtitleTool(runtime));
   registry.register(createVideoBuildTool(runtime));
+  // podcast-generator 改进 #1/#4/#6 新增 domain 工具
+  registry.register(createThreadFocuserTool({ llm }));
+  registry.register(createSentenceValidatorTool({ llm }));
+  registry.register(createWechatArticleTool({ llm }));
   return registry;
 }
 
