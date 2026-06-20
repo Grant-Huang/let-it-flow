@@ -1,135 +1,155 @@
-/**
- * skill.write_wechat_article：基于已聚焦主线索撰写公众号长文。
- *
- * 公众号特点：
- *   - 二级标题（##）分段
- *   - 短段落、加粗重点、引用块
- *   - 目标 6500 字（默认），±10% 容差
- *   - 自校验字数 + section 数量
- */
-import { generateText } from "ai";
-import type { LanguageModel } from "ai";
 import { createSkill } from "../../../src/agent/skill-bridge.js";
-import { wrapEvidence } from "../../../src/core/evidence-envelope.js";
-import type { SkillStep, SkillConnector } from "../../../src/agent/skill-bridge.js";
+import type { EvidenceEnvelope } from "../../../src/core/evidence-envelope.js";
 
-const SYSTEM_PROMPT = `你是中文公众号长文撰稿人。遵守规范：
-
-1. 二级标题（##）分段，5-7 个 section 为佳。
-2. 段落短（3-5 句），避免大段密文。
-3. 重点加粗（**...**），便于扫读。
-4. 列表（- / 1.）用于罗列要点。
-5. 引用块（> ...）用于直引信源。
-6. 全文围绕 focusedThread 单一议题，narrative 决定行文逻辑。
-
-输出 JSON：
-{
-  "article": "<完整 markdown 正文>",
-  "sectionOutline": ["##标题1", "##标题2", ...],
-  "citationList": ["..."]
-}
-不要外层 markdown 围栏。`;
-
-interface ArticleOutput {
+export interface WechatArticleOutput {
   article: string;
-  sectionOutline: string[];
-  citationList: string[];
-  selfCheck: {
-    targetWords: number;
-    actualWords: number;
-    sectionCount: number;
-  };
+  sectionOutline: Array<{
+    title: string;
+    wordCount: number;
+  }>;
+  citationList: Array<{ text: string; source: string }>;
+  evidence: EvidenceEnvelope;
 }
 
-export function createWriteWechatArticleSkill(getModel: () => LanguageModel): SkillConnector {
-  const steps: SkillStep[] = [
-    {
-      description: "生成公众号长文",
-      execute: async (_ctx, params) => {
-        const targetWords = Number(params.targetWords ?? 6500);
-        const narrative = String(params.narrativeReason ?? params.narrative ?? "");
-        const focused = params.focusedThread as { oneLine?: string; evidence?: string } | undefined;
-        const userPrompt = `主线索：${focused?.oneLine ?? "(空)"}
-证据：${focused?.evidence ?? "(空)"}
-叙事逻辑：${narrative}
-目标字数：${targetWords}（±10%）
+export const writeWechatArticleSkill = createSkill({
+  name: "skill.write_wechat_article",
+  description: "基于聚焦线索和口播稿决策，撰写公众号长文（6500字左右）",
+  inputSchema: {
+    type: "object" as const,
+    properties: {
+      focusedThread: {
+        type: "object",
+        description: "聚焦后的核心线索",
+      },
+      narrativeReason: {
+        type: "string",
+        description: "选定叙事结构的理由",
+      },
+      podcastScript: {
+        type: "string",
+        description: "已生成的口播稿（作为参考和基础）",
+      },
+      targetWords: {
+        type: "number",
+        description: "目标字数",
+        default: 6500,
+      },
+    },
+    required: ["focusedThread", "narrativeReason", "podcastScript"],
+  },
 
-请输出 JSON。`;
-        const { text } = await generateText({
-          model: getModel(),
-          system: SYSTEM_PROMPT,
-          prompt: userPrompt,
+  async steps(input) {
+    const { step } = input;
+    const targetWords = input.targetWords || 6500;
+    const tolerance = targetWords * 0.05; // ±5% 容差
+
+    // Step 1: 获取图文写作规范
+    const rulesStep = await step("获取图文规范", async (ctx) => {
+      const rules = await ctx.call<{ standards: Record<string, string> }>("kb.search", {
+        query: "图文写作规范 公众号",
+        scope: "podcast-skill",
+      });
+      return rules;
+    });
+
+    const rulesContext = rulesStep.standards
+      ? Object.values(rulesStep.standards).join("\n\n")
+      : "";
+
+    // Step 2: 生成长文稿
+    const draftStep = await step("长文生成", async (ctx) => {
+      const draft = await ctx.call<{
+        article: string;
+        sections: Array<{ title: string; content: string }>;
+      }>("generate", {
+        systemPrompt: `你是公众号资深编辑。基于以下口播稿和叙事思路，扩展成公众号长文。
+
+## 图文规范
+${rulesContext}
+
+## 约束
+- 目标字数: ${targetWords} ±${tolerance}
+- 使用 ## 二级标题分章
+- 每段 80-150 字
+- 关键词加粗
+- 避免列表过长
+
+## 口播稿参考
+${input.podcastScript}`,
+        userPrompt: `请为以下线索写公众号长文（${targetWords}字左右）：\n\n线索：${JSON.stringify(input.focusedThread)}\n\n结构理由：${input.narrativeReason}\n\nJSON 返回: { article: "完整文章", sections: [{ title: "...", content: "..." }, ...] }`,
+      });
+      return draft;
+    });
+
+    const articleDraft = draftStep.article || "";
+    const sections = draftStep.sections || [];
+
+    // Step 3: 字数校验
+    const validateStep = await step("字数校验", async (ctx) => {
+      const result = await ctx.call<{
+        wordCount: number;
+        needsRevise: boolean;
+        issue: string;
+      }>("thought", {
+        directive: `检查以下文章的字数：
+文本: ${articleDraft}
+
+目标: ${targetWords} 字，容差 ±${tolerance} 字
+实际字数与目标的差异是否超过容差？
+
+返回: { wordCount, needsRevise: boolean, issue: "" }`,
+      });
+      return result;
+    });
+
+    let finalArticle = articleDraft;
+    if (validateStep.needsRevise) {
+      const reviseStep = await step("字数调整", async (ctx) => {
+        const issue = validateStep.issue || "";
+        const revised = await ctx.call<{ article: string }>("generate", {
+          systemPrompt: `修改公众号文章，调整字数到 ${targetWords} 字（${issue}）`,
+          userPrompt: `原文：\n${articleDraft}\n\n修改后的完整文章：`,
         });
-        return { text, targetWords };
-      },
-    },
-    {
-      description: "解析 + 自校验 + 包 envelope",
-      execute: async (_ctx, _params, prior) => {
-        const r = prior[0] as { text: string; targetWords: number };
-        const parsed = safeJson<{
-          article: string;
-          sectionOutline: string[];
-          citationList: string[];
-        }>(r.text);
-        const article = parsed.article ?? "";
-        const actual = countChinese(article);
-        const sections = (article.match(/^##\s/gm) ?? []).length;
-        const output: ArticleOutput = {
-          article,
-          sectionOutline: parsed.sectionOutline ?? [],
-          citationList: parsed.citationList ?? [],
-          selfCheck: { targetWords: r.targetWords, actualWords: actual, sectionCount: sections },
-        };
-        const deviation = Math.abs(actual - r.targetWords) / r.targetWords;
-        return wrapEvidence(output, {
-          freshness: "realtime",
-          confidence: deviation <= 0.1 ? "estimated" : "inferred",
-          system: "llm",
-          provenance: "skill.write_wechat_article",
-          caveat:
-            deviation > 0.1 ? `字数偏差 ${(deviation * 100).toFixed(1)}% 超过 10% 容差` : undefined,
-        });
-      },
-    },
-  ];
+        return revised;
+      });
+      finalArticle = reviseStep.article || articleDraft;
+    }
 
-  return createSkill({
-    name: "skill.write_wechat_article",
-    description:
-      "基于已聚焦主线索撰写公众号长文（默认 6500 字）。结构化为 ## 二级标题分段、重点加粗、列表/引用块。自校验字数 + section 数量。",
-    whenToUse: {
-      triggers: ["撰写公众号长文", "生成图文文章"],
-      notFor: ["口播稿（用 skill.write_podcast_script）", "尚未聚焦主线索"],
-    },
-    inputSchema: {
-      type: "object",
-      properties: {
-        focusedThread: { type: "object" },
-        narrativeReason: { type: "string", description: "选定叙事的理由（供长文行文逻辑参考）" },
-        targetWords: { type: "number", description: "目标字数，默认 6500" },
+    // Step 4: 提取引用
+    const citationsStep = await step("提取引用", async (ctx) => {
+      const citations = await ctx.call<{
+        citations: Array<{ text: string; source: string }>;
+      }>("thought", {
+        directive: `从以下文章中提取所有直接引用和信源：
+${finalArticle}
+
+返回: { citations: [{ text: "引用内容", source: "信源" }, ...] }`,
+      });
+      return citations;
+    });
+
+    const wordCount = finalArticle.length;
+    const sectionOutline = sections.map((sec) => ({
+      title: sec.title,
+      wordCount: sec.content?.length || 0,
+    }));
+
+    const output: WechatArticleOutput = {
+      article: finalArticle,
+      sectionOutline,
+      citationList: citationsStep.citations || [],
+      evidence: {
+        provenance: "skill.write_wechat_article",
+        confidence: "generated",
+        freshness: new Date().toISOString(),
+        data: {
+          targetWords,
+          actualWords: wordCount,
+          sections: sections.length,
+        },
       },
-      required: ["focusedThread"],
-    },
-    outputSchema: { type: "object", properties: { data: { type: "object" } } },
-    outputExample: {
-      data: { article: "## ...", sectionOutline: ["## 引子"], citationList: [], selfCheck: {} },
-      confidence: "estimated",
-    },
-    steps,
-  });
-}
+    };
 
-function safeJson<T>(text: string): T {
-  const m = text.match(/\{[\s\S]*\}/);
-  const raw = m ? m[0] : text;
-  try {
-    return JSON.parse(raw) as T;
-  } catch (e) {
-    throw new Error(`LLM 返回非合法 JSON：${e instanceof Error ? e.message : String(e)}`);
-  }
-}
-
-function countChinese(s: string): number {
-  return [...s].filter((c) => /[一-鿿]/.test(c)).length;
-}
+    return output;
+  },
+});

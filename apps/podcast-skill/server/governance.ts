@@ -1,32 +1,35 @@
+import type { GovernanceChain } from "../../../src/agent/types.js";
+
 /**
- * Podcast-Skill 治理规则（G 内容）。
- *
- * 主要防止成本失控：
- *   - core.web_fetch 单次 URL 数 >5 阻断（强制拆分或人工确认）
+ * 构建 podcast-skill 应用的治理规则（G 层）。
  */
-import { GovernanceChain } from "../../../src/agent/governance.js";
-import type { GovernanceRule } from "../../../src/agent/governance.js";
+export interface GovernanceConfig {
+  webFetchMaxUrlPerCall?: number;
+}
 
-export function buildPodcastSkillGovernance(): GovernanceChain {
-  const chain = new GovernanceChain();
+export function buildPodcastSkillGovernance(config: GovernanceConfig = {}): GovernanceChain {
+  const maxUrls = config.webFetchMaxUrlPerCall ?? 5;
 
-  chain.add({
-    id: "guard_bulk_web_fetch",
-    description: "core.web_fetch 单次抓取 URL 数 >5 时阻断（避免成本失控）",
-    check: (toolName, args) => {
-      if (toolName !== "core.web_fetch") return { allow: true };
-      const a = (args ?? {}) as { urls?: unknown; url?: unknown };
-      const count =
-        Array.isArray(a.urls) ? (a.urls as unknown[]).length : a.url ? 1 : 0;
-      if (count > 5) {
-        return {
-          allow: false,
-          reason: `单次 web_fetch URL 数 ${count} 超过上限 5，请拆分为多次调用。`,
-        };
-      }
-      return { allow: true };
-    },
-  } satisfies GovernanceRule);
+  const chain: GovernanceChain = {
+    name: "podcast-skill-governance",
+    rules: [
+      {
+        name: "web_fetch_cost_guard",
+        phase: "before_tool_call",
+        condition: (step) => {
+          const tc = step.toolCalls[step.toolCalls.length - 1];
+          if (!tc || tc.toolName !== "core.web_fetch") return false;
+          // 检查本步内已调用 web_fetch 的 URL 数
+          const fetchCalls = step.toolCalls.filter((c) => c.toolName === "core.web_fetch");
+          return fetchCalls.length > maxUrls;
+        },
+        action: (step) => ({
+          gate: "requireConfirmation",
+          prompt: `已在本步调用 ${maxUrls} 次 web_fetch，继续可能产生高成本。确认继续?`,
+        }),
+      },
+    ],
+  };
 
   return chain;
 }

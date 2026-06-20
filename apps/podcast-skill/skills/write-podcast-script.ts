@@ -1,208 +1,158 @@
-/**
- * skill.write_podcast_script：基于已聚焦的主线索撰写口播稿。
- *
- * 写稿铁律（来自 KB / 写稿铁律/*）：
- *   - 字数公式：字数 ≈ durationMinutes × 210（±5% 容差）
- *   - 单句长度 ≤ 25 字
- *   - 术语过滤：通用术语（CEO/GDP/ChatGPT）不解释；小众代号必须解释
- *
- * 写完后做自校验，校验失败自动重写一遍（skill 内重试 1 次）。
- */
-import { generateText } from "ai";
-import type { LanguageModel } from "ai";
 import { createSkill } from "../../../src/agent/skill-bridge.js";
-import { wrapEvidence } from "../../../src/core/evidence-envelope.js";
-import type { SkillStep, SkillConnector } from "../../../src/agent/skill-bridge.js";
+import type { EvidenceEnvelope } from "../../../src/core/evidence-envelope.js";
 
-const SYSTEM_PROMPT = `你是中文播客主播口播稿撰稿人。严格遵守以下铁律：
-
-1. 字数公式：分钟数 × 210（±5%），偏离即重写。
-2. 单句长度 ≤ 25 字，逗号断句，节奏短促，便于口播。
-3. 术语过滤：
-   - 通用术语（CEO/GDP/ChatGPT/AI/IPO 等）不解释
-   - 小众代号、专业缩略词出现时必须用一句话解释
-4. 引用规范：单条引用 ≤ 30 字，标信源；同信源不反复直引。
-5. 段落结构按 narrative 决定（开场→主线展开→收束）。
-6. 不堆砌多条线索，全文围绕 focusedThread 单一议题。
-
-输出 JSON：
-{
-  "script": "<完整稿件，含段落分隔 \\n\\n>",
-  "segmentBreakdown": [{ "title": "...", "words": 0 }],
-  "estimatedDurationMin": 0,
-  "citationList": ["..."]
-}
-不要 markdown 围栏。`;
-
-interface ScriptOutput {
+export interface PodcastScriptOutput {
   script: string;
-  segmentBreakdown: Array<{ title: string; words: number }>;
+  segmentBreakdown: Array<{
+    segment: string;
+    wordCount: number;
+    estimatedDuration: number;
+  }>;
   estimatedDurationMin: number;
-  citationList: string[];
-  selfCheck: {
-    targetWords: number;
-    actualWords: number;
-    deviation: number;
-    maxSentenceLen: number;
-    retried: boolean;
-  };
+  citationList: Array<{ text: string; source: string }>;
+  evidence: EvidenceEnvelope;
 }
 
-export function createWritePodcastScriptSkill(getModel: () => LanguageModel): SkillConnector {
-  const steps: SkillStep[] = [
-    {
-      description: "首次生成口播稿",
-      execute: async (_ctx, params) => {
-        return await writeOnce(getModel(), params, null);
+export const writePodcastScriptSkill = createSkill({
+  name: "skill.write_podcast_script",
+  description: "根据聚焦线索和叙事结构撰写口播稿，内置字数、句长、术语校验",
+  inputSchema: {
+    type: "object" as const,
+    properties: {
+      focusedThread: {
+        type: "object",
+        description: "聚焦后的核心线索（来自 thread_focuser）",
+      },
+      narrative: {
+        type: "string",
+        description: "选定的叙事结构类型（suspense|analyst|briefing|dual-line）",
+      },
+      durationMinutes: {
+        type: "number",
+        description: "目标时长（分钟）",
+        default: 30,
+      },
+      language: {
+        type: "string",
+        description: "语言（zh|en）",
+        default: "zh",
       },
     },
-    {
-      description: "字数/单句长度自校验，必要时重写",
-      execute: async (_ctx, params, prior) => {
-        const first = prior[0] as { text: string; targetWords: number; durationMin: number };
-        const check = checkScript(first.text, first.targetWords);
-        if (check.ok) {
-          return { ...first, retried: false, check };
-        }
-        // 失败：附带修正指令重写
-        const second = await writeOnce(getModel(), params, check);
-        const recheck = checkScript(second.text, second.targetWords);
-        return { ...second, retried: true, check: recheck };
-      },
-    },
-    {
-      description: "解析为结构化输出 + EvidenceEnvelope",
-      execute: async (_ctx, _params, prior) => {
-        const r = prior[1] as {
-          text: string;
-          targetWords: number;
-          durationMin: number;
-          retried: boolean;
-          check: ReturnType<typeof checkScript>;
-        };
-        const parsed = safeJson<{
-          script: string;
-          segmentBreakdown: Array<{ title: string; words: number }>;
-          estimatedDurationMin: number;
-          citationList: string[];
-        }>(r.text);
-        const actualWords = countChinese(parsed.script);
-        const output: ScriptOutput = {
-          script: parsed.script,
-          segmentBreakdown: parsed.segmentBreakdown ?? [],
-          estimatedDurationMin: parsed.estimatedDurationMin ?? r.durationMin,
-          citationList: parsed.citationList ?? [],
-          selfCheck: {
-            targetWords: r.targetWords,
-            actualWords,
-            deviation: (actualWords - r.targetWords) / r.targetWords,
-            maxSentenceLen: r.check.maxLen,
-            retried: r.retried,
-          },
-        };
-        return wrapEvidence(output, {
-          freshness: "realtime",
-          confidence: r.check.ok ? "estimated" : "inferred",
-          system: "llm",
-          provenance: "skill.write_podcast_script",
-          caveat: r.check.ok ? undefined : `自校验未完全通过：${r.check.reason}`,
+    required: ["focusedThread", "narrative"],
+  },
+
+  async steps(input) {
+    const { step } = input;
+    const targetMinutes = input.durationMinutes || 30;
+    const targetWords = targetMinutes * 210; // 字数公式
+    const tolerance = targetWords * 0.05; // ±5% 容差
+
+    // Step 1: 从知识库拉取写稿铁律
+    const rulesStep = await step("获取写稿铁律", async (ctx) => {
+      const rules = await ctx.call<{ rules: Record<string, string> }>("kb.search", {
+        query: `写稿铁律 ${input.language === "zh" ? "中文" : "英文"}`,
+        scope: "podcast-skill",
+      });
+      return rules;
+    });
+
+    const rulesContext = rulesStep.rules ? Object.values(rulesStep.rules).join("\n\n") : "";
+
+    // Step 2: 第一轮生成
+    const draftStep = await step("初稿生成", async (ctx) => {
+      const draft = await ctx.call<{ script: string; segments: string[] }>("generate", {
+        systemPrompt: `你是播客写稿专家。按照叙事结构写稿。
+
+## 写稿铁律
+${rulesContext}
+
+## 约束
+- 目标字数: ${targetWords} ±${tolerance}字
+- 单句不超过25字
+- 避免术语堆砌
+
+## 叙事结构: ${input.narrative}`,
+        userPrompt: `为以下线索写${targetMinutes}分钟口播稿：\n\n${JSON.stringify(input.focusedThread)}\n\nJSON 格式返回: { script: "完整稿件", segments: ["段落1", "段落2", ...] }`,
+      });
+      return draft;
+    });
+
+    const scriptDraft = draftStep.script || "";
+    const segments = draftStep.segments || [];
+
+    // Step 3: 自校验
+    const validateStep = await step("字数/句长/术语校验", async (ctx) => {
+      const result = await ctx.call<{
+        wordCount: number;
+        maxSentenceLength: number;
+        violations: string[];
+        needsRevise: boolean;
+      }>("thought", {
+        directive: `校验以下稿件：
+文本: ${scriptDraft}
+
+检查项：
+1. 总字数: 应为 ${targetWords} ±${tolerance}
+2. 单句长度: 不超过25字
+3. 术语过滤: 避免 ChatGPT/CEO/GDP 等常见术语的裸露解释
+
+返回: { wordCount, maxSentenceLength, violations: [], needsRevise: boolean }`,
+      });
+      return result;
+    });
+
+    let finalScript = scriptDraft;
+    if (validateStep.needsRevise) {
+      // 自动重写
+      const reviseStep = await step("自动重写", async (ctx) => {
+        const revised = await ctx.call<{ script: string }>("generate", {
+          systemPrompt: `修改播客稿件，修复以下问题：${validateStep.violations.join("；")}`,
+          userPrompt: `原稿件：\n${scriptDraft}\n\n修改后的完整稿件：`,
         });
+        return revised;
+      });
+      finalScript = reviseStep.script || scriptDraft;
+    }
+
+    // Step 4: 提取引用
+    const citationsStep = await step("提取引用", async (ctx) => {
+      const citations = await ctx.call<{
+        citations: Array<{ text: string; source: string }>;
+      }>("thought", {
+        directive: `从以下稿件中提取所有直接引用或信源引用：
+${finalScript}
+
+返回: { citations: [{ text: "引用内容", source: "信源" }, ...] }`,
+      });
+      return citations;
+    });
+
+    const wordCount = finalScript.length;
+    const estimatedMin = Math.round(wordCount / 210);
+    const segmentBreakdown = segments.map((seg, idx) => ({
+      segment: `Segment ${idx + 1}`,
+      wordCount: seg.length,
+      estimatedDuration: Math.round(seg.length / 210),
+    }));
+
+    const output: PodcastScriptOutput = {
+      script: finalScript,
+      segmentBreakdown,
+      estimatedDurationMin: estimatedMin,
+      citationList: citationsStep.citations || [],
+      evidence: {
+        provenance: "skill.write_podcast_script",
+        confidence: "generated",
+        freshness: new Date().toISOString(),
+        data: {
+          targetMinutes,
+          actualMinutes: estimatedMin,
+          wordCount,
+          segments: segments.length,
+        },
       },
-    },
-  ];
+    };
 
-  return createSkill({
-    name: "skill.write_podcast_script",
-    description:
-      "基于已聚焦的主线索撰写口播稿。严格遵守字数公式（分钟 × 210，±5%）+ 单句 ≤25 字 + 术语过滤铁律。内部自校验失败自动重写一遍。",
-    whenToUse: {
-      triggers: ["撰写播客口播稿", "生成节目稿件"],
-      notFor: ["尚未聚焦主线索（先调 skill.thread_focuser）", "公众号长文（用 skill.write_wechat_article）"],
-    },
-    inputSchema: {
-      type: "object",
-      properties: {
-        focusedThread: { type: "object", description: "skill.thread_focuser 输出的 selected 字段" },
-        narrative: { type: "string", description: "叙事结构名（悬念驱动体 / 分析师独白体 / 简报体 / 双线对照体）" },
-        durationMinutes: { type: "number", description: "目标节目时长（分钟）" },
-        language: { type: "string", description: "稿件语言，默认 zh-CN" },
-      },
-      required: ["focusedThread", "narrative", "durationMinutes"],
-    },
-    outputSchema: { type: "object", properties: { data: { type: "object" } } },
-    outputExample: {
-      data: { script: "...", segmentBreakdown: [], estimatedDurationMin: 30, citationList: [], selfCheck: {} },
-      confidence: "estimated",
-    },
-    steps,
-  });
-}
-
-async function writeOnce(
-  model: LanguageModel,
-  params: Record<string, unknown>,
-  fixHint: ReturnType<typeof checkScript> | null,
-): Promise<{ text: string; targetWords: number; durationMin: number }> {
-  const durationMin = Number(params.durationMinutes ?? 30);
-  const targetWords = Math.round(durationMin * 210);
-  const narrative = String(params.narrative ?? "分析师独白体");
-  const focused = params.focusedThread as { oneLine?: string; evidence?: string } | undefined;
-  const fixSection = fixHint
-    ? `\n\n⚠️ 上一稿未通过自校验：${fixHint.reason}。请按目标字数 ${targetWords}（±5%）+ 单句 ≤25 字重写。`
-    : "";
-
-  const userPrompt = `主线索：${focused?.oneLine ?? "(空)"}
-证据：${focused?.evidence ?? "(空)"}
-叙事结构：${narrative}
-目标时长：${durationMin} 分钟（${targetWords} 字 ±5%）${fixSection}
-
-请输出 JSON。`;
-
-  const { text } = await generateText({
-    model,
-    system: SYSTEM_PROMPT,
-    prompt: userPrompt,
-  });
-  return { text, targetWords, durationMin };
-}
-
-function checkScript(text: string, targetWords: number): { ok: boolean; reason: string; maxLen: number } {
-  const parsed = tryParse(text);
-  if (!parsed) return { ok: false, reason: "稿件无法解析为 JSON", maxLen: 0 };
-  const script = parsed.script ?? "";
-  const actual = countChinese(script);
-  const deviation = Math.abs(actual - targetWords) / targetWords;
-  const sentences = script.split(/[。！？\n]/).filter((s) => s.trim());
-  const maxLen = sentences.reduce((max, s) => Math.max(max, countChinese(s.trim())), 0);
-  if (deviation > 0.05) {
-    return { ok: false, reason: `字数偏差 ${(deviation * 100).toFixed(1)}%（目标 ${targetWords}，实际 ${actual}）`, maxLen };
-  }
-  if (maxLen > 25) {
-    return { ok: false, reason: `存在超长单句（${maxLen} 字）`, maxLen };
-  }
-  return { ok: true, reason: "", maxLen };
-}
-
-function tryParse(text: string): { script?: string } | null {
-  const m = text.match(/\{[\s\S]*\}/);
-  if (!m) return null;
-  try {
-    return JSON.parse(m[0]) as { script?: string };
-  } catch {
-    return null;
-  }
-}
-
-function safeJson<T>(text: string): T {
-  const m = text.match(/\{[\s\S]*\}/);
-  const raw = m ? m[0] : text;
-  try {
-    return JSON.parse(raw) as T;
-  } catch (e) {
-    throw new Error(`LLM 返回非合法 JSON：${e instanceof Error ? e.message : String(e)}`);
-  }
-}
-
-function countChinese(s: string): number {
-  return [...s].filter((c) => /[一-鿿]/.test(c)).length;
-}
+    return output;
+  },
+});

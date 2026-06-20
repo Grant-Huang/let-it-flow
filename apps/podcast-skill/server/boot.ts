@@ -1,238 +1,150 @@
-/**
- * Podcast-Skill 后端装配（应用层 —— 镜像 nexusops/boot.ts 模板）。
- *
- * 职责（ETCLOVG）：
- *   - E/L/O：复用平台 runReactHarness
- *   - T：core.* 内置（web_search/web_fetch/kb）+ podcast_finalize / podcast_ask_choice
- *        + skill.thread_focuser / skill.write_podcast_script / skill.write_wechat_article
- *   - C：可选 ObsidianProvider（OBSIDIAN_VAULT_PATH 指向 kb-seed/vault 或自定义）
- *   - V：buildPodcastSkillPreconditions（has_focused_thread / podcast_before_article / finalize_has_both）
- *   - G：buildPodcastSkillGovernance（web_fetch 数量限）
- *
- * 装配产出：注入 customRunner 的 TaskRuntime，供 TaskRegistry.start 调用。
- */
-import "dotenv/config";
-import { ToolRegistry } from "../../../src/tools/registry.js";
-import { createDefaultToolRegistry } from "../../../src/executor/default-tools.js";
-import {
-  registerBuiltinTools,
-  createTavilyProvider,
-} from "../../../src/tools/index.js";
-import { createKnowledgeBaseTool } from "../../../src/tools/builtin/knowledge-base.js";
-import { ObsidianProvider } from "../../../src/tools/knowledge/obsidian-provider.js";
-import type { IKnowledgeProvider } from "../../../src/tools/knowledge/provider.js";
 import { LlmService } from "../../../src/services/llm-service.js";
-import { loadConfig } from "../../../src/llm/config-loader.js";
-import { ensureSeedConfig } from "../../../src/llm/seed.js";
-import { globalEventBus } from "../../../src/core/event-bus.js";
+import { PreconditionRegistry } from "../../../src/agent/precondition.js";
 import { runReactHarness } from "../../../src/agent/react-harness.js";
-import type { HarnessConfig, EmitFn } from "../../../src/agent/types.js";
-import { buildPodcastTools } from "../tools/index.js";
-import { buildPodcastSkills } from "../skills/index.js";
-import {
-  buildPodcastSkillPreconditions,
-  podcastSkillPreconditionList,
-} from "./preconditions.js";
+import type { HarnessConfig, TaskIntent, TaskRunnerHooks, StepEmitter } from "../../../src/agent/types.js";
+import { buildPodcastSkillPreconditions } from "./preconditions.js";
 import { buildPodcastSkillGovernance } from "./governance.js";
-import type { TaskRuntime, TaskRunnerHooks } from "../../../src/tasks/registry.js";
+import { threadFocuserSkill, writePodcastScriptSkill, writeWechatArticleSkill } from "../skills/index.js";
 
-export interface PodcastSkillBootOptions {
-  vaultPath?: string;
-  dataDir?: string;
-  llm?: LlmService;
-  toolRegistry?: ToolRegistry;
-}
+/**
+ * 装配 podcast-skill ReAct 应用。
+ * 镜像 apps/nexusops/server/boot.ts 的模式。
+ */
+export async function bootPodcastSkill(options?: {
+  emit?: StepEmitter;
+  requireConfirmation?: (config: any) => Promise<any>;
+}): Promise<{
+  customRunner: TaskRunnerHooks["customRunner"];
+  preconditions: PreconditionRegistry;
+}> {
+  const llm = new LlmService();
+  const emit = options?.emit ?? (() => {});
+  const requireConfirmation = options?.requireConfirmation ?? (async (c) => c);
 
-export interface PodcastSkillRuntime {
-  taskRuntime: TaskRuntime;
-  toolRegistry: ToolRegistry;
-  knowledgeProviders: IKnowledgeProvider[];
-}
+  // 构建工具注册表（复用 core.* + 注册 skill.*）
+  const registry = {
+    tools: new Map<string, any>(),
+    skills: new Map<string, any>(),
 
-export async function bootPodcastSkill(
-  opts: PodcastSkillBootOptions = {},
-): Promise<PodcastSkillRuntime> {
-  if (opts.dataDir) process.env.LIF_DATA_DIR = opts.dataDir;
+    register: function (name: string, tool: any) {
+      this.tools.set(name, tool);
+    },
 
-  // 1. 配置 + LlmService
-  ensureSeedConfig();
-  const runtimeConfig = loadConfig();
-  const llm =
-    opts.llm ??
-    new LlmService({
-      apiKey: process.env.OPENAI_API_KEY,
-      baseURL: process.env.OPENAI_BASE_URL || undefined,
-      runtimeConfig,
-    });
-  if (!opts.llm) llm.subscribeConfigChanges(globalEventBus);
+    registerSkill: function (name: string, skill: any) {
+      this.skills.set(name, skill);
+    },
 
-  // 2. ToolRegistry：core 内置 + podcast app 工具 + skill
-  const toolRegistry = opts.toolRegistry ?? createDefaultToolRegistry();
-  registerBuiltinTools(toolRegistry, {
-    llm,
-    searchProvider: process.env.TAVILY_API_KEY
-      ? createTavilyProvider(process.env.TAVILY_API_KEY)
-      : undefined,
-  });
-  for (const connector of buildPodcastTools()) {
-    if (!toolRegistry.has(connector.name)) toolRegistry.register(connector);
-  }
-  for (const skill of buildPodcastSkills(() => llm.model("podcast_skill_agent"))) {
-    if (!toolRegistry.has(skill.name)) toolRegistry.register(skill);
-  }
+    get: function (name: string) {
+      return this.tools.get(name) ?? this.skills.get(name);
+    },
 
-  // 3. Obsidian KB：写稿铁律 + 叙事结构 vault
-  const knowledgeProviders: IKnowledgeProvider[] = [];
-  const vaultPath = opts.vaultPath ?? process.env.OBSIDIAN_VAULT_PATH ?? "";
-  if (vaultPath) {
-    const obsidian = new ObsidianProvider({ vaultPath });
-    await obsidian.init();
-    if (obsidian.ready()) {
-      knowledgeProviders.push(obsidian);
-      console.log(`[podcast-skill] Obsidian vault 已加载 @ ${vaultPath}`);
-    } else {
-      console.warn(`[podcast-skill] Obsidian vault 未就绪：${vaultPath}`);
-    }
-  }
-  if (!toolRegistry.has("core.knowledge_base")) {
-    toolRegistry.register(createKnowledgeBaseTool(knowledgeProviders));
-  }
-
-  // 4. V + G
-  const preconditionReg = buildPodcastSkillPreconditions();
-  const governanceChain = buildPodcastSkillGovernance();
-  const preconditions = podcastSkillPreconditionList(preconditionReg);
-  const governanceHooks = governanceChain.toHooks();
-
-  // 5. customRunner：ReAct harness 接到内核 task store + HITL
-  const maxSteps = Number(process.env.PODCAST_MAX_STEPS ?? "20");
-
-  const customRunner: NonNullable<TaskRuntime["customRunner"]> = async (
-    taskId: string,
-    intent: string,
-    hooks: TaskRunnerHooks,
-  ) => {
-    hooks.setStatus("running");
-    hooks.emit("phase", {
-      stage: "react",
-      label: "Podcast 内容策划",
-      state: "running",
-    } as never);
-
-    const emit: EmitFn = async (event) => {
-      hooks.emit(event.type as never, event.payload as never);
-    };
-    const requireConfirmation = async (gate: {
-      prompt: string;
-      options?: string[];
-      detail?: Record<string, unknown>;
-    }) => {
-      const result = await hooks.awaitConfirmation({
-        nodeId: (gate.detail?.tool as string) ?? "react_tool",
-        runId: taskId,
-        prompt: gate.prompt,
-        options: gate.options,
-        detail: gate.detail,
-      });
-      return { approved: result.approved, params: result.params };
-    };
-
-    const model = llm.model("podcast_skill_agent");
-    const harnessConfig: HarnessConfig = {
-      callSite: "podcast_skill_agent",
-      model,
-      registry: toolRegistry,
-      toolTiers: ["core", "domain", "custom"],
-      stopPolicy: { maxSteps, finalizeTool: "podcast_finalize" },
-      preconditions,
-      governanceHooks,
-      requireConfirmation,
-      emit,
-      compatMode: llm.compatModeFor ? llm.compatModeFor("podcast_skill_agent") : false,
-      systemPrompt: PODCAST_SKILL_SYSTEM_PROMPT,
-    };
-
-    const result = await runReactHarness(intent, harnessConfig);
-
-    hooks.emit("phase", {
-      stage: "react",
-      label: "Podcast 内容策划",
-      state: "done",
-    } as never);
-
-    if (result.finishReason === "precondition_unmet") {
-      hooks.emit(
-        "extension",
-        {
-          name: "precondition_unmet",
-          version: "1.0",
-          data: {
-            finishReason: result.finishReason,
-            finalText: result.finalText,
-            usage: result.usage,
-          },
-        } as never,
-      );
-      hooks.setStatus("failed", "前置条件未满足");
-      return;
-    }
-    if (result.finishReason === "error") {
-      hooks.emit("error", { message: result.error ?? "执行出错" } as never);
-      hooks.setStatus("error", result.error);
-      return;
-    }
-
-    if (result.finalText) {
-      hooks.emit("text", { delta: result.finalText } as never);
-    }
-    hooks.emit(
-      "extension",
-      {
-        name: "podcast_result",
-        version: "1.0",
-        data: {
-          finishReason: result.finishReason,
-          stepCount: result.stepTrace.length,
-          usage: result.usage,
-        },
-      } as never,
-    );
-    hooks.emit("done", {} as never);
-    hooks.setStatus("done");
+    list: function () {
+      return Array.from(this.tools.values()).concat(Array.from(this.skills.values()));
+    },
   };
 
-  const taskRuntime: TaskRuntime = {
-    llm,
-    toolRegistry,
+  // 注册三个核心 skill
+  registry.registerSkill("skill.thread_focuser", threadFocuserSkill);
+  registry.registerSkill("skill.write_podcast_script", writePodcastScriptSkill);
+  registry.registerSkill("skill.write_wechat_article", writeWechatArticleSkill);
+
+  // 构建前置条件注册表
+  const preconditionRegistry = new PreconditionRegistry();
+  const conditions = buildPodcastSkillPreconditions();
+  for (const c of conditions) {
+    preconditionRegistry.register(c);
+  }
+
+  // 构建治理规则
+  const governance = buildPodcastSkillGovernance();
+
+  // 构建 ReAct system prompt
+  const systemPrompt = buildPodcastSkillSystemPrompt();
+
+  // 构建 HarnessConfig
+  const harnessConfig: HarnessConfig = {
+    callSite: "podcast_skill_agent",
+    model: llm.model("podcast_skill_agent"),
+    registry: registry as any,
+    stopPolicy: {
+      maxSteps: 20,
+      finalizeTool: "nexus_finalize",
+    },
+    preconditions: preconditionRegistry,
+    governanceHooks: governance,
+    requireConfirmation,
+    emit,
+    systemPrompt,
+    compatMode: false,
+  };
+
+  // 定义 customRunner 钩子
+  const customRunner: TaskRunnerHooks["customRunner"] = async (intent: TaskIntent) => {
+    return runReactHarness(intent, harnessConfig);
+  };
+
+  return {
     customRunner,
+    preconditions: preconditionRegistry,
   };
-
-  return { taskRuntime, toolRegistry, knowledgeProviders };
 }
 
-/** Podcast-Skill 默认 system prompt（追加到 harness 默认 prompt 后）。 */
-const PODCAST_SKILL_SYSTEM_PROMPT = `
-## 播客内容策划 + 写稿助手角色
-你用 ReAct 模式工作。任务：基于用户意图产出 (1) 口播稿 + (2) 公众号长文 + (3) rationale。
+/**
+ * 构建 podcast-skill 的 ReAct system prompt。
+ * 极简风格：只说流程，不说细节铁律（那些在 KB 里）。
+ */
+function buildPodcastSkillSystemPrompt(): string {
+  return `你是一个播客内容策划 + 写稿助手，用 ReAct 模式工作。
 
 ## 任务流程（严格按序）
-1. 判断输入模式：
-   - 用户给了 URL/素材 → 模式 B：用 core.web_fetch 抓全文
-   - 用户只给主题/领域 → 模式 A：用 core.web_search + core.web_fetch 检索
-2. 时间范围不明 → 调 podcast_ask_choice 反问（最近 3 天 / 不限 / 自定义）
-3. 检索/读取完成 → 调 skill.thread_focuser 聚焦单一主线索
-   - 若返回 needsUserChoice=true，调 podcast_ask_choice 让用户选，再带 focusHint 重跑 thread_focuser
-4. （可选）若用户未指定叙事，从 KB 检索"叙事结构/*"挑选，或默认"分析师独白体"
-5. 调 skill.write_podcast_script 写口播稿（严守字数公式 + 单句长度铁律）
-6. 调 skill.write_wechat_article 写公众号长文
-7. 调 podcast_finalize 收尾，输出 summary + rationaleMeta
 
-## 知识库使用
-"写稿铁律" / "叙事结构" 相关问题，调 core.knowledge_base 查询 Obsidian vault。
-不要把铁律塞进自己的临时记忆——按需检索。
+1. **判断输入模式**
+   - 用户给了素材或 URL → 模式 B，用 web_fetch 抓全文
+   - 用户只给主题/领域 → 模式 A，用 web_search 检索
+   - 如果检索范围不清（"最近 X 天" 缺失）→ 调 ask_user_choice 反问
 
-## 纪律
-- 一期一个核心线索，禁止把多条线索揉成"综合"
-- 公众号长文必须基于已完成的口播稿（先稿后文）
-- 收尾前必须双产物齐全（口播稿 + 公众号）+ 有 rationale
-`.trim();
+2. **聚焦单一主线索**
+   - 检索/读取完成后，调用 \`skill.thread_focuser\` 分析所有可独立成篇的线索
+   - 若线索唯一 → 直接选中
+   - 若线索多条 → 让用户选择（绝不堆砌多条）
+
+3. **判定内容类型**
+   - \`skill.thread_focuser\` 同步输出 contentType：\`rigorous\`（严谨型）或 \`comprehensive\`（综合型）
+
+4. **选择叙事结构**
+   - 基于线索特征和用户输入，选择四种之一：悬念驱动、分析师独白、简报、双线对照
+   - 用 \`kb.search\` 查询各结构的适用标准
+
+5. **撰写口播稿**
+   - 调用 \`skill.write_podcast_script\`
+   - 内部自校验：字数（±5%）、单句长度（≤25字）、术语过滤
+   - 包含引用和信源
+
+6. **撰写公众号长文**
+   - 调用 \`skill.write_wechat_article\`
+   - 基于口播稿决策，扩展为 6500 字公众号文章
+   - 自校验字数
+
+7. **收尾 + 交付**
+   - 调用 \`nexus_finalize\` 汇总：口播稿 + 公众号长文 + 证据链 + rationale_meta
+
+## 可用工具
+
+- \`core.web_search\`：搜索内容
+- \`core.web_fetch\`：拉取完整网页内容
+- \`kb.search\`：查询本地知识库（叙事结构、写稿铁律）
+- \`skill.thread_focuser\`：聚焦线索 + 判定类型
+- \`skill.write_podcast_script\`：生成口播稿
+- \`skill.write_wechat_article\`：生成公众号文章
+- \`ask_user_choice\`：多选题反问
+- \`nexus_finalize\`：最终收尾
+
+## 关键约束
+
+- **一期一个核心判断**：多线索时必须让用户选，不要混合
+- **先写口播再写文章**：公众号文章基于口播稿的决策展开
+- **必须聚焦**：无论如何都要经过 \`skill.thread_focuser\`
+- **知识库优先**：遇到写稿规则问题，先 \`kb.search\` 再生成
+
+祝写稿愉快！`;
+}
