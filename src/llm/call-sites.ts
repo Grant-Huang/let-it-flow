@@ -17,6 +17,7 @@ export const CALL_SITES = [
   "image_prompts", // 生图提示词（step3d）
   "nexus_agent", // ReAct Harness 主循环（编排 LLM，多步 tool calling）
   "nexus_advise", // 结构化建议产出（ReAct finalize 节点）
+  "podcast_skill_agent", // podcast-skill 应用 ReAct 主循环（内容策划 + 写稿）
 ] as const;
 export type CallSite = (typeof CALL_SITES)[number];
 

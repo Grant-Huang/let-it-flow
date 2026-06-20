@@ -1,0 +1,23 @@
+{
+  "name": "@lif/podcast-skill",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Podcast content sourcing + scriptwriting skill for let-it-flow",
+  "main": "./server/index.ts",
+  "scripts": {
+    "dev": "node --loader tsx ./server/index.ts",
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest"
+  },
+  "dependencies": {
+    "let-it-flow": "workspace:*",
+    "zod": "^3.22.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0",
+    "tsx": "^4.7.0",
+    "vitest": "^1.0.0",
+    "@types/node": "^20.10.0"
+  }
+}

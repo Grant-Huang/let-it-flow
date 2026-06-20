@@ -199,7 +199,7 @@ describe("P8.4 /api/config/bindings", () => {
     const body = await res.json() as ApiResponse<Array<{ callSite: string }>>;
     expect(body.status).toBe("success");
     expect(Array.isArray(body.data)).toBe(true);
-    expect(body.data.length).toBe(8); // P8 基础 6 + S3 nexus_agent/nexus_advise
+    expect(body.data.length).toBe(9); // P8 基础 6 + S3 nexus_agent/nexus_advise + podcast_skill_agent
     const sites = body.data.map((b) => b.callSite);
     expect(sites).toContain("planner");
     expect(sites).toContain("rewrite");
