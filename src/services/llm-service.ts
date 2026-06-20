@@ -47,6 +47,7 @@ const CALLSITE_TO_ROLE: Record<CallSite, LlmRole> = {
   image_prompts: "writer",
   nexus_agent: "planner",
   nexus_advise: "planner",
+  nexus_review: "planner",
   podcast_skill_agent: "planner",
 };
 

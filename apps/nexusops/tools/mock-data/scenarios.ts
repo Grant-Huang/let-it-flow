@@ -10,6 +10,7 @@
  * 所有数据都模拟 MES/MOM/ERP 实测，confidence=measured。
  */
 import type { EvidenceEnvelope, Freshness, Confidence } from "../../../../src/core/evidence-envelope.js";
+import { actionStore } from "./action-store.js";
 
 export type ScenarioId = "normal" | "anomaly" | "crisis";
 
@@ -292,4 +293,19 @@ export function ctxFromArgs(args: Record<string, unknown>): ScenarioContext {
   const scenarioId = (args.scenarioId as ScenarioId | undefined) ?? "anomaly";
   const line = args.line as LineId | undefined;
   return { scenarioId, ...(line ? { line } : {}) };
+}
+
+/**
+ * 查询 mock 动作工具产生的字段覆盖（action→read 因果链可观测）。
+ *
+ * 延迟导入 actionStore（避免 scenarios ↔ action-store 循环依赖）。
+ * 读取工具在 getData 里对关键字段调此函数：若动作工具写过覆盖（如
+ * mcp.process.adjust_parameters 写了 temperature=185），读取侧返回新值。
+ *
+ * @param ctx 场景上下文（line 缺省按 L01）
+ * @param field 字段名（与动作工具 sideEffects 的 key 对齐，如 "temperature"）
+ * @returns 覆盖值；未覆盖返回 undefined
+ */
+export function lookupActionOverride(ctx: ScenarioContext, field: string): unknown {
+  return actionStore.lookupOverride(ctx.scenarioId, ctx.line, field);
 }

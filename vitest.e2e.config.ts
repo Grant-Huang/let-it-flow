@@ -11,6 +11,9 @@ export default defineConfig({
   test: {
     include: ["tests/e2e/**/*.ts"],
     exclude: ["node_modules/**"],
-    testTimeout: 60_000,
+    // NexusOps e2e 单链路 ~70s（DeepSeek 多步 ReAct）+ 判官 ~15s，
+    // 原 60s 不够；这里放宽到 180s，hookTimeout 给 bootNexusOps 初始化。
+    testTimeout: 180_000,
+    hookTimeout: 60_000,
   },
 });

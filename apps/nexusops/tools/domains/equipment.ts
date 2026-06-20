@@ -5,7 +5,7 @@
  * 数据源：MES（运行状态）+ PLM（维护历史）。
  */
 import { createQueryTool } from "../mock-data/tool-factory.js";
-import { getEquipment, type ScenarioId } from "../mock-data/scenarios.js";
+import { getEquipment, lookupActionOverride, type ScenarioId } from "../mock-data/scenarios.js";
 
 const SYSTEM = "MES";
 
@@ -20,7 +20,13 @@ export function registerEquipmentTools(): import("../../../../src/tools/base.js"
       inputSchema: { type: "object", properties: {} },
       getData: (ctx) => {
         const e = getEquipment(ctx);
-        return { status: e.status, healthScore: e.healthScore, line: ctx.line ?? "L01" };
+        const lineStopped = lookupActionOverride(ctx, "equipment.lineStopped") === true;
+        return {
+          status: lineStopped ? "down" : e.status,
+          healthScore: e.healthScore,
+          line: ctx.line ?? "L01",
+          ...(lineStopped ? { note: "产线已被停线动作（mcp.eam.stop_line）置为 down" } : {}),
+        };
       },
       system: SYSTEM,
       provenance: (a) => `/mes/equipment/status?line=${(a.line as string) ?? "L01"}`,

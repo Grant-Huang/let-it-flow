@@ -81,11 +81,37 @@ export interface Precondition {
 
 /** G 层：应用挂的阻断规则（PreToolUse 钩子）。 */
 export interface GovernanceHooks {
-  /** 工具执行前调用。返回 allow=false 则阻断（不发请求）。 */
+  /**
+   * 工具执行前调用。返回 allow=false 则阻断（不发请求）。
+   * @param toolName  工具名（dot-namespacing，如 "mcp.mes.update_schedule"）
+   * @param args      工具入参（已按 inputSchema 解析）
+   * @param risk      工具风险评级（safe/write/destructive，来自 connector.risk，缺省 safe）
+   */
   preToolUse?: (
     toolName: string,
     args: unknown,
+    risk?: "safe" | "write" | "destructive",
   ) => { allow: true } | { allow: false; reason: string };
+
+  /**
+   * 工具执行后、结果返回给 LLM 前调用（过程侧一致性校验）。
+   *
+   * 与 preToolUse 的区别：preToolUse 拿不到工具结果，只能按入参阻断；
+   * postToolUse 能看到 EvidenceEnvelope，检测证据冲突、置信度兜底等。
+   *
+   * @returns
+   *   - { pass: true }：放行，结果原样返回
+   *   - { pass: false, severity: "warn", reason }：放行但往 result 注入 _warnings（LLM 可见）
+   *   - { pass: false, severity: "block", reason }：把 result 替换为 { blocked: true, reason }，
+   *     让 LLM 看到"这个证据不可用，需重取"
+   */
+  postToolUse?: (
+    toolName: string,
+    args: unknown,
+    result: unknown,
+  ) =>
+    | { pass: true }
+    | { pass: false; reason: string; severity?: "warn" | "block" };
 }
 
 /** harness 每步前的上下文（给 prepareStep 钩子）。 */

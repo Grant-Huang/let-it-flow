@@ -40,10 +40,17 @@ export interface SkillStep {
  *
  * 通过 kind="skill" 标识，harness/前端可识别它是沉淀流程。
  * 本体仍是 FlowConnector，故能注册进 ToolRegistry。
+ *
+ * status 字段标识 skill 成熟度：
+ *   - "active"（缺省）：正式 skill，注册进 toolTiers，主循环直接采用结果
+ *   - "draft"：试运行 skill，以影子模式运行（结果标记 _shadow，不直接采用，与主循环对比）
+ *     连续 N 次与原方法结论一致、无反信号命中才转正（由 SkillRegistry 计数升级）
  */
 export interface SkillConnector extends FlowConnector {
   readonly kind: "skill";
   readonly steps: SkillStep[];
+  /** 成熟度：active（正式）/ draft（试运行，影子模式）。缺省 active。 */
+  readonly status?: "draft" | "active";
 }
 
 /**
@@ -54,6 +61,7 @@ export interface SkillConnector extends FlowConnector {
  *   - description: 喂给 LLM 的"何时调用此 skill"
  *   - steps:       内部步骤序列
  *   - inputSchema: skill 的输入参数（透传给第一步）
+ *   - status:      active（正式，缺省）/ draft（试运行，影子模式）
  */
 export function createSkill(opts: {
   name: string;
@@ -64,20 +72,25 @@ export function createSkill(opts: {
   outputExample: Record<string, unknown>;
   steps: SkillStep[];
   risk?: "safe" | "write" | "destructive";
+  status?: "draft" | "active";
 }): SkillConnector {
-  const { name, description, whenToUse, inputSchema, outputSchema, outputExample, steps, risk } = opts;
+  const { name, description, whenToUse, inputSchema, outputSchema, outputExample, steps, risk, status = "active" } = opts;
+  const isDraft = status === "draft";
 
   const connector: SkillConnector = {
     kind: "skill",
     name,
     tier: "domain", // skill 注册到 domain 层（harness 默认 core+domain+custom 都给 LLM）
-    description: `[Skill] ${description}（封装 ${steps.length} 步标准流程）`,
+    description: isDraft
+      ? `[Skill·draft] ${description}（封装 ${steps.length} 步标准流程，试运行中，结果标 _shadow）`
+      : `[Skill] ${description}（封装 ${steps.length} 步标准流程）`,
     inputSchema,
     outputSchema,
     outputExample,
     whenToUse,
     ...(risk ? { risk } : {}),
     steps,
+    status,
 
     async *execute(
       params: Record<string, unknown>,
@@ -164,6 +177,14 @@ export function createSkill(opts: {
           source: { system: "skill", provenance: name },
           ...(errors.length > 0 ? { caveat: errors.join("; ") } : {}),
         };
+      }
+
+      // draft 影子模式：标记 _shadow，让主循环/前端识别"这是试运行结果，不直接采用"
+      if (isDraft) {
+        if (output.data && typeof output.data === "object") {
+          output.data = { ...(output.data as Record<string, unknown>), _shadow: true };
+        }
+        output._shadow = true;
       }
 
       yield {

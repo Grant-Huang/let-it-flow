@@ -235,3 +235,198 @@ describe("S4 场景数据一致性", () => {
     expect(l01).toBeLessThan(l03); // L01 是问题产线，L03 正常
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// mock MCP 动作工具集（mcp.* / write+destructive / HITL / 副作用）
+// ─────────────────────────────────────────────────────────────────────────────
+
+import { registerMcpActionTools } from "../../apps/nexusops/tools/domains/mcp-actions.js";
+import { actionStore } from "../../apps/nexusops/tools/mock-data/action-store.js";
+
+const ACTION_TOOLS = registerMcpActionTools();
+const ACTION_BY_NAME = new Map(ACTION_TOOLS.map((t) => [t.name, t]));
+
+describe("NexusOps mock MCP 动作工具集", () => {
+  const mockCtx = {
+    taskId: "t", runId: "r", nodeId: "n", intent: "",
+    emit: async () => ({} as never),
+    requireConfirmation: async () => ({ approved: true }),
+    resolveRef: () => undefined,
+  } as unknown as Parameters<FlowConnector["execute"]>[1];
+
+  async function runAction(
+    name: string,
+    args: Record<string, unknown> = {},
+  ): Promise<ToolResult> {
+    const tool = ACTION_BY_NAME.get(name)!;
+    const gen = tool.execute(args, mockCtx);
+    let final: ToolResult | undefined;
+    while (true) {
+      const r = await gen.next();
+      if (r.done) {
+        final = r.value;
+        break;
+      }
+    }
+    return final!;
+  }
+
+  function receiptData(result: ToolResult): {
+    ticketId: string;
+    status: string;
+    summary: string;
+    sideEffects?: Record<string, unknown>;
+  } {
+    const env = result.output as {
+      data: { ticketId: string; status: string; summary: string; sideEffects?: Record<string, unknown> };
+    };
+    return env.data;
+  }
+
+  it("动作工具数 ≥ 12（MES/ERP/QMS/EAM/process 五系统）", () => {
+    expect(ACTION_TOOLS.length).toBeGreaterThanOrEqual(12);
+  });
+
+  it("全部动作工具 tier=custom", () => {
+    for (const t of ACTION_TOOLS) expect(t.tier).toBe("custom");
+  });
+
+  it("全部动作工具 risk ∈ {write, destructive}（无 safe）", () => {
+    for (const t of ACTION_TOOLS) {
+      expect(["write", "destructive"]).toContain(t.risk);
+    }
+  });
+
+  it("命名遵循 mcp.<system>.<tool> 规范", () => {
+    for (const t of ACTION_TOOLS) {
+      expect(t.name).toMatch(/^mcp\.(mes|erp|qms|eam|process)\./);
+    }
+  });
+
+  it("destructive 动作 ≥ 2（停线 + 批量报废）", () => {
+    const destructive = ACTION_TOOLS.filter((t) => t.risk === "destructive");
+    expect(destructive.length).toBeGreaterThanOrEqual(2);
+    expect(ACTION_BY_NAME.has("mcp.eam.stop_line")).toBe(true);
+    expect(ACTION_BY_NAME.has("mcp.qms.scrap_batch")).toBe(true);
+  });
+
+  it("MES 排产/换模/产能重分配 ≥ 3 个 write 工具", () => {
+    const mes = ACTION_TOOLS.filter(
+      (t) => t.name.startsWith("mcp.mes.") && t.risk === "write",
+    );
+    expect(mes.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("mcp.process.adjust_parameters 执行后产出回执 + 副作用覆盖", async () => {
+    actionStore.reset();
+    const result = await runAction("mcp.process.adjust_parameters", {
+      line: "L01",
+      scenarioId: "anomaly",
+      parameters: { temperature: 185, pressure: 4.2 },
+      reason: "温度压力漂移回调",
+    });
+    const rec = receiptData(result);
+    expect(rec.status).toBe("executed");
+    expect(rec.summary).toContain("185");
+    expect(rec.sideEffects?.temperature).toBe(185);
+    // 动作已记录到 store
+    expect(actionStore.hasActions()).toBe(true);
+    expect(actionStore.all().length).toBe(1);
+    // 副作用覆盖可被读取侧查询到
+    expect(actionStore.lookupOverride("anomaly", "L01", "temperature")).toBe(185);
+  });
+
+  it("mcp.mes.schedule_work_order 产出单据号 + 排产副作用", async () => {
+    actionStore.reset();
+    const result = await runAction("mcp.mes.schedule_work_order", {
+      line: "L01",
+      orderId: "PO-2026-0619-01",
+      qty: 1000,
+    });
+    const rec = receiptData(result);
+    expect(rec.ticketId).toMatch(/^WO-\d{8}-\d{3}$/);
+    expect(rec.status).toBe("scheduled");
+    expect(rec.sideEffects?.["schedule.plannedQty"]).toBe(1000);
+  });
+
+  it("mcp.eam.stop_line（destructive）执行后 schedule.attainment 归零", async () => {
+    actionStore.reset();
+    const result = await runAction("mcp.eam.stop_line", {
+      line: "L01",
+      reason: "主轴轴承断裂",
+      duration: "4h",
+    });
+    const rec = receiptData(result);
+    expect(rec.status).toBe("executed");
+    expect(rec.summary).toContain("停线");
+    expect(rec.sideEffects?.["schedule.attainment"]).toBe(0);
+    expect(rec.sideEffects?.["equipment.lineStopped"]).toBe(true);
+  });
+
+  it("actionStore.reset 后副作用清空（会话隔离）", async () => {
+    actionStore.reset();
+    await runAction("mcp.process.adjust_parameters", {
+      parameters: { temperature: 190 },
+    });
+    expect(actionStore.lookupOverride("anomaly", "L01", "temperature")).toBe(190);
+    actionStore.reset();
+    expect(actionStore.hasActions()).toBe(false);
+    expect(actionStore.lookupOverride("anomaly", "L01", "temperature")).toBeUndefined();
+  });
+
+  it("连续多动作产生有序日志（actionLog 时序正确）", async () => {
+    actionStore.reset();
+    await runAction("mcp.mes.schedule_work_order", { orderId: "o1" });
+    await runAction("mcp.qms.quarantine", { batchId: "b1", reason: "test" });
+    await runAction("mcp.eam.maintenance_order", {
+      equipmentId: "注塑机#1",
+      type: "PM",
+    });
+    const log = actionStore.all();
+    expect(log.length).toBe(3);
+    expect(log[0]?.tool).toBe("mcp.mes.schedule_work_order");
+    expect(log[1]?.tool).toBe("mcp.qms.quarantine");
+    expect(log[2]?.tool).toBe("mcp.eam.maintenance_order");
+    // 单据号递增
+    expect(log[0]?.receipt.ticketId).toMatch(/-001$/);
+    expect(log[2]?.receipt.ticketId).toMatch(/-003$/);
+  });
+
+  it("action→read 因果链：调参后 process.parameters 反映新值", async () => {
+    actionStore.reset();
+    // 取证：anomaly 场景温度漂移（197℃，超 spec）
+    const beforeTool = BY_NAME.get("process.parameters")!;
+    const beforeGen = beforeTool.execute({ scenarioId: "anomaly", line: "L01" }, mockCtx);
+    let beforeFinal: ToolResult | undefined;
+    while (true) {
+      const r = await beforeGen.next();
+      if (r.done) {
+        beforeFinal = r.value;
+        break;
+      }
+    }
+    const beforeTemp = ((beforeFinal!.output as { data: { parameters: Record<string, number> } }).data.parameters).温度;
+    expect(beforeTemp).toBeGreaterThan(190); // 漂移（anomaly L01 温度 197℃）
+
+    // 动作：回调温度到 185（参数键用中文与 seed 对齐）
+    await runAction("mcp.process.adjust_parameters", {
+      line: "L01",
+      scenarioId: "anomaly",
+      parameters: { 温度: 185 },
+      reason: "温度漂移回调至标准",
+    });
+
+    // 复检：process.parameters 现在应反映 185
+    const afterGen = beforeTool.execute({ scenarioId: "anomaly", line: "L01" }, mockCtx);
+    let afterFinal: ToolResult | undefined;
+    while (true) {
+      const r = await afterGen.next();
+      if (r.done) {
+        afterFinal = r.value;
+        break;
+      }
+    }
+    const afterTemp = ((afterFinal!.output as { data: { parameters: Record<string, number> } }).data.parameters).温度;
+    expect(afterTemp).toBe(185); // 已被动作副作用覆盖
+  });
+});

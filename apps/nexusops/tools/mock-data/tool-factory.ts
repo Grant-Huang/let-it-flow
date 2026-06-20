@@ -17,6 +17,7 @@ import {
   ctxFromArgs,
   mockEvidence,
 } from "./scenarios.js";
+import { actionStore, type ActionReceipt } from "./action-store.js";
 
 /** 工具构造参数。 */
 export interface DomainToolSpec<TData> {
@@ -133,6 +134,154 @@ export function createQueryTool<TData>(spec: DomainToolSpec<TData>): FlowConnect
       return {
         output: envelope,
         summary: `${spec.name} ${ctx.line ?? "L01"}(${ctx.scenarioId})`,
+      };
+    },
+  };
+
+  return connector;
+}
+
+/**
+ * 动作工具构造参数。
+ *
+ * 与 DomainToolSpec 的区别：
+ *  - name 必须是 mcp.<serverId>.<tool> 形态（governance 规则按此前缀匹配）
+ *  - risk 必填（write 或 destructive），决定是否走 HITL 确认门
+ *  - execute 返回 ActionReceipt（含单据号 + 副作用覆盖），而非纯数据
+ *  - 系统来源是外部业务系统（MES/ERP/QMS），freshness 缺省 realtime
+ */
+export interface ActionToolSpec {
+  /** 工具全名（如 mcp.mes.schedule_work_order）。 */
+  name: string;
+  /** 描述（喂给 LLM：何时用、副作用、是否需确认）。 */
+  description: string;
+  /** 触发场景。 */
+  triggers: string[];
+  /** 不适用场景。 */
+  notFor: string[];
+  /** 输入 schema（除 scenarioId/line 外的字段）。 */
+  inputSchema: Record<string, unknown>;
+  /** 风险评级（write/destructive，必填）。 */
+  risk: "write" | "destructive";
+  /** 执行逻辑：从参数产出执行回执（含单据号 + 副作用）。 */
+  run: (args: Record<string, unknown>, ctx: ReturnType<typeof ctxFromArgs>) => ActionReceipt;
+  /** 业务系统来源（MES/ERP/QMS/EHS）。 */
+  system: string;
+  /** provenance 描述。 */
+  provenance: (args: Record<string, unknown>) => string;
+  /** 单据号前缀（mock 生成 ticketId 用，如 WO/MO/QH/PM）。 */
+  ticketPrefix: string;
+  /** 数据时效性（缺省 realtime）。 */
+  freshness?: EvidenceEnvelope["freshness"];
+}
+
+/**
+ * 构造一个 NexusOps 动作工具（write/destructive，走 HITL，返回执行回执信封）。
+ *
+ * 与 createQueryTool 的关键差异：
+ *  - risk 显式 write/destructive → tool-adapter 自动触发 requireConfirmation
+ *  - 执行后记录到 actionStore，副作用覆盖可被后续读取工具观察到
+ *  - 输出是 ActionReceipt（业务回执），confidence=inferred（动作结果非实测）
+ */
+export function createActionTool(spec: ActionToolSpec): FlowConnector {
+  const connector: FlowConnector = {
+    name: spec.name,
+    tier: "custom",
+    description: spec.description,
+    inputSchema: {
+      type: "object",
+      properties: {
+        scenarioId: {
+          type: "string",
+          enum: ["normal", "anomaly", "crisis"],
+          description: "场景 id（缺省 anomaly）",
+        },
+        line: {
+          type: "string",
+          enum: ["L01", "L02", "L03"],
+          description: "产线 id（缺省 L01）",
+        },
+        ...(spec.inputSchema.properties as Record<string, unknown>),
+      },
+      required: spec.inputSchema.required ?? [],
+    },
+    whenToUse: { triggers: spec.triggers, notFor: spec.notFor },
+    outputSchema: {
+      type: "object",
+      properties: {
+        data: { type: "object", description: "执行回执（ticketId/status/summary/sideEffects）" },
+        freshness: { type: "string" },
+        capturedAt: { type: "string" },
+        confidence: { type: "string" },
+        source: { type: "object" },
+      },
+    },
+    outputExample: {
+      data: {
+        ticketId: `${spec.ticketPrefix}-YYYYMMDD-NNN`,
+        status: "executed",
+        summary: "操作已执行",
+      },
+      freshness: spec.freshness ?? "realtime",
+      capturedAt: new Date().toISOString(),
+      confidence: "inferred",
+      source: { system: spec.system, provenance: spec.name },
+    },
+    risk: spec.risk,
+
+    async *execute(
+      args: Record<string, unknown>,
+    ): AsyncGenerator<ToolEvent, ToolResult> {
+      const callId = `c_${randomUUID().slice(0, 8)}`;
+      const startedAt = Date.now();
+      const ctx = ctxFromArgs(args);
+
+      yield {
+        type: "tool_call",
+        channel: "status",
+        payload: toolCallPayload({
+          id: callId,
+          name: spec.name,
+          args,
+          risk: spec.risk,
+          groupId: spec.name.split(".").slice(0, 2).join("."),
+        }),
+      };
+
+      // 注入单据号（让 run 逻辑可用），执行动作
+      const receipt = spec.run(args, ctx);
+      if (!receipt.ticketId) receipt.ticketId = actionStore.nextTicket(spec.ticketPrefix);
+
+      // 记录到 store（副作用覆盖在此应用；用 ctx 解析后的 scenarioId/line 保持键一致）
+      actionStore.record({
+        tool: spec.name,
+        args: { ...args, scenarioId: ctx.scenarioId, line: ctx.line ?? "L01" },
+        executedAt: new Date().toISOString(),
+        receipt,
+        confirmed: true, // 能走到这里说明 HITL 已放行（或 safe 直接执行）
+      });
+
+      const envelope = mockEvidence(receipt, {
+        system: spec.system,
+        provenance: spec.provenance(args),
+        freshness: spec.freshness ?? "realtime",
+        confidence: "inferred",
+        caveat: "mock 执行回执（非真实业务系统）",
+      });
+
+      yield {
+        type: "tool_result",
+        channel: "status",
+        payload: toolResultPayload({
+          tool_call_id: callId,
+          output: JSON.stringify(envelope),
+          duration_ms: Date.now() - startedAt,
+        }),
+      };
+
+      return {
+        output: envelope,
+        summary: `${spec.name} → ${receipt.ticketId}(${receipt.status})`,
       };
     },
   };

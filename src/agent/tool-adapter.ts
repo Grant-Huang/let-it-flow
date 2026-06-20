@@ -34,7 +34,23 @@ export interface ToolAdapterDeps {
    * 工具执行前调用；返回 allow=false 则拒绝执行（不发请求）。
    * 注意：与 HITL 不同，governance 是确定性阻断（不询问用户）。
    */
-  governancePreToolUse?: (toolName: string, args: unknown) => { allow: true } | { allow: false; reason: string };
+  governancePreToolUse?: (
+    toolName: string,
+    args: unknown,
+    risk: "safe" | "write" | "destructive",
+  ) => { allow: true } | { allow: false; reason: string };
+
+  /**
+   * Governance postToolUse 钩子（G 层过程侧一致性校验）。
+   * 工具执行后、结果返回 LLM 前调用；可 warn（注入 _warnings）或 block（替换结果）。
+   */
+  governancePostToolUse?: (
+    toolName: string,
+    args: unknown,
+    result: unknown,
+  ) =>
+    | { pass: true }
+    | { pass: false; reason: string; severity?: "warn" | "block" };
 }
 
 /**
@@ -72,7 +88,7 @@ export function adaptTool(
 
       // G 层 governance 钩子：确定性阻断（先于 HITL，不询问用户）
       if (deps.governancePreToolUse) {
-        const decision = deps.governancePreToolUse(connector.name, args);
+        const decision = deps.governancePreToolUse(connector.name, args, risk);
         if (!decision.allow) {
           const output = { skipped: true, reason: decision.reason, governance_blocked: true };
           await safeEmit(deps.emit, {
@@ -166,7 +182,32 @@ export function adaptTool(
           await safeEmit(deps.emit, r.value as unknown as { type: string; channel?: string; payload: Record<string, unknown> });
         }
 
-        const output = final?.output;
+        const rawOutput = final?.output;
+
+        // G 层 postToolUse 钩子：过程侧一致性校验（warn 注入 _warnings / block 替换结果）
+        let output: unknown = rawOutput;
+        if (deps.governancePostToolUse) {
+          const verdict = deps.governancePostToolUse(connector.name, args, rawOutput);
+          if (!verdict.pass) {
+            const severity = verdict.severity ?? "warn";
+            if (severity === "block") {
+              // 替换结果：让 LLM 看到"这个证据不可用，需重取"
+              output = { blocked: true, reason: verdict.reason };
+            } else {
+              // warn：保留原结果，注入 _warnings（LLM 可见，据此交叉验证）
+              if (output && typeof output === "object") {
+                output = {
+                  ...(output as Record<string, unknown>),
+                  _warnings: [
+                    ...((output as Record<string, unknown>)._warnings as string[] ?? []),
+                    verdict.reason,
+                  ],
+                };
+              }
+            }
+          }
+        }
+
         await safeEmit(deps.emit, {
           type: "tool_result",
           channel: "status",

@@ -195,6 +195,26 @@ interface EvidenceEnvelope<T> {
 
 `createSkill({ name, steps })` 把多步 FlowConnector 串成一个 SkillConnector，execute 时顺序执行所有 step，把最后一步的 EvidenceEnvelope 提升为 skill 输出（注入 `_skill` 元数据）。
 
+### 15.6.1 SkillConnector 成熟度（status）
+
+SkillConnector 带 `status` 字段标识成熟度：
+
+- `active`（缺省）：正式 skill，注册进 toolTiers，主循环直接采用结果
+- `draft`：试运行 skill，以影子模式运行（输出标记 `_shadow`，不直接采用，与主循环结果对比）
+
+draft 影子模式的意义：把"自动识别准不准"降级为"试错代价够不够低"。识别错也不会造成伤害，顶多浪费几次影子计算。连续 N 次成功（无反信号）才转正（由 SkillRegistry 计数升级，见 §17）。
+
+### 15.6.2 自动沉淀（trace 挖矿 + draft 转正）
+
+skill 沉淀从"纯手写"升级为混合机制（详见 [17-skill-sedimentation.md](17-skill-sedimentation.md)）：
+
+- 用户主动触发走快通道
+- 自动挖矿（`src/agent/skill-miner.ts`）走慢通道：候选 → 确认 → draft 影子 → 转正
+
+挖矿不训练分类器，用"三硬信号 AND + 反信号一票否决 + 跨会话去重降权"：
+- 三硬信号：簇内 ≥3 次 + 成本占比 >60% + 成功率 ≥80%
+- 反信号一票否决：含 inferred 硬结论 / HITL 决策 / governance 阻断 / skill 部分失败
+
 ## 15.7 O 层：可观测
 
 - `StepTrace`（`src/agent/types.ts`）：每步的 thought/reasoning/toolCalls/usage/durationMs
@@ -221,15 +241,29 @@ interface EvidenceEnvelope<T> {
 
 `GovernanceChain`（`src/agent/governance.ts`）维护规则列表，每个工具执行前过一遍链（`preToolUse`），任一阻断即拒绝（不发请求）。
 
+`PostToolUseChain`（对称 `GovernanceChain`）维护过程侧一致性校验规则，每个工具执行后、结果返回 LLM 前过一遍链（`postToolUse`）。与 preToolUse 的区别：preToolUse 拿不到结果只能按入参阻断；postToolUse 能看到 EvidenceEnvelope，检测证据冲突、置信度兜底等，可 warn（注入 `_warnings`）或 block（替换结果为 `{ blocked: true, reason }`）。
+
 与 HITL 的区别：
 
-| | Governance | HITL |
-|---|---|---|
-| 性质 | 确定性阻断 | 询问用户 |
-| 决策方 | 代码规则 | 人 |
-| 适用 | 违规即禁（批量改排产） | 高风险需授权（停线） |
+| | Governance preToolUse | Governance postToolUse | HITL |
+|---|---|---|---|
+| 性质 | 确定性阻断（前） | 确定性校验（后） | 询问用户 |
+| 决策方 | 代码规则 | 代码规则 | 人 |
+| 输入 | 入参 + risk | 入参 + 结果 | 入参 + risk |
+| 适用 | 违规即禁（批量改排产） | 证据冲突/inferred 兜底 | 高风险需授权（停线） |
 
-应用挂规则（如 NexusOps 的 `guard_bulk_schedule_change`）：单次改 >3 工单直接阻断，不询问。
+应用挂规则（如 NexusOps 的 `guard_bulk_schedule_change` + `warn_inferred_repeat` + `warn_low_evidence_strength`）：前者单次改 >3 工单直接阻断；后者检测 inferred 证据被反复引用、低强度证据出现，注入 warn 提示 LLM 降权。
+
+### 15.9.1 finalize 后 review pass
+
+除确定性钩子外，可选挂一次 finalize 后的 LLM 事后审计（`src/agent/review-pass.ts`）：
+
+- 把 stepTrace 压成精简文本（thought + toolName + 证据徽章），喂给便宜模型（callSite `nexus_review`）
+- 产出结构化报告：`{ overClaims, unsupportedConclusions, evidenceGaps, confidence }`
+- 不阻断主结果（只挂可信度报告），失败降级为 skipped
+- 开关 `NEXUS_REVIEW_PASS=1`（默认关）
+
+这是把"证据-结论"链路的校验从主循环里剥离，避免主循环上下文爆炸。
 
 ## 15.10 ETCLOVG 检查清单
 
@@ -238,7 +272,7 @@ interface EvidenceEnvelope<T> {
 - [ ] **E**：选范式（DAG 还是 ReAct）；若 ReAct，注入 customRunner
 - [ ] **T**：domain.* 工具集，每个返回 EvidenceEnvelope，描述含 triggers/notFor
 - [ ] **C**：KB provider 配置（vault 路径 / MCP server）；core.knowledge_base 自动注册
-- [ ] **L**：高频诊断流程沉淀为 skill.*
+- [ ] **L**：高频诊断流程沉淀为 skill.*；启用 trace 挖矿（SkillRegistry）+ draft 影子转正
 - [ ] **O**：StepTrace 自动产出，无需应用干预
-- [ ] **V**：声明业务前置条件（哪些结论需哪些取证）
-- [ ] **G**：声明业务阻断规则（哪些操作需确定性禁或 HITL）
+- [ ] **V**：声明业务前置条件（on_finalize 兜底 + every_step 实时拦截 + prepareStep 裁工具）
+- [ ] **G**：声明业务阻断规则（preToolUse 违规即禁 + postToolUse 一致性校验 + 可选 review pass）

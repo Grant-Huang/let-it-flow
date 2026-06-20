@@ -28,6 +28,7 @@ const CALL_SITE_ENV: Record<CallSite, string> = {
   image_prompts: "LIF_IMAGE_PROMPTS_MODEL",
   nexus_agent: "LIF_NEXUS_AGENT_MODEL",
   nexus_advise: "LIF_NEXUS_ADVISE_MODEL",
+  nexus_review: "LIF_NEXUS_REVIEW_MODEL",
   podcast_skill_agent: "LIF_PODCAST_SKILL_AGENT_MODEL",
 };
 
@@ -41,6 +42,7 @@ const DEFAULT_BINDINGS: Record<CallSite, string> = {
   image_prompts: "default-image-prompts",
   nexus_agent: "default-nexus-agent",
   nexus_advise: "default-nexus-advise",
+  nexus_review: "default-nexus-review",
   podcast_skill_agent: "default-podcast-skill-agent",
 };
 

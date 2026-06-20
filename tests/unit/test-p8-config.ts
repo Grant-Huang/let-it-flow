@@ -145,7 +145,7 @@ describe("P8.1 ModelRegistry", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("P8.1 CallSiteBinding", () => {
-  it("CALL_SITES 包含全部调用点（P8 基础 6 + S3 nexus 扩展 2 + podcast-skill 扩展 1）", () => {
+  it("CALL_SITES 包含全部调用点（P8 基础 6 + nexus 扩展 3 + podcast-skill 扩展 1）", () => {
     expect(CALL_SITES).toEqual([
       "planner",
       "rewrite",
@@ -156,6 +156,8 @@ describe("P8.1 CallSiteBinding", () => {
       // S3 平台扩展：ReAct harness / NexusOps 应用调用点
       "nexus_agent",
       "nexus_advise",
+      // C2 扩展：finalize 后可信度审计（便宜模型，事后 review pass）
+      "nexus_review",
       // podcast-skill 应用调用点
       "podcast_skill_agent",
     ]);

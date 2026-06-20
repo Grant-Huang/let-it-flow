@@ -81,6 +81,7 @@ export async function runReactHarness(
       requireConfirmation: config.requireConfirmation,
       emit,
       governancePreToolUse: config.governanceHooks?.preToolUse,
+      governancePostToolUse: config.governanceHooks?.postToolUse,
     },
     { taskId: "react", runId: "react", nodeId: "react" },
   );

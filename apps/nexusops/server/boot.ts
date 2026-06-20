@@ -30,11 +30,19 @@ import { loadConfig } from "../../../src/llm/config-loader.js";
 import { ensureSeedConfig } from "../../../src/llm/seed.js";
 import { globalEventBus } from "../../../src/core/event-bus.js";
 import { runReactHarness } from "../../../src/agent/react-harness.js";
+import { runReviewPass } from "../../../src/agent/review-pass.js";
 import type { HarnessConfig, EmitFn } from "../../../src/agent/types.js";
+import { governanceToHooks } from "../../../src/agent/governance.js";
+import { SkillRegistry } from "../../../src/agent/skill-registry.js";
+import { promotableCandidates } from "../../../src/agent/skill-miner.js";
 import { buildNexusTools } from "../tools/index.js";
+import { registerMcpActionTools } from "../tools/domains/mcp-actions.js";
+import { actionStore } from "../tools/mock-data/action-store.js";
 import { buildNexusSkills } from "../skills/index.js";
 import { buildNexusPreconditions, nexusPreconditionList } from "./preconditions.js";
 import { buildNexusGovernance } from "./governance.js";
+import { buildNexusPrepareStep } from "./prepare-step.js";
+import { buildNexusPostToolUseChain } from "./post-rules.js";
 import type { TaskRuntime, TaskRunnerHooks } from "../../../src/tasks/registry.js";
 
 /** 解析 MCP server 配置（NEXUS_MCP_SERVERS env，JSON 数组）。 */
@@ -97,6 +105,8 @@ export async function bootNexusOps(opts: NexusBootOptions = {}): Promise<NexusRu
 
   // 2. ToolRegistry：core 内置 + NexusOps domain + skill + kb + mcp
   const toolRegistry = opts.toolRegistry ?? createDefaultToolRegistry();
+  // skill 沉淀 registry（跨会话存候选/draft/active，本地 JSON 持久化；在 skill 注册前创建）
+  const skillRegistry = new SkillRegistry();
   // core.* 内置工具（web_search/web_fetch/llm_node/deliver）
   registerBuiltinTools(toolRegistry, {
     llm,
@@ -110,8 +120,20 @@ export async function bootNexusOps(opts: NexusBootOptions = {}): Promise<NexusRu
     if (!toolRegistry.has(connector.name)) toolRegistry.register(connector);
   }
 
-  // NexusOps skill.* 沉淀流程（L 层 —— 已验证轨迹工具化）
-  for (const skill of buildNexusSkills()) {
+  // NexusOps mock MCP 动作工具（write/destructive，走 HITL 确认门）
+  // 开关 NEXUS_MOCK_ACTIONS（缺省开启，测试可关闭）。命名遵循 mcp.<sys>.<tool>
+  // 让 governance 规则（按 mcp.mes.*/mcp.qms.* 前缀）与 nexus_advise 的 actionTool 直接生效。
+  const enableMockActions = process.env.NEXUS_MOCK_ACTIONS !== "0";
+  if (enableMockActions) {
+    actionStore.reset();
+    for (const connector of registerMcpActionTools()) {
+      if (!toolRegistry.has(connector.name)) toolRegistry.register(connector);
+    }
+    console.log(`[nexusops] mock MCP 动作工具已注册（${registerMcpActionTools().length} 个）`);
+  }
+
+  // NexusOps skill.* 沉淀流程（L 层 —— 手写 skill + registry active skill）
+  for (const skill of buildNexusSkills(skillRegistry)) {
     if (!toolRegistry.has(skill.name)) toolRegistry.register(skill);
   }
 
@@ -148,17 +170,24 @@ export async function bootNexusOps(opts: NexusBootOptions = {}): Promise<NexusRu
     toolRegistry.register(createKnowledgeBaseTool(knowledgeProviders));
   }
 
-  // 5. V + G：业务前置条件 + 治理规则
+  // 5. V + G：业务前置条件 + 治理规则（pre 链全局复用，post 链每 run 新建因含会话状态）
   const preconditionReg = buildNexusPreconditions();
   const governanceChain = buildNexusGovernance();
   const preconditions = nexusPreconditionList(preconditionReg);
-  const governanceHooks = governanceChain.toHooks();
 
   // 6. customRunner：把 ReAct Harness 接到内核 task store + HITL
   const maxSteps = Number(process.env.NEXUS_MAX_STEPS ?? "15");
   const costCapInput = process.env.NEXUS_COST_CAP_INPUT
     ? Number(process.env.NEXUS_COST_CAP_INPUT)
     : undefined;
+
+  // prepareStep 需要全部工具名列表（裁域时过滤）
+  const toolTiers: ("core" | "domain" | "custom")[] = ["core", "domain", "custom"];
+  const allToolNames = toolRegistry.listByTiers(toolTiers).map((t) => t.name);
+  const prepareStep = buildNexusPrepareStep(allToolNames);
+
+  // review pass 开关（默认关，生产可开；用便宜模型事后审计）
+  const reviewPassEnabled = process.env.NEXUS_REVIEW_PASS === "1";
 
   const customRunner: NonNullable<TaskRuntime["customRunner"]> = async (
     taskId: string,
@@ -189,11 +218,13 @@ export async function bootNexusOps(opts: NexusBootOptions = {}): Promise<NexusRu
     };
 
     const model = llm.model("nexus_agent");
+    // post 链每 run 新建（含 inferred 引用计数等会话级状态）
+    const governanceHooks = governanceToHooks(governanceChain, buildNexusPostToolUseChain());
     const harnessConfig: HarnessConfig = {
       callSite: "nexus_agent",
       model,
       registry: toolRegistry,
-      toolTiers: ["core", "domain", "custom"],
+      toolTiers,
       stopPolicy: {
         maxSteps,
         ...(costCapInput ? { costCap: { maxInputTokens: costCapInput } } : {}),
@@ -201,6 +232,7 @@ export async function bootNexusOps(opts: NexusBootOptions = {}): Promise<NexusRu
       },
       preconditions,
       governanceHooks,
+      prepareStep,
       requireConfirmation,
       emit,
       // 兼容模式（DeepSeek 等）：折叠 system 进 user，规避 developer 角色
@@ -252,6 +284,57 @@ export async function bootNexusOps(opts: NexusBootOptions = {}): Promise<NexusRu
         },
       } as never,
     );
+
+    // C 层 review pass：finalize 后用便宜模型审计"证据-结论"链路（可选，默认关）
+    if (reviewPassEnabled) {
+      try {
+        const reviewModel = llm.model("nexus_review");
+        const review = await runReviewPass(result.stepTrace, result.finalText, {
+          model: reviewModel,
+          compatMode: llm.compatModeFor ? llm.compatModeFor("nexus_review") : false,
+        });
+        hooks.emit(
+          "extension",
+          {
+            name: "review_report",
+            version: "1.0",
+            data: review,
+          } as never,
+        );
+      } catch {
+        // review 失败不阻断主结果（锦上添花）
+      }
+    }
+
+    // L 层 skill 挖矿：把本次轨迹喂给 miner，有新候选则登记 + emit 提示
+    try {
+      const newCands = promotableCandidates([result.stepTrace]);
+      if (newCands.length > 0) {
+        const updated = skillRegistry.registerCandidates(newCands);
+        const promotable = skillRegistry.promotableCandidates();
+        if (promotable.length > 0) {
+          hooks.emit(
+            "extension",
+            {
+              name: "skill_candidates",
+              version: "1.0",
+              data: {
+                candidates: promotable.slice(0, 3).map((c) => ({
+                  signature: c.signature,
+                  occurrences: c.occurrences,
+                  sampleSequence: c.sampleSequence,
+                })),
+                hint: "检测到可复用模式，是否沉淀为 skill？",
+              },
+            } as never,
+          );
+        }
+        void updated;
+      }
+    } catch {
+      // 挖矿失败不阻断主结果
+    }
+
     hooks.emit("done", {} as never);
     hooks.setStatus("done");
   };
@@ -284,4 +367,11 @@ const NEXUS_SYSTEM_PROMPT = `
 ## 建议 quality
 - impact/executionScore/confidence 都在 0-1 之间，给真实估计而非全部 0.9。
 - 行动按钮：仅当确有对应 MCP 动作工具且参数明确时附 actionTool+actionArgs；否则留空（宁可不给按钮也不勉强）。
+- 可用的 MCP 动作工具（mcp.<系统>.<动作>，附 actionTool 时用全名）：
+  - mcp.mes.schedule_work_order（重排工单）、mcp.mes.changeover（换模调度）、mcp.mes.reallocate_capacity（产能重分配）
+  - mcp.erp.purchase_request（采购申请）、mcp.erp.material_issue（领料出库）
+  - mcp.qms.quarantine（质量隔离）、mcp.qms.rework_order（返工单）、mcp.qms.scrap_batch（批量报废，destructive 慎用）
+  - mcp.eam.maintenance_order（维护工单）、mcp.eam.spare_part_order（备件订购）、mcp.eam.stop_line（停线，destructive 慎用）
+  - mcp.process.adjust_parameters（工艺参数回调，参数漂移首选）
+- destructive 动作（停线/批量报废）仅在确有安全/不可挽回风险时建议，且必须附具体 reason；正常工况绝不建议 destructive 动作。
 `.trim();

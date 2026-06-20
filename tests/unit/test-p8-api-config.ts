@@ -192,17 +192,19 @@ describe("P8.4 /api/config/models CRUD", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("P8.4 /api/config/bindings", () => {
-  it("GET 返回 6 个调用点的绑定（含默认）", async () => {
+  it("GET 返回全部调用点的绑定（含默认）", async () => {
     const bus = new EventBus();
     const app = createConfigBindingsApp(tmpRoot, bus);
     const res = await app.request("/");
     const body = await res.json() as ApiResponse<Array<{ callSite: string }>>;
     expect(body.status).toBe("success");
     expect(Array.isArray(body.data)).toBe(true);
-    expect(body.data.length).toBe(9); // P8 基础 6 + S3 nexus_agent/nexus_advise + podcast_skill_agent
+    expect(body.data.length).toBe(10); // P8 基础 6 + nexus_agent/nexus_advise + nexus_review + podcast_skill_agent
     const sites = body.data.map((b) => b.callSite);
     expect(sites).toContain("planner");
     expect(sites).toContain("rewrite");
+    expect(sites).toContain("nexus_review");
+    expect(sites).toContain("podcast_skill_agent");
   });
 
   it("PUT 更新某调用点的绑定", async () => {

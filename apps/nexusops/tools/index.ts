@@ -12,6 +12,7 @@ import type { ToolEvent } from "../../../src/core/stream-events.js";
 import { toolCallPayload, toolResultPayload } from "../../../src/core/stream-events.js";
 import { wrapEvidence } from "../../../src/core/evidence-envelope.js";
 import { randomUUID } from "node:crypto";
+import { validateAdvise } from "./advise-validator.js";
 import { registerOeeTools } from "./domains/oee.js";
 import { registerEquipmentTools } from "./domains/equipment.js";
 import { registerQualityTools } from "./domains/quality.js";
@@ -136,7 +137,29 @@ function createAdviseTool(): FlowConnector {
         payload: toolCallPayload({ id: callId, name: "nexus_advise", args: params, risk: "safe", groupId: "nexus" }),
       };
       const recs = (params.recommendations as unknown[]) ?? [];
-      // 把建议包成 EvidenceEnvelope（advice 类证据 confidence=inferred）
+
+      // B3：输出结构自检（确定性约束）。不达标则返回 invalid，LLM 被迫修正
+      const validation = validateAdvise(recs);
+      if (!validation.valid) {
+        const invalidOutput = {
+          invalid: true,
+          reasons: validation.reasons,
+          hint: "请按 schema 修正上述问题后重新调用 nexus_advise（impact/executionScore/confidence 必须在 [0,1]，title/rationale 必填非空）",
+        };
+        yield {
+          type: "tool_result",
+          channel: "status",
+          payload: toolResultPayload({ tool_call_id: callId, output: JSON.stringify(invalidOutput), duration_ms: Date.now() - startedAt }),
+        };
+        return { output: invalidOutput, summary: `建议结构校验未通过（${validation.reasons.length} 项问题）` };
+      }
+
+      // 校验通过：把建议包成 EvidenceEnvelope（advice 类证据 confidence=inferred）
+      // evidenceRefs 缺失的 warn 并入 caveat（LLM 下次产出时可见）
+      const caveatParts = ["建议由 LLM 基于证据综合生成，行动前需人工复核"];
+      if (validation.evidenceRefWarnings.length > 0) {
+        caveatParts.push(`证据引用提醒：${validation.evidenceRefWarnings.join("；")}`);
+      }
       const envelope = wrapEvidence(
         { recommendations: recs, count: recs.length },
         {
@@ -144,7 +167,7 @@ function createAdviseTool(): FlowConnector {
           confidence: "inferred",
           system: "llm",
           provenance: "nexus_advise",
-          caveat: "建议由 LLM 基于证据综合生成，行动前需人工复核",
+          caveat: caveatParts.join(" | "),
         },
       );
       yield {

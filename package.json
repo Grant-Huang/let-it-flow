@@ -16,6 +16,9 @@
     "dev:podcast-skill": "tsx watch apps/podcast-skill/server/index.ts",
     "dev:nexus:web": "pnpm --filter @let-it-flow/nexusops-web dev",
     "lint": "eslint .",
+    "full-test": "tsx scripts/full-test.ts",
+    "full-test:online": "tsx scripts/full-test.ts --online",
+    "scenarios": "tsx tests/scenarios/run.ts",
     "smoke": "tsx -e \"import('./src/index.ts').then(m => console.log('import ok', typeof m.LetItFlow))\""
   },
   "dependencies": {

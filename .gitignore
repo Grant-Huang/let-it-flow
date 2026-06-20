@@ -40,3 +40,6 @@ reference/
 # 测试覆盖率
 coverage/
 .vitest/
+
+# 全量测试报告（本地生成的运行时产物）
+tests/reports/

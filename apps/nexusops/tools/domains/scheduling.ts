@@ -5,7 +5,7 @@
  * 数据源：MES（执行）+ ERP（订单）。
  */
 import { createQueryTool } from "../mock-data/tool-factory.js";
-import { getSchedule, type ScenarioId } from "../mock-data/scenarios.js";
+import { getSchedule, lookupActionOverride, type ScenarioId } from "../mock-data/scenarios.js";
 
 export function registerScheduleTools(): import("../../../../src/tools/base.js").FlowConnector[] {
   return [
@@ -18,11 +18,12 @@ export function registerScheduleTools(): import("../../../../src/tools/base.js")
       inputSchema: { type: "object", properties: {} },
       getData: (ctx) => {
         const s = getSchedule(ctx);
+        const plannedOverride = lookupActionOverride(ctx, "schedule.plannedQty");
         return {
           orderId: "PO-2026-0619-01",
           product: "产品 A",
-          plannedQty: 1200,
-          completedQty: Math.round(1200 * s.attainment),
+          plannedQty: (plannedOverride as number | undefined) ?? 1200,
+          completedQty: Math.round(((plannedOverride as number | undefined) ?? 1200) * s.attainment),
           progressPct: s.attainment * 100,
         };
       },
@@ -39,11 +40,14 @@ export function registerScheduleTools(): import("../../../../src/tools/base.js")
       inputSchema: { type: "object", properties: {} },
       getData: (ctx) => {
         const s = getSchedule(ctx);
+        const attainOverride = lookupActionOverride(ctx, "schedule.attainment") as number | undefined;
+        const attainment = attainOverride ?? s.attainment;
         return {
-          attainment: s.attainment,
+          attainment,
           target: 0.95,
-          gap: s.attainment - 0.95,
-          status: s.attainment >= 0.95 ? "on_track" : s.attainment >= 0.8 ? "at_risk" : "behind",
+          gap: attainment - 0.95,
+          status: attainment >= 0.95 ? "on_track" : attainment >= 0.8 ? "at_risk" : "behind",
+          ...(attainOverride !== undefined ? { note: "已反映近期排产调整动作的副作用" } : {}),
         };
       },
       system: "MES",

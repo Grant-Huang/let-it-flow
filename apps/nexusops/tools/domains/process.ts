@@ -5,7 +5,7 @@
  * 数据源：PLM（工艺标准）+ MES（实测）。
  */
 import { createQueryTool } from "../mock-data/tool-factory.js";
-import { getProcess, type ScenarioId } from "../mock-data/scenarios.js";
+import { getProcess, lookupActionOverride, type ScenarioId } from "../mock-data/scenarios.js";
 
 export function registerProcessTools(): import("../../../../src/tools/base.js").FlowConnector[] {
   return [
@@ -19,7 +19,10 @@ export function registerProcessTools(): import("../../../../src/tools/base.js").
       getData: (ctx) => {
         const p = getProcess(ctx);
         const actuals: Record<string, number> = {};
-        for (const [k, v] of Object.entries(p.parameters)) actuals[k] = v.actual;
+        for (const [k, v] of Object.entries(p.parameters)) {
+          const override = lookupActionOverride(ctx, k) as number | undefined;
+          actuals[k] = override ?? v.actual;
+        }
         return { parameters: actuals, inSpecCount: Object.values(p.parameters).filter((v) => v.inSpec).length };
       },
       system: "MES",
