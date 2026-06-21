@@ -4,7 +4,7 @@
  * 验证 validateAdvise 的字段完整性 / 数值范围 / 证据引用 warn 三类检查。
  */
 import { describe, it, expect } from "vitest";
-import { validateAdvise } from "../../apps/nexusops/tools/advise-validator.js";
+import { validateAdvise } from "../../../apps/nexusops/tools/advise-validator.js";
 
 describe("validateAdvise 字段完整性", () => {
   it("空建议列表 → invalid", () => {

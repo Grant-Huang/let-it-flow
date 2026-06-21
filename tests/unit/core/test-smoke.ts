@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { LetItFlow } from "../../src/index.js";
+import { LetItFlow } from "../../../src/index.js";
 import {
   makeEvent,
   toSSE,
@@ -13,8 +13,8 @@ import {
   workflowNodePayload,
   errorPayload,
   confirmGatePayload,
-} from "../../src/core/stream-events.js";
-import type { StreamEvent } from "../../src/core/stream-events.js";
+} from "../../../src/core/stream-events.js";
+import type { StreamEvent } from "../../../src/core/stream-events.js";
 import { applyEvent, createInitialStreamState, parseSSELine } from "@meso.ai/types";
 
 describe("smoke", () => {

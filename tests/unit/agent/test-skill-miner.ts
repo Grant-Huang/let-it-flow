@@ -7,8 +7,8 @@
  *   - promotableCandidates 只返回全满足 + 未否决的候选
  */
 import { describe, it, expect } from "vitest";
-import { mineSkillCandidates, promotableCandidates } from "../../src/agent/skill-miner.js";
-import type { StepTrace } from "../../src/agent/types.js";
+import { mineSkillCandidates, promotableCandidates } from "../../../src/agent/skill-miner.js";
+import type { StepTrace } from "../../../src/agent/types.js";
 
 /** 构造一条含若干工具调用的 trace。 */
 function makeRun(toolNames: string[], opts: { success?: boolean; rejected?: boolean; inferred?: boolean; blocked?: boolean; skillErrors?: boolean } = {}): StepTrace[] {

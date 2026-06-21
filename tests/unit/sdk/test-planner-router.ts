@@ -22,12 +22,12 @@ vi.mock("ai", () => ({
 }));
 
 // 必须在 mock 声明之后导入（vi.mock 会 hoist）
-import { plan } from "../../src/planner/planner.js";
-import { createDefaultToolRegistry } from "../../src/executor/default-tools.js";
-import { registerBuiltinTools } from "../../src/tools/index.js";
-import { LlmService } from "../../src/services/llm-service.js";
-import type { ConsumerTemplate } from "../../src/planner/consumer-template.js";
-import type { WorkflowDAG } from "../../src/planner/dag-schema.js";
+import { plan } from "../../../src/planner/planner.js";
+import { createDefaultToolRegistry } from "../../../src/executor/default-tools.js";
+import { registerBuiltinTools } from "../../../src/tools/index.js";
+import { LlmService } from "../../../src/services/llm-service.js";
+import type { ConsumerTemplate } from "../../../src/planner/consumer-template.js";
+import type { WorkflowDAG } from "../../../src/planner/dag-schema.js";
 
 /**
  * 内联最小 ConsumerTemplate（替代已废弃的 podcastTemplate）。

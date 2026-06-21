@@ -17,14 +17,14 @@ import {
   patchSystemSettings,
   DEFAULT_SYSTEM_SETTINGS,
   getHeavyIoTimeoutMs,
-} from "../../src/core/system-settings.js";
+} from "../../../src/core/system-settings.js";
 import {
   loadHeavyIoSettings,
   patchHeavyIoSettings,
   DEFAULT_HEAVY_IO_SETTINGS,
-} from "../../src/core/heavy-io-settings.js";
-import { createConfigSystemApp } from "../../src/api/config-system.js";
-import { createConfigHeavyIoApp } from "../../src/api/config-heavy-io.js";
+} from "../../../src/core/heavy-io-settings.js";
+import { createConfigSystemApp } from "../../../src/api/config-system.js";
+import { createConfigHeavyIoApp } from "../../../src/api/config-heavy-io.js";
 
 interface ApiResponse<T = unknown> {
   status: "success" | "error";

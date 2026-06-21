@@ -11,10 +11,10 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { tmpdir } from "node:os";
 import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { ModelEndpoint, ModelRegistry } from "../../src/llm/model-registry.js";
-import { CALL_SITES, CallSiteBinding } from "../../src/llm/call-sites.js";
-import { loadConfig } from "../../src/llm/config-loader.js";
-import { LlmService } from "../../src/services/llm-service.js";
+import { ModelEndpoint, ModelRegistry } from "../../../src/llm/model-registry.js";
+import { CALL_SITES, CallSiteBinding } from "../../../src/llm/call-sites.js";
+import { loadConfig } from "../../../src/llm/config-loader.js";
+import { LlmService } from "../../../src/services/llm-service.js";
 
 let tmpRoot: string;
 let savedEnv: Record<string, string | undefined>;

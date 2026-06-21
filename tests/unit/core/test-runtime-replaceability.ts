@@ -1,18 +1,18 @@
 import { describe, it, expect } from "vitest";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { MockHeavyIoRuntime } from "../../src/tools/heavy-io/mock-runtime.js";
-import { createTtsTool } from "../../src/tools/heavy-io/tts.js";
-import { createImageGenTool } from "../../src/tools/heavy-io/image-gen.js";
-import { createVideoBuildTool } from "../../src/tools/heavy-io/video-build.js";
-import { createRewriteTool } from "../../src/tools/heavy-io/rewrite.js";
+import { MockHeavyIoRuntime } from "../../../src/tools/heavy-io/mock-runtime.js";
+import { createTtsTool } from "../../../src/tools/heavy-io/tts.js";
+import { createImageGenTool } from "../../../src/tools/heavy-io/image-gen.js";
+import { createVideoBuildTool } from "../../../src/tools/heavy-io/video-build.js";
+import { createRewriteTool } from "../../../src/tools/heavy-io/rewrite.js";
 import {
   createTranslateTool,
   createSubtitleTool,
   createImagePromptsTool,
-} from "../../src/tools/builtin/text-steps.js";
-import type { FlowConnector } from "../../src/tools/base.js";
-import type { ToolEvent } from "../../src/core/stream-events.js";
+} from "../../../src/tools/builtin/text-steps.js";
+import type { FlowConnector } from "../../../src/tools/base.js";
+import type { ToolEvent } from "../../../src/core/stream-events.js";
 
 /**
  * P5 重构验证：重 IO 工具依赖能力接口（TtsRuntime 等）而非具体类。

@@ -12,11 +12,11 @@ import { tmpdir } from "node:os";
 import { mkdtempSync, existsSync, readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createImagePromptsTool, createTranslateTool, createSeamRepairTool, createTerminologyTool } from "../../src/tools/builtin/text-steps.js";
-import type { ToolResult } from "../../src/tools/base.js";
-import type { ToolEvent } from "../../src/core/stream-events.js";
-import type { ImagePromptsRuntime } from "../../src/tools/heavy-io/runtime-interfaces.js";
-import type { LlmService } from "../../src/services/llm-service.js";
+import { createImagePromptsTool, createTranslateTool, createSeamRepairTool, createTerminologyTool } from "../../../src/tools/builtin/text-steps.js";
+import type { ToolResult } from "../../../src/tools/base.js";
+import type { ToolEvent } from "../../../src/core/stream-events.js";
+import type { ImagePromptsRuntime } from "../../../src/tools/heavy-io/runtime-interfaces.js";
+import type { LlmService } from "../../../src/services/llm-service.js";
 
 let tmpRoot: string;
 beforeEach(() => {
@@ -161,7 +161,7 @@ describe("P8.3 image_prompts TS 直连", () => {
 });
 
 describe("P8.3 prompt 逐字移植验证", () => {
-  const promptsDir = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "src", "tools", "heavy-io", "prompts");
+  const promptsDir = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "src", "tools", "heavy-io", "prompts");
 
   it("image-prompts.md 存在且含关键约束", () => {
     const path = join(promptsDir, "image-prompts.md");

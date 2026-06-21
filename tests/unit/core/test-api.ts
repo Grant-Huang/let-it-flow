@@ -2,9 +2,9 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { tmpdir } from "node:os";
 import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
-import { createApp } from "../../src/api/app.js";
-import { TaskRegistry } from "../../src/tasks/registry.js";
-import { serializeSSEData } from "../../src/core/stream-events.js";
+import { createApp } from "../../../src/api/app.js";
+import { TaskRegistry } from "../../../src/tasks/registry.js";
+import { serializeSSEData } from "../../../src/core/stream-events.js";
 import { parseSSELine } from "@meso.ai/types";
 
 // 用临时目录隔离

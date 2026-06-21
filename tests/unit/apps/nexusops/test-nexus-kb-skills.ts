@@ -8,11 +8,11 @@
  */
 import { describe, it, expect } from "vitest";
 import { join } from "node:path";
-import { ObsidianProvider } from "../../src/tools/knowledge/obsidian-provider.js";
-import { isEvidenceEnvelope } from "../../src/core/evidence-envelope.js";
-import { buildNexusSkills } from "../../apps/nexusops/skills/index.js";
-import type { SkillConnector } from "../../src/agent/skill-bridge.js";
-import type { FlowConnector, ToolResult } from "../../src/tools/base.js";
+import { ObsidianProvider } from "../../../../src/tools/knowledge/obsidian-provider.js";
+import { isEvidenceEnvelope } from "../../../../src/core/evidence-envelope.js";
+import { buildNexusSkills } from "../../../../apps/nexusops/skills/index.js";
+import type { SkillConnector } from "../../../../src/agent/skill-bridge.js";
+import type { FlowConnector, ToolResult } from "../../../../src/tools/base.js";
 
 const SEED_DIR = join(process.cwd(), "apps/nexusops/kb-seed");
 

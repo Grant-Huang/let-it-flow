@@ -14,20 +14,20 @@ vi.mock("ai", async (importOriginal) => {
 const { streamText: _ensureMocked } = await import("ai");
 void _ensureMocked;
 
-import { ToolRegistry } from "../../src/tools/registry.js";
+import { ToolRegistry } from "../../../src/tools/registry.js";
 import {
   createWebSearchTool,
   createTavilyProvider,
   createNativeProvider,
   type SearchProvider,
   type SearchResult,
-} from "../../src/tools/builtin/web-search.js";
-import { createWebFetchTool, extractHtml } from "../../src/tools/builtin/web-fetch.js";
-import { createLlmNodeTool } from "../../src/tools/builtin/llm-node.js";
-import { createDeliverTool } from "../../src/tools/builtin/deliver.js";
-import { LlmService } from "../../src/services/llm-service.js";
-import type { ExecutionContext, ToolResult } from "../../src/tools/base.js";
-import type { StreamEvent, ToolEvent } from "../../src/core/stream-events.js";
+} from "../../../src/tools/builtin/web-search.js";
+import { createWebFetchTool, extractHtml } from "../../../src/tools/builtin/web-fetch.js";
+import { createLlmNodeTool } from "../../../src/tools/builtin/llm-node.js";
+import { createDeliverTool } from "../../../src/tools/builtin/deliver.js";
+import { LlmService } from "../../../src/services/llm-service.js";
+import type { ExecutionContext, ToolResult } from "../../../src/tools/base.js";
+import type { StreamEvent, ToolEvent } from "../../../src/core/stream-events.js";
 
 /** 构造一个记录事件的 ExecutionContext。 */
 function makeCtx(overrides?: Partial<ExecutionContext>): {

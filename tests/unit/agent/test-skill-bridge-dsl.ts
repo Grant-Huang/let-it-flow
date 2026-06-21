@@ -8,9 +8,9 @@
  *   - ctx.emit(event)：透传事件
  */
 import { describe, it, expect } from "vitest";
-import { createSkill } from "../../src/agent/skill-bridge.js";
-import type { FlowConnector, ToolResult } from "../../src/tools/base.js";
-import type { ToolEvent } from "../../src/core/stream-events.js";
+import { createSkill } from "../../../src/agent/skill-bridge.js";
+import type { FlowConnector, ToolResult } from "../../../src/tools/base.js";
+import type { ToolEvent } from "../../../src/core/stream-events.js";
 
 /** mock ExecutionContext（dsl 执行需要 emit/requireConfirmation）。 */
 function mockCtx(extra: Partial<{

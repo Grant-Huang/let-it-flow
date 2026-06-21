@@ -12,10 +12,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { tmpdir } from "node:os";
 import { mkdtempSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { EventBus } from "../../src/core/event-bus.js";
-import { createConfigModelsApp } from "../../src/api/config-models.js";
-import { createConfigBindingsApp } from "../../src/api/config-bindings.js";
-import { LlmService } from "../../src/services/llm-service.js";
+import { EventBus } from "../../../src/core/event-bus.js";
+import { createConfigModelsApp } from "../../../src/api/config-models.js";
+import { createConfigBindingsApp } from "../../../src/api/config-bindings.js";
+import { LlmService } from "../../../src/services/llm-service.js";
 
 /** API 响应类型。 */
 interface ApiResponse<T = unknown> {

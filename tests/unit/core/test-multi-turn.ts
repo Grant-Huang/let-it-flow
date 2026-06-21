@@ -14,13 +14,13 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FileTaskStore } from "../../src/tasks/task-store.js";
-import { ConversationStore } from "../../src/tasks/conversation-store.js";
-import { TaskRegistry } from "../../src/tasks/registry.js";
-import { createApp } from "../../src/api/app.js";
-import { compressTrace } from "../../src/agent/review-pass.js";
-import type { StepTrace } from "../../src/agent/types.js";
-import type { StreamEvent } from "../../src/core/stream-events.js";
+import { FileTaskStore } from "../../../src/tasks/task-store.js";
+import { ConversationStore } from "../../../src/tasks/conversation-store.js";
+import { TaskRegistry } from "../../../src/tasks/registry.js";
+import { createApp } from "../../../src/api/app.js";
+import { compressTrace } from "../../../src/agent/review-pass.js";
+import type { StepTrace } from "../../../src/agent/types.js";
+import type { StreamEvent } from "../../../src/core/stream-events.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // helpers

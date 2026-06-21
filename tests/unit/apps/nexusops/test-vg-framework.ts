@@ -7,11 +7,11 @@
  *   - call-sites 含 nexus_agent / nexus_advise（已在 S1 加）
  */
 import { describe, it, expect } from "vitest";
-import { adaptTool } from "../../src/agent/tool-adapter.js";
-import { GovernanceChain, PreconditionRegistry, calledToolNames } from "../../src/agent/index.js";
-import type { FlowConnector, ToolResult } from "../../src/tools/base.js";
-import type { ToolEvent } from "../../src/core/stream-events.js";
-import { CALL_SITES } from "../../src/llm/call-sites.js";
+import { adaptTool } from "../../../../src/agent/tool-adapter.js";
+import { GovernanceChain, PreconditionRegistry, calledToolNames } from "../../../../src/agent/index.js";
+import type { FlowConnector, ToolResult } from "../../../../src/tools/base.js";
+import type { ToolEvent } from "../../../../src/core/stream-events.js";
+import { CALL_SITES } from "../../../../src/llm/call-sites.js";
 
 /** 一个 echo 工具。 */
 function makeEcho(name: string): FlowConnector {
@@ -100,7 +100,7 @@ describe("S3 PreconditionRegistry 业务规则场景", () => {
     // 都缺
     expect(reg.checkFinalize([]).met).toBe(false);
     // 只补 OEE
-    const half: import("../../src/agent/types.js").StepTrace[] = [{
+    const half: import("../../../../src/agent/types.js").StepTrace[] = [{
       stepNumber: 0, finishReason: "tool-calls", durationMs: 0,
       toolCalls: [{ id: "tc1", toolName: "oee.realtime", args: {}, result: {}, durationMs: 0 }],
     }];
@@ -111,7 +111,7 @@ describe("S3 PreconditionRegistry 业务规则场景", () => {
     const full = [...half, {
       stepNumber: 1, finishReason: "tool-calls", durationMs: 0,
       toolCalls: [{ id: "tc2", toolName: "equipment.downtime", args: {}, result: {}, durationMs: 0 }],
-    }] as import("../../src/agent/types.js").StepTrace[];
+    }] as import("../../../../src/agent/types.js").StepTrace[];
     expect(reg.checkFinalize(full).met).toBe(true);
   });
 

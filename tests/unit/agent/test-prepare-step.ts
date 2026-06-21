@@ -6,8 +6,8 @@
  *   2. every_step precondition 提示注入：取证不足时注入 system 提醒
  */
 import { describe, it, expect } from "vitest";
-import { buildNexusPrepareStep } from "../../apps/nexusops/server/prepare-step.js";
-import type { PrepareStepContext, StepTrace } from "../../src/agent/types.js";
+import { buildNexusPrepareStep } from "../../../apps/nexusops/server/prepare-step.js";
+import type { PrepareStepContext, StepTrace } from "../../../src/agent/types.js";
 
 /** 全部工具名（模拟 harness 暴露给 LLM 的工具集）。 */
 const ALL_TOOLS = [

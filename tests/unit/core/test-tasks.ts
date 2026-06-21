@@ -2,18 +2,18 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { tmpdir } from "node:os";
 import { mkdtempSync, appendFileSync as appendFileSyncRaw } from "node:fs";
 import { join } from "node:path";
-import { AsyncLatch } from "../../src/tasks/latch.js";
-import { StreamCoalescer } from "../../src/tasks/coalescer.js";
-import { FileTaskStore } from "../../src/tasks/task-store.js";
-import { TaskRegistry } from "../../src/tasks/registry.js";
+import { AsyncLatch } from "../../../src/tasks/latch.js";
+import { StreamCoalescer } from "../../../src/tasks/coalescer.js";
+import { FileTaskStore } from "../../../src/tasks/task-store.js";
+import { TaskRegistry } from "../../../src/tasks/registry.js";
 import {
   writeJsonAtomicSync,
   readJsonSync,
   appendJsonlLine,
   readJsonlSync,
   readJsonlSinceSync,
-} from "../../src/storage/file-store.js";
-import type { StreamEvent } from "../../src/core/stream-events.js";
+} from "../../../src/storage/file-store.js";
+import type { StreamEvent } from "../../../src/core/stream-events.js";
 
 // 用临时目录隔离测试，不污染项目 data/（config 为惰性读取，运行时切换生效）
 let tmpRoot: string;

@@ -2,18 +2,18 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { tmpdir } from "node:os";
 import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
-import { createApp } from "../../src/api/app.js";
-import { TaskRegistry, type TaskRuntime } from "../../src/tasks/registry.js";
-import { createDefaultToolRegistry } from "../../src/executor/default-tools.js";
-import { ToolRegistry } from "../../src/tools/registry.js";
-import { registerBuiltinTools } from "../../src/tools/index.js";
-import { LlmService } from "../../src/services/llm-service.js";
-import { plan, type PlannerConfig } from "../../src/planner/planner.js";
-import type { ConsumerTemplate } from "../../src/planner/consumer-template.js";
-import type { WorkflowDAG } from "../../src/planner/dag-schema.js";
-import type { FlowConnector, ToolTrigger, ToolResult } from "../../src/tools/base.js";
-import type { ToolEvent } from "../../src/core/stream-events.js";
-import type { ToolManifest } from "../../src/tools/registry.js";
+import { createApp } from "../../../src/api/app.js";
+import { TaskRegistry, type TaskRuntime } from "../../../src/tasks/registry.js";
+import { createDefaultToolRegistry } from "../../../src/executor/default-tools.js";
+import { ToolRegistry } from "../../../src/tools/registry.js";
+import { registerBuiltinTools } from "../../../src/tools/index.js";
+import { LlmService } from "../../../src/services/llm-service.js";
+import { plan, type PlannerConfig } from "../../../src/planner/planner.js";
+import type { ConsumerTemplate } from "../../../src/planner/consumer-template.js";
+import type { WorkflowDAG } from "../../../src/planner/dag-schema.js";
+import type { FlowConnector, ToolTrigger, ToolResult } from "../../../src/tools/base.js";
+import type { ToolEvent } from "../../../src/core/stream-events.js";
+import type { ToolManifest } from "../../../src/tools/registry.js";
 
 /**
  * 内联最小 ConsumerTemplate（替代已废弃的 podcastTemplate）。

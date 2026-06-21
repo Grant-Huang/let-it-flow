@@ -4,10 +4,10 @@
  * 不依赖真实 LLM/Harness，直接调 FlowConnector.execute 取输出。
  */
 import { describe, it, expect } from "vitest";
-import { buildNexusTools } from "../../apps/nexusops/tools/index.js";
-import { isEvidenceEnvelope } from "../../src/core/evidence-envelope.js";
-import type { FlowConnector, ToolResult } from "../../src/tools/base.js";
-import type { ToolEvent } from "../../src/core/stream-events.js";
+import { buildNexusTools } from "../../../../apps/nexusops/tools/index.js";
+import { isEvidenceEnvelope } from "../../../../src/core/evidence-envelope.js";
+import type { FlowConnector, ToolResult } from "../../../../src/tools/base.js";
+import type { ToolEvent } from "../../../../src/core/stream-events.js";
 
 const TOOLS = buildNexusTools();
 const BY_NAME = new Map(TOOLS.map((t) => [t.name, t]));
@@ -107,8 +107,8 @@ describe("S4 工具输出 EvidenceEnvelope", () => {
   }
 
   /** 取工具输出的 EvidenceEnvelope（已校验结构）。 */
-  function env(result: ToolResult): import("../../src/core/evidence-envelope.js").EvidenceEnvelope<Record<string, unknown>> {
-    return result.output as import("../../src/core/evidence-envelope.js").EvidenceEnvelope<Record<string, unknown>>;
+  function env(result: ToolResult): import("../../../../src/core/evidence-envelope.js").EvidenceEnvelope<Record<string, unknown>> {
+    return result.output as import("../../../../src/core/evidence-envelope.js").EvidenceEnvelope<Record<string, unknown>>;
   }
 
   /** 取工具输出的 data 负载（松类型，便于断言）。 */
@@ -240,8 +240,8 @@ describe("S4 场景数据一致性", () => {
 // mock MCP 动作工具集（mcp.* / write+destructive / HITL / 副作用）
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { registerMcpActionTools } from "../../apps/nexusops/tools/domains/mcp-actions.js";
-import { actionStore } from "../../apps/nexusops/tools/mock-data/action-store.js";
+import { registerMcpActionTools } from "../../../../apps/nexusops/tools/domains/mcp-actions.js";
+import { actionStore } from "../../../../apps/nexusops/tools/mock-data/action-store.js";
 
 const ACTION_TOOLS = registerMcpActionTools();
 const ACTION_BY_NAME = new Map(ACTION_TOOLS.map((t) => [t.name, t]));

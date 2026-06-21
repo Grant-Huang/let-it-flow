@@ -17,9 +17,9 @@ import {
   LlmCallEvent,
   CallLogWriter,
   classifyError,
-} from "../../src/llm/call-log.js";
-import { tracedGenerateText } from "../../src/llm/call-tracer.js";
-import { computeCost } from "../../src/llm/cost-compute.js";
+} from "../../../src/llm/call-log.js";
+import { tracedGenerateText } from "../../../src/llm/call-tracer.js";
+import { computeCost } from "../../../src/llm/cost-compute.js";
 
 let tmpRoot: string;
 beforeEach(() => {

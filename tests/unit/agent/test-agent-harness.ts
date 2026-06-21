@@ -12,16 +12,16 @@
  * 不依赖真实 LLM（harness 的端到端集成测试由应用层 S6/S7 覆盖）。
  */
 import { describe, it, expect } from "vitest";
-import { buildStopWhen, DEFAULT_MAX_STEPS, DEFAULT_FINALIZE_TOOL } from "../../src/agent/stop-policy.js";
-import { adaptTool, adaptToolSet, toolNameToKey, keyToToolName } from "../../src/agent/tool-adapter.js";
-import { TraceAccumulator, emitStepPhase, stepEventToTrace } from "../../src/agent/step-emitter.js";
-import { PreconditionRegistry, calledToolNames } from "../../src/agent/precondition.js";
-import { GovernanceChain, type GovernanceRule } from "../../src/agent/governance.js";
-import { createSkill, type SkillConnector } from "../../src/agent/skill-bridge.js";
-import { ToolRegistry } from "../../src/tools/registry.js";
-import type { FlowConnector, ToolResult } from "../../src/tools/base.js";
-import type { ToolEvent } from "../../src/core/stream-events.js";
-import type { StepTrace } from "../../src/agent/types.js";
+import { buildStopWhen, DEFAULT_MAX_STEPS, DEFAULT_FINALIZE_TOOL } from "../../../src/agent/stop-policy.js";
+import { adaptTool, adaptToolSet, toolNameToKey, keyToToolName } from "../../../src/agent/tool-adapter.js";
+import { TraceAccumulator, emitStepPhase, stepEventToTrace } from "../../../src/agent/step-emitter.js";
+import { PreconditionRegistry, calledToolNames } from "../../../src/agent/precondition.js";
+import { GovernanceChain, type GovernanceRule } from "../../../src/agent/governance.js";
+import { createSkill, type SkillConnector } from "../../../src/agent/skill-bridge.js";
+import { ToolRegistry } from "../../../src/tools/registry.js";
+import type { FlowConnector, ToolResult } from "../../../src/tools/base.js";
+import type { ToolEvent } from "../../../src/core/stream-events.js";
+import type { StepTrace } from "../../../src/agent/types.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // helpers：构造简单的 FlowConnector

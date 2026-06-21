@@ -36,7 +36,7 @@ import { argv, cwd, exit, env, versions, platform } from "node:process";
  * 大修后如需验证完整链路，用 --online。
  */
 const ONLINE_TESTS = [
-  "tests/unit/test-p6-sdk.ts", // 真实 LetItFlow() → LLM planner + 网络
+  "tests/unit/sdk/test-sdk-hitl.ts", // 真实 LetItFlow() → LLM planner + 网络
 ];
 
 /**

@@ -2,10 +2,10 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { tmpdir } from "node:os";
 import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
-import { LetItFlow } from "../../src/sdk/let-it-flow.js";
-import type { StreamEvent } from "../../src/core/stream-events.js";
-import type { ConsumerTemplate } from "../../src/planner/consumer-template.js";
-import type { WorkflowDAG } from "../../src/planner/dag-schema.js";
+import { LetItFlow } from "../../../src/sdk/let-it-flow.js";
+import type { StreamEvent } from "../../../src/core/stream-events.js";
+import type { ConsumerTemplate } from "../../../src/planner/consumer-template.js";
+import type { WorkflowDAG } from "../../../src/planner/dag-schema.js";
 
 /**
  * 内联最小 ConsumerTemplate（替代已废弃的 podcastTemplate）。

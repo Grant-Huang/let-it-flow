@@ -7,13 +7,13 @@
  * invalid_type/expected array/received undefined 的根因。
  */
 import { describe, it, expect } from "vitest";
-import { createWebFetchTool } from "../../src/tools/builtin/web-fetch.js";
-import { createWebSearchTool } from "../../src/tools/builtin/web-search.js";
-import { createDeliverTool } from "../../src/tools/builtin/deliver.js";
-import { createLlmNodeTool } from "../../src/tools/builtin/llm-node.js";
-import { adaptTool } from "../../src/agent/tool-adapter.js";
-import type { FlowConnector, ToolResult } from "../../src/tools/base.js";
-import type { ToolEvent } from "../../src/core/stream-events.js";
+import { createWebFetchTool } from "../../../src/tools/builtin/web-fetch.js";
+import { createWebSearchTool } from "../../../src/tools/builtin/web-search.js";
+import { createDeliverTool } from "../../../src/tools/builtin/deliver.js";
+import { createLlmNodeTool } from "../../../src/tools/builtin/llm-node.js";
+import { adaptTool } from "../../../src/agent/tool-adapter.js";
+import type { FlowConnector, ToolResult } from "../../../src/tools/base.js";
+import type { ToolEvent } from "../../../src/core/stream-events.js";
 import { z } from "zod";
 
 const mockCtx = {

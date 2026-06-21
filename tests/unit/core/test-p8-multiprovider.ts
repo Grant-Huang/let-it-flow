@@ -15,10 +15,10 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { tmpdir } from "node:os";
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { ModelRegistry } from "../../src/llm/model-registry.js";
-import { loadConfig, saveConfig } from "../../src/llm/config-loader.js";
-import { ensureSeedConfig } from "../../src/llm/seed.js";
-import { LlmService } from "../../src/services/llm-service.js";
+import { ModelRegistry } from "../../../src/llm/model-registry.js";
+import { loadConfig, saveConfig } from "../../../src/llm/config-loader.js";
+import { ensureSeedConfig } from "../../../src/llm/seed.js";
+import { LlmService } from "../../../src/services/llm-service.js";
 
 let tmpRoot: string;
 let savedEnv: Record<string, string | undefined>;

@@ -13,18 +13,18 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ToolRegistry } from "../../src/tools/registry.js";
-import { TaskRegistry } from "../../src/tasks/registry.js";
-import { buildNexusTools } from "../../apps/nexusops/tools/index.js";
-import { buildNexusSkills } from "../../apps/nexusops/skills/index.js";
-import { bootNexusOps } from "../../apps/nexusops/server/boot.js";
-import { buildNexusPreconditions } from "../../apps/nexusops/server/preconditions.js";
-import { buildNexusGovernance } from "../../apps/nexusops/server/governance.js";
-import { buildNexusPostToolUseChain } from "../../apps/nexusops/server/post-rules.js";
-import { buildNexusPrepareStep } from "../../apps/nexusops/server/prepare-step.js";
-import { SkillRegistry } from "../../src/agent/skill-registry.js";
-import { isEvidenceEnvelope } from "../../src/core/evidence-envelope.js";
-import type { LlmService } from "../../src/services/llm-service.js";
+import { ToolRegistry } from "../../../../src/tools/registry.js";
+import { TaskRegistry } from "../../../../src/tasks/registry.js";
+import { buildNexusTools } from "../../../../apps/nexusops/tools/index.js";
+import { buildNexusSkills } from "../../../../apps/nexusops/skills/index.js";
+import { bootNexusOps } from "../../../../apps/nexusops/server/boot.js";
+import { buildNexusPreconditions } from "../../../../apps/nexusops/server/preconditions.js";
+import { buildNexusGovernance } from "../../../../apps/nexusops/server/governance.js";
+import { buildNexusPostToolUseChain } from "../../../../apps/nexusops/server/post-rules.js";
+import { buildNexusPrepareStep } from "../../../../apps/nexusops/server/prepare-step.js";
+import { SkillRegistry } from "../../../../src/agent/skill-registry.js";
+import { isEvidenceEnvelope } from "../../../../src/core/evidence-envelope.js";
+import type { LlmService } from "../../../../src/services/llm-service.js";
 
 let dataDir: string;
 let vaultPath: string;
@@ -291,7 +291,7 @@ describe("S6 every_step precondition（A1）", () => {
   });
 
   it("collectEveryStepReminders 返回提示文本", async () => {
-    const { collectEveryStepReminders } = await import("../../apps/nexusops/server/preconditions.js");
+    const { collectEveryStepReminders } = await import("../../../../apps/nexusops/server/preconditions.js");
     const trace = [
       {
         stepNumber: 0,
@@ -428,7 +428,7 @@ describe("S6 postToolUse 一致性校验规则（B2）", () => {
 
 describe("S6 review pass callSite 注册（C2）", () => {
   it("nexus_review 已在 CALL_SITES 枚举", async () => {
-    const { CALL_SITES } = await import("../../src/llm/call-sites.js");
+    const { CALL_SITES } = await import("../../../../src/llm/call-sites.js");
     expect(CALL_SITES).toContain("nexus_review");
   });
 });

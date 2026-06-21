@@ -13,12 +13,12 @@ import {
   buildConfirmPayload,
   toolSequenceToDynamicFn,
   acceptToDraftSkill,
-} from "../../src/agent/skill-confirm.js";
-import { createSkill } from "../../src/agent/skill-bridge.js";
-import type { CandidateRecord } from "../../src/agent/skill-registry.js";
-import type { StepTrace } from "../../src/agent/types.js";
-import type { FlowConnector, ToolResult } from "../../src/tools/base.js";
-import type { ToolEvent } from "../../src/core/stream-events.js";
+} from "../../../src/agent/skill-confirm.js";
+import { createSkill } from "../../../src/agent/skill-bridge.js";
+import type { CandidateRecord } from "../../../src/agent/skill-registry.js";
+import type { StepTrace } from "../../../src/agent/types.js";
+import type { FlowConnector, ToolResult } from "../../../src/tools/base.js";
+import type { ToolEvent } from "../../../src/core/stream-events.js";
 
 /** 构造含若干工具调用的 trace。 */
 function makeTrace(toolNames: string[]): StepTrace[] {

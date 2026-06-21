@@ -12,8 +12,8 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SkillRegistry, type CandidateRecord, type SkillRecord } from "../../src/agent/skill-registry.js";
-import type { SkillCandidate } from "../../src/agent/skill-miner.js";
+import { SkillRegistry, type CandidateRecord, type SkillRecord } from "../../../src/agent/skill-registry.js";
+import type { SkillCandidate } from "../../../src/agent/skill-miner.js";
 
 let dataDir: string;
 let filePath: string;

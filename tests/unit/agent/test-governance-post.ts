@@ -13,10 +13,10 @@ import {
   governanceToHooks,
   type GovernanceRule,
   type PostToolUseRule,
-} from "../../src/agent/governance.js";
-import { adaptTool } from "../../src/agent/tool-adapter.js";
-import type { FlowConnector, ToolResult } from "../../src/tools/base.js";
-import type { ToolEvent } from "../../src/core/stream-events.js";
+} from "../../../src/agent/governance.js";
+import { adaptTool } from "../../../src/agent/tool-adapter.js";
+import type { FlowConnector, ToolResult } from "../../../src/tools/base.js";
+import type { ToolEvent } from "../../../src/core/stream-events.js";
 
 describe("PostToolUseChain", () => {
   it("空链全放行（warns 为空，无 block）", () => {

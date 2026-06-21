@@ -9,8 +9,8 @@ import {
   runReviewPass,
   compressTrace,
   parseReviewReport,
-} from "../../src/agent/review-pass.js";
-import type { StepTrace } from "../../src/agent/types.js";
+} from "../../../src/agent/review-pass.js";
+import type { StepTrace } from "../../../src/agent/types.js";
 import type { LanguageModel } from "ai";
 
 /** 占位 model（runReviewPass 空输入路径不会真调它）。 */

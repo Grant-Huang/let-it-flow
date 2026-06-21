@@ -14,18 +14,18 @@ import {
   evidenceStrength,
   summarizeEvidence,
   type EvidenceEnvelope,
-} from "../../src/core/evidence-envelope.js";
+} from "../../../../src/core/evidence-envelope.js";
 import {
   ObsidianProvider,
   wrapSnippetAsEvidence,
   type IKnowledgeProvider,
-} from "../../src/tools/knowledge/index.js";
-import { createKnowledgeBaseTool } from "../../src/tools/builtin/knowledge-base.js";
-import { createMcpActionTool } from "../../src/tools/mcp/mcp-action-tool.js";
-import { McpRouter } from "../../src/tools/mcp/mcp-router.js";
-import { ToolRegistry } from "../../src/tools/registry.js";
-import type { FlowConnector, ToolResult } from "../../src/tools/base.js";
-import type { McpClient, McpToolCallResult, McpToolDescriptor } from "../../src/tools/mcp/mcp-client.js";
+} from "../../../../src/tools/knowledge/index.js";
+import { createKnowledgeBaseTool } from "../../../../src/tools/builtin/knowledge-base.js";
+import { createMcpActionTool } from "../../../../src/tools/mcp/mcp-action-tool.js";
+import { McpRouter } from "../../../../src/tools/mcp/mcp-router.js";
+import { ToolRegistry } from "../../../../src/tools/registry.js";
+import type { FlowConnector, ToolResult } from "../../../../src/tools/base.js";
+import type { McpClient, McpToolCallResult, McpToolDescriptor } from "../../../../src/tools/mcp/mcp-client.js";
 
 let vaultPath: string;
 beforeEach(() => {
@@ -402,6 +402,6 @@ async function registerViaRouter(
   router: McpRouter,
   serverId: string,
 ): Promise<number> {
-  const { registerMcpServerTools } = await import("../../src/tools/mcp/mcp-action-tool.js");
+  const { registerMcpServerTools } = await import("../../../../src/tools/mcp/mcp-action-tool.js");
   return registerMcpServerTools(reg, router, serverId);
 }
