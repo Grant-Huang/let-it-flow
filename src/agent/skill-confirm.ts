@@ -1,18 +1,19 @@
 /**
  * skill-confirm（L 层机制 —— 候选转 draft + 确认门）。
  *
- * 把 skill-miner 的候选 + sampleTrace 转成可执行的 SkillStep[]，调 createSkill
+ * 把 skill-miner 的候选 + sampleTrace 转成可执行的 DynamicStepsFn，调 createSkill
  * 产出 draft SkillConnector（影子模式）。确认门走 extension 事件（前端可编辑
  * name/description/steps → 回传确认）。
  *
- * 转换逻辑：sampleTrace 的工具调用序列 → 每个工具一个 SkillStep，
- * step.execute 直接转发到 ToolRegistry 调用对应工具。
+ * 转换逻辑：sampleTrace 的工具调用序列 → toolSequenceToDynamicFn 产出一个
+ * DynamicStepsFn（每步用 step() 包裹 ctx.call(toolName, params)，保留 _skillStepError
+ * 降级语义）。
+ *
+ * 与手写 skill 统一走同一条 runDynamicSteps 执行路径。
  */
-import { createSkill, type SkillStep, type SkillConnector } from "./skill-bridge.js";
+import { createSkill, type DynamicStepsFn, type SkillConnector } from "./skill-bridge.js";
 import type { CandidateRecord } from "./skill-registry.js";
 import type { StepTrace } from "./types.js";
-import type { FlowConnector, ToolResult } from "../tools/base.js";
-import type { ToolEvent } from "../core/stream-events.js";
 
 /** 确认门 payload（发给前端，用户可编辑后回传）。 */
 export interface SkillConfirmPayload {
@@ -74,48 +75,53 @@ export function extractStepSequence(trace: StepTrace[]): string[] {
 }
 
 /**
- * 把工具序列转成 SkillStep[]。
- * 每个 step 转发到 ToolRegistry 调对应工具，透传 params + 累积 priorResults。
+ * 把工具序列转成 DynamicStepsFn。
+ *
+ * 每个工具调用包在一个 step() 里，内部走 ctx.call(toolName, params)。
+ * 未注册工具不抛错（保留 _skillStepError 降级语义，让 skill 继续跑完，
+ * 错误标记进入步骤结果，由 createSkill 汇总为 skillMeta）。
+ *
+ * skill 输入参数透传给每一步的 ctx.call。
  *
  * @param toolNames  工具名序列
- * @param registry   工具注册表（按名查 FlowConnector）
+ * @returns          DynamicStepsFn（供 createSkill.steps）
  */
-export function toolSequenceToSteps(
-  toolNames: string[],
-  lookup: (name: string) => FlowConnector | undefined,
-): SkillStep[] {
-  return toolNames.map((toolName, i) => ({
-    description: `步骤 ${i + 1}：调用 ${toolName}`,
-    execute: async (ctx, params, _prior) => {
-      const connector = lookup(toolName);
-      if (!connector) {
-        return { _skillStepError: true, toolName, reason: `工具 ${toolName} 未注册` };
-      }
-      // 转发调用：消费 generator，取最终 output
-      const gen = connector.execute(params as Record<string, unknown>, ctx);
-      let final: ToolResult | undefined;
-      while (true) {
-        const r = await gen.next();
-        if (r.done) {
-          final = r.value;
-          break;
+export function toolSequenceToDynamicFn(toolNames: string[]): DynamicStepsFn {
+  return async (input) => {
+    const { step } = input;
+    // 剥离 step() 工厂，剩下的就是 skill 输入参数
+    const skillParams: Record<string, unknown> = { ...input };
+    delete (skillParams as { step?: unknown }).step;
+
+    let lastResult: unknown;
+    for (const toolName of toolNames) {
+      lastResult = await step(`调用 ${toolName}`, async (ctx) => {
+        try {
+          return await ctx.call(toolName, skillParams);
+        } catch (e) {
+          // 未注册/执行失败：降级标记，不中断后续步骤（与原静态版语义一致）
+          return {
+            _skillStepError: true,
+            toolName,
+            reason: e instanceof Error ? e.message : String(e),
+          };
         }
-        // SkillStep 不 emit 事件（避免与主循环 SSE 重复）；事件由 skill-bridge 统一发
-      }
-      return final?.output;
-    },
-  }));
+      });
+    }
+    return lastResult;
+  };
 }
 
 /**
  * 从用户确认（accept）构造一个 draft SkillConnector。
- * 内部用 toolSequenceToSteps 把工具序列转成步骤。
+ * 内部用 toolSequenceToDynamicFn 把工具序列转成 DynamicStepsFn。
  */
 export function acceptToDraftSkill(
   accept: SkillConfirmAccept,
-  lookup: (name: string) => FlowConnector | undefined,
+  lookup: (name: string) => unknown,
 ): SkillConnector {
-  const steps = toolSequenceToSteps(accept.steps, lookup);
+  void lookup; // 工具查找由运行时 ExecutionContext.resolveTool 注入，此处不静态绑定
+  const dynamicSteps = toolSequenceToDynamicFn(accept.steps);
   return createSkill({
     name: accept.name,
     description: accept.description,
@@ -126,7 +132,7 @@ export function acceptToDraftSkill(
     inputSchema: { type: "object", properties: {} },
     outputSchema: { type: "object", properties: { data: { type: "object" } } },
     outputExample: { data: { _shadow: true } },
-    steps,
+    steps: dynamicSteps,
     status: "draft",
   });
 }

@@ -2,6 +2,8 @@
  * skill.downtime_root_cause：停机根因分析流（应用层 —— L 内容）。
  *
  * 沉淀自设备停机场景的标准 4 步根因分析。
+ *
+ * 动态 DSL 写法：步骤间用具名变量传递，类型自动推导。
  */
 import { createSkill } from "../../../src/agent/skill-bridge.js";
 import {
@@ -11,105 +13,8 @@ import {
   ctxFromArgs,
 } from "../tools/mock-data/scenarios.js";
 import { wrapEvidence } from "../../../src/core/evidence-envelope.js";
-import type { SkillStep } from "../../../src/agent/skill-bridge.js";
 
 export function createDowntimeRootCauseSkill() {
-  const steps: SkillStep[] = [
-    {
-      description: "取停机事件清单 + 设备状态",
-      execute: async (_ctx, params) => {
-        const args = params;
-        const sctx = ctxFromArgs(args);
-        const eq = getEquipment(sctx);
-        return {
-          step: 1,
-          status: eq.status,
-          totalDowntimeMinutes: eq.downtimeEvents.reduce((s, e) => s + e.minutes, 0),
-          events: eq.downtimeEvents,
-          topReason: eq.downtimeEvents[0]?.reason ?? "无停机",
-        };
-      },
-    },
-    {
-      description: "查维护历史 + 备件",
-      execute: async (_ctx, params, _prior) => {
-        const args = params;
-        const sctx = ctxFromArgs(args);
-        const eq = getEquipment(sctx);
-        return {
-          step: 2,
-          mtbfHours: eq.mtbfHours,
-          mttrMinutes: eq.mttrMinutes,
-          failureRisk30d: eq.failureRisk30d,
-          healthScore: eq.healthScore,
-          overdueMaintenance: eq.healthScore < 0.7,
-        };
-      },
-    },
-    {
-      description: "交叉查工艺/物料排除外部因素",
-      execute: async (_ctx, params, _prior) => {
-        const args = params;
-        const sctx = ctxFromArgs(args);
-        const pr = getProcess(sctx);
-        const m = getMaterial(sctx);
-        return {
-          step: 3,
-          processDeviation: pr.deviationScore,
-          materialShortageRisk: m.shortageRisk,
-          externalCauseRuled:
-            pr.deviationScore < 0.3 && m.shortageRisk < 0.3,
-        };
-      },
-    },
-    {
-      description: "综合根因结论",
-      execute: async (_ctx, params, prior) => {
-        const args = params;
-        const sctx = ctxFromArgs(args);
-        const step1 = prior[0] as { topReason: string; totalDowntimeMinutes: number };
-        const step2 = prior[1] as { healthScore: number; failureRisk30d: number };
-        const step3 = prior[2] as { externalCauseRuled: boolean };
-
-        let rootCause = step1.topReason;
-        let category: string;
-        if (step2.healthScore < 0.5) {
-          category = "equipment_degradation";
-          rootCause = `设备健康分 ${step2.healthScore.toFixed(2)} 严重偏低，主因：${step1.topReason}`;
-        } else if (!step3.externalCauseRuled) {
-          category = "external";
-          rootCause = "停机可能由外部因素（物料/工艺）诱发，需进一步排查";
-        } else {
-          category = "sporadic";
-          rootCause = `${step1.topReason}（偶发性，设备健康尚可）`;
-        }
-
-        return wrapEvidence(
-          {
-            scenarioId: sctx.scenarioId,
-            line: sctx.line ?? "L01",
-            rootCause,
-            category,
-            totalDowntimeMinutes: step1.totalDowntimeMinutes,
-            confidence: category === "equipment_degradation" ? 0.85 : category === "sporadic" ? 0.6 : 0.5,
-            recommendedNext:
-              category === "equipment_degradation"
-                ? "立即安排预防性维护（设备健康已恶化）"
-                : category === "external"
-                  ? "排查物料批次 + 工艺参数"
-                  : "加强点检频次，监控复发",
-          },
-          {
-            freshness: "realtime",
-            confidence: category === "equipment_degradation" ? "measured" : "estimated",
-            system: "MES",
-            provenance: "skill.downtime_root_cause",
-          },
-        );
-      },
-    },
-  ];
-
   return createSkill({
     name: "skill.downtime_root_cause",
     description:
@@ -142,6 +47,110 @@ export function createDowntimeRootCauseSkill() {
       data: { rootCause: "主轴轴承磨损", category: "equipment_degradation", confidence: 0.85 },
       confidence: "measured",
     },
-    steps,
+
+    async steps(input) {
+      const { step } = input;
+      const scenarioId = typeof input.scenarioId === "string" ? input.scenarioId : "normal";
+      const line = typeof input.line === "string" ? input.line : undefined;
+      const sctx = ctxFromArgs({ scenarioId, line });
+
+      // Step 1: 取停机事件清单 + 设备状态
+      const step1 = await step<{
+        status: ReturnType<typeof getEquipment>["status"];
+        totalDowntimeMinutes: number;
+        events: ReturnType<typeof getEquipment>["downtimeEvents"];
+        topReason: string;
+      }>("取停机事件清单 + 设备状态", async () => {
+        const eq = getEquipment(sctx);
+        return {
+          status: eq.status,
+          totalDowntimeMinutes: eq.downtimeEvents.reduce((s, e) => s + e.minutes, 0),
+          events: eq.downtimeEvents,
+          topReason: eq.downtimeEvents[0]?.reason ?? "无停机",
+        };
+      });
+
+      // Step 2: 查维护历史 + 备件
+      const step2 = await step<{
+        mtbfHours: number;
+        mttrMinutes: number;
+        failureRisk30d: number;
+        healthScore: number;
+        overdueMaintenance: boolean;
+      }>("查维护历史 + 备件", async () => {
+        const eq = getEquipment(sctx);
+        return {
+          mtbfHours: eq.mtbfHours,
+          mttrMinutes: eq.mttrMinutes,
+          failureRisk30d: eq.failureRisk30d,
+          healthScore: eq.healthScore,
+          overdueMaintenance: eq.healthScore < 0.7,
+        };
+      });
+
+      // Step 3: 交叉查工艺/物料排除外部因素
+      const step3 = await step<{
+        processDeviation: number;
+        materialShortageRisk: number;
+        externalCauseRuled: boolean;
+      }>("交叉查工艺/物料排除外部因素", async () => {
+        const pr = getProcess(sctx);
+        const m = getMaterial(sctx);
+        return {
+          processDeviation: pr.deviationScore,
+          materialShortageRisk: m.shortageRisk,
+          externalCauseRuled: pr.deviationScore < 0.3 && m.shortageRisk < 0.3,
+        };
+      });
+
+      // Step 4: 综合根因结论（包成 EvidenceEnvelope）
+      const step4 = await step<ReturnType<typeof wrapEvidence>>(
+        "综合根因结论",
+        async () => {
+          let rootCause = step1.topReason;
+          let category: string;
+          if (step2.healthScore < 0.5) {
+            category = "equipment_degradation";
+            rootCause = `设备健康分 ${step2.healthScore.toFixed(2)} 严重偏低，主因：${step1.topReason}`;
+          } else if (!step3.externalCauseRuled) {
+            category = "external";
+            rootCause = "停机可能由外部因素（物料/工艺）诱发，需进一步排查";
+          } else {
+            category = "sporadic";
+            rootCause = `${step1.topReason}（偶发性，设备健康尚可）`;
+          }
+
+          return wrapEvidence(
+            {
+              scenarioId: sctx.scenarioId,
+              line: sctx.line ?? "L01",
+              rootCause,
+              category,
+              totalDowntimeMinutes: step1.totalDowntimeMinutes,
+              confidence:
+                category === "equipment_degradation"
+                  ? 0.85
+                  : category === "sporadic"
+                    ? 0.6
+                    : 0.5,
+              recommendedNext:
+                category === "equipment_degradation"
+                  ? "立即安排预防性维护（设备健康已恶化）"
+                  : category === "external"
+                    ? "排查物料批次 + 工艺参数"
+                    : "加强点检频次，监控复发",
+            },
+            {
+              freshness: "realtime",
+              confidence: category === "equipment_degradation" ? "measured" : "estimated",
+              system: "MES",
+              provenance: "skill.downtime_root_cause",
+            },
+          );
+        },
+      );
+
+      return step4;
+    },
   });
 }

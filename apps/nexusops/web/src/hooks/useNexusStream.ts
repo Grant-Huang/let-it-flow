@@ -20,36 +20,20 @@ import { createWorkflow, confirmTask, clarifyTask, type ConfirmDecision } from "
 export function useNexusStream() {
   const [state, setState] = useState<StreamState>(createInitialStreamState);
   const [taskId, setTaskId] = useState<string | null>(null);
+  /** 多轮追问：当前会话 id（首轮 done 后从响应中保存，追问时透传） */
+  const [conversationId, setConversationId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const stateRef = useRef<StreamState>(state);
+  /** 最近一次完成轮的 taskId（追问时作为 parentTaskId） */
+  const lastDoneTaskIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     return () => abortRef.current?.abort();
   }, []);
 
-  /** 创建任务并订阅 SSE 流。 */
-  const start = useCallback(async (intent: string, config?: object) => {
-    abortRef.current?.abort();
-    setError(null);
-
-    let createdTaskId: string;
-    try {
-      const created = await createWorkflow(intent, config);
-      createdTaskId = created.taskId;
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-      return;
-    }
-
-    setTaskId(createdTaskId);
-
-    const ctrl = new AbortController();
-    abortRef.current = ctrl;
-    const fresh = { ...createInitialStreamState(), status: "streaming" as const };
-    stateRef.current = fresh;
-    setState(fresh);
-
+  /** 订阅 SSE 流并归约状态。内部共享逻辑（start/followUp 复用）。 */
+  const subscribe = useCallback(async (createdTaskId: string, ctrl: AbortController) => {
     try {
       const resp = await fetch(`/api/tasks/${createdTaskId}/stream?since=0`, {
         signal: ctrl.signal,
@@ -74,7 +58,12 @@ export function useNexusStream() {
           const next = applyEvent(stateRef.current, event);
           stateRef.current = next;
           setState(next);
-          if (event.type === "done" || event.type === "error") {
+          if (event.type === "done") {
+            lastDoneTaskIdRef.current = createdTaskId;
+            abortRef.current?.abort();
+            return;
+          }
+          if (event.type === "error") {
             abortRef.current?.abort();
             return;
           }
@@ -87,6 +76,70 @@ export function useNexusStream() {
       setState((prev) => ({ ...prev, status: "error", errorMessage: msg }));
     }
   }, []);
+
+  /** 创建任务并订阅 SSE 流（首意图，不传 conversationId）。 */
+  const start = useCallback(async (intent: string, config?: object) => {
+    abortRef.current?.abort();
+    setError(null);
+    // 首意图：重置会话上下文
+    setConversationId(null);
+    lastDoneTaskIdRef.current = null;
+
+    let createdTaskId: string;
+    let createdConvId: string | undefined;
+    try {
+      const created = await createWorkflow(intent, { config });
+      createdTaskId = created.taskId;
+      createdConvId = created.conversationId;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      return;
+    }
+
+    setTaskId(createdTaskId);
+    if (createdConvId) setConversationId(createdConvId);
+
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    const fresh = { ...createInitialStreamState(), status: "streaming" as const };
+    stateRef.current = fresh;
+    setState(fresh);
+
+    await subscribe(createdTaskId, ctrl);
+  }, [subscribe]);
+
+  /** 多轮追问：基于当前会话上下文继续提问。 */
+  const followUp = useCallback(async (intent: string, config?: object) => {
+    if (!conversationId) {
+      // 无活跃会话时退化为首意图
+      return start(intent, config);
+    }
+    abortRef.current?.abort();
+    setError(null);
+
+    let createdTaskId: string;
+    try {
+      const created = await createWorkflow(intent, {
+        config,
+        conversationId,
+        parentTaskId: lastDoneTaskIdRef.current ?? undefined,
+      });
+      createdTaskId = created.taskId;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      return;
+    }
+
+    setTaskId(createdTaskId);
+
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    const fresh = { ...createInitialStreamState(), status: "streaming" as const };
+    stateRef.current = fresh;
+    setState(fresh);
+
+    await subscribe(createdTaskId, ctrl);
+  }, [conversationId, subscribe, start]);
 
   /** HITL 确认门 */
   const confirm = useCallback(
@@ -165,10 +218,25 @@ export function useNexusStream() {
     stateRef.current = fresh;
     setState(fresh);
     setTaskId(null);
+    setConversationId(null);
+    lastDoneTaskIdRef.current = null;
     setError(null);
   }, []);
 
   const isStreaming = state.status === "streaming";
 
-  return { state, taskId, error, isStreaming, start, replay, confirm, clarify, abort, reset };
+  return {
+    state,
+    taskId,
+    conversationId,
+    error,
+    isStreaming,
+    start,
+    followUp,
+    replay,
+    confirm,
+    clarify,
+    abort,
+    reset,
+  };
 }

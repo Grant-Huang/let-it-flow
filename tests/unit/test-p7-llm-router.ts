@@ -26,7 +26,53 @@ import { plan } from "../../src/planner/planner.js";
 import { createDefaultToolRegistry } from "../../src/executor/default-tools.js";
 import { registerBuiltinTools } from "../../src/tools/index.js";
 import { LlmService } from "../../src/services/llm-service.js";
-import { podcastTemplate } from "../../examples/podcast-generator/template.js";
+import type { ConsumerTemplate } from "../../src/planner/consumer-template.js";
+import type { WorkflowDAG } from "../../src/planner/dag-schema.js";
+
+/**
+ * 内联最小 ConsumerTemplate（替代已废弃的 podcastTemplate）。
+ * 仅用于验证 planner LLM 路由失败时回退到消费模板的机制，
+ * 不耦合 podcast 业务（podcast-generator 已重构为 ai-content-factory + ReAct）。
+ */
+const fallbackTemplate: ConsumerTemplate = {
+  templateId: "research",
+  description: "研究主题并交付（最小兜底模板，仅含 fetch + deliver）",
+  matchPattern: /研究|总结|report|做成|做一期|分析|播客/,
+  match: (intent: string) => /研究|总结|report|做成|做一期|分析|播客/.test(intent),
+  async extractParams(): Promise<unknown> {
+    return { topic: "test" };
+  },
+  build(_params: unknown, _fullPipeline: boolean): WorkflowDAG {
+    const confirmed = { maxTokens: 4000, strip: true, summarize: false };
+    return {
+      schemaVersion: "1.0",
+      nodes: [
+        {
+          id: "fetch",
+          toolName: "core.web_fetch",
+          params: { urls: ["https://example.com"] },
+          inputRefs: {},
+          dependsOn: [],
+          requireConfirmation: false,
+          onNodeError: "skip",
+          contentPipeline: confirmed,
+        },
+        {
+          id: "deliver",
+          toolName: "core.deliver",
+          params: { artifactType: "research_report" },
+          inputRefs: { "$.tasks.fetch.output[0].content": "items" },
+          dependsOn: ["fetch"],
+          requireConfirmation: false,
+          onNodeError: "skip",
+          contentPipeline: confirmed,
+        },
+      ],
+      onNodeError: "skip",
+      retryAttempts: 0,
+    };
+  },
+};
 
 let tmpRoot: string;
 beforeEach(() => {
@@ -108,12 +154,12 @@ describe("P7 planner LLM 选工具成功路径", () => {
     mockOutput = null; // LLM 返回空 → planner 回退
 
     const reg = coreRegistry();
-    const outcome = await plan("把 https://example.com 做成播客", {
+    const outcome = await plan("把 https://example.com 做成研究报告", {
       llm: mockLlm(),
       registry: reg,
       maxRetries: 1,
       useLlmRouter: true,
-      consumerTemplates: [podcastTemplate],
+      consumerTemplates: [fallbackTemplate],
     });
 
     expect(outcome.kind).toBe("proceed");

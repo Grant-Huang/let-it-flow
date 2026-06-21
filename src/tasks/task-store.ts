@@ -50,6 +50,16 @@ export const TaskMeta = z.object({
   config: z.record(z.string(), z.unknown()).default({}),
   /** 错误信息（仅 status=error）。 */
   error: z.string().optional(),
+  /**
+   * 会话 id：同一会话内的多轮追问共享同一个 conversationId。
+   * 首条消息缺省时由 store 创建（c_<random>）。
+   */
+  conversationId: z.string().optional(),
+  /**
+   * 上一轮 task id（追问时填）：用于 customRunner 读取上一轮产物
+   * 构造压缩上下文。缺省表示首轮。
+   */
+  parentTaskId: z.string().optional(),
 });
 export type TaskMeta = z.infer<typeof TaskMeta>;
 
@@ -64,8 +74,20 @@ export class FileTaskStore {
     ensureStorageDirs();
   }
 
-  /** 创建新任务，返回 meta。 */
-  create(intent: string, config: Record<string, unknown> = {}): TaskMeta {
+  /**
+   * 创建新任务，返回 meta。
+   *
+   * @param intent       用户意图
+   * @param config       触发请求体（配置、模板等）
+   * @param options      多轮会话相关：
+   *   - conversationId：追问时传入；缺省时 store 生成新 c_<random>
+   *   - parentTaskId：追问时显式指定上一轮 task id（缺省表示首轮）
+   */
+  create(
+    intent: string,
+    config: Record<string, unknown> = {},
+    options: { conversationId?: string; parentTaskId?: string } = {},
+  ): TaskMeta {
     const now = Date.now();
     const meta: TaskMeta = {
       id: cryptoRandomId(),
@@ -75,6 +97,8 @@ export class FileTaskStore {
       updatedAt: now,
       lastSeq: 0,
       config,
+      conversationId: options.conversationId ?? cryptoConversationId(),
+      parentTaskId: options.parentTaskId,
     };
     writeJsonAtomicSync(taskMetaPath(meta.id), meta);
     return meta;
@@ -143,14 +167,24 @@ export class FileTaskStore {
         status: m.status,
         createdAt: m.createdAt,
         updatedAt: m.updatedAt,
+        conversationId: m.conversationId,
+        parentTaskId: m.parentTaskId,
       }));
   }
 }
 
 /** 任务列表摘要（listAll 返回的轻量形态）。 */
-export type TaskSummary = Pick<TaskMeta, "id" | "intent" | "status" | "createdAt" | "updatedAt">;
+export type TaskSummary = Pick<
+  TaskMeta,
+  "id" | "intent" | "status" | "createdAt" | "updatedAt" | "conversationId" | "parentTaskId"
+>;
 
 /** 生成短随机 id（前缀 t = task）。 */
 function cryptoRandomId(): string {
   return `t_${randomUUID().slice(0, 12)}`;
+}
+
+/** 生成短随机会话 id（前缀 c = conversation）。 */
+function cryptoConversationId(): string {
+  return `c_${randomUUID().slice(0, 12)}`;
 }

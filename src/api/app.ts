@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { createWorkflowsApp } from "./workflows.js";
 import { createTasksApp } from "./tasks.js";
 import { createToolsApp } from "./tools.js";
+import { createConversationsApp } from "./conversations.js";
 import { createConfigModelsApp } from "./config-models.js";
 import { createConfigBindingsApp } from "./config-bindings.js";
 import { createConfigSystemApp } from "./config-system.js";
@@ -37,6 +38,7 @@ export function createApp(registry?: TaskRegistry): Hono {
   app.route("/api/workflows", createWorkflowsApp(reg));
   app.route("/api/tasks", createTasksApp(reg));
   app.route("/api/tools", createToolsApp(reg));
+  app.route("/api/conversations", createConversationsApp(reg));
   app.route("/api/config/models", createConfigModelsApp(getDataDir(), globalEventBus));
   app.route("/api/config/bindings", createConfigBindingsApp(getDataDir(), globalEventBus));
   app.route("/api/config/system", createConfigSystemApp(getDataDir()));

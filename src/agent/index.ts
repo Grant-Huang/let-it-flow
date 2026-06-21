@@ -10,7 +10,12 @@ export { adaptTool, adaptToolSet, toolNameToKey, keyToToolName } from "./tool-ad
 export type { ToolAdapterDeps } from "./tool-adapter.js";
 export { TraceAccumulator, emitStepPhase } from "./step-emitter.js";
 export { createSkill } from "./skill-bridge.js";
-export type { SkillConnector, SkillStep } from "./skill-bridge.js";
+export type {
+  SkillConnector,
+  StepCtx,
+  StepsInput,
+  DynamicStepsFn,
+} from "./skill-bridge.js";
 export { PreconditionRegistry, calledToolNames } from "./precondition.js";
 export { GovernanceChain } from "./governance.js";
 export type { GovernanceRule } from "./governance.js";

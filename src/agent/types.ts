@@ -173,6 +173,25 @@ export interface HarnessConfig {
   /** 追加到默认 agent 提示的 system 文本。 */
   systemPrompt?: string;
   /**
+   * 多轮追问：上一轮的压缩上下文（由 customRunner 注入）。
+   *
+   * 存在时 harness 把它作为 user 消息的前置段落注入，让 LLM 感知上一轮的
+   * 取证轨迹与结论，从而基于"上轮分析 + 本轮追问"继续深挖。
+   *
+   * 设计约束：
+   *   - 纯文本注入（非 messages 数组累积），token 成本可控
+   *   - 仅传最近 1 轮压缩上下文；更早轮次靠 finalText 间接传递
+   *   - compressTrace 已截断 thought 到 200 字，单轮典型 1-2K token
+   */
+  previousContext?: {
+    /** 上一轮用户意图。 */
+    intent: string;
+    /** 上一轮压缩轨迹（compressTrace 产出）。 */
+    traceDigest: string;
+    /** 上一轮最终结论。 */
+    finalText: string;
+  };
+  /**
    * 兼容模式（DeepSeek 等非 OpenAI 官方 API）：开启后把 system 折叠进 user 消息，
    * 规避 SDK 把 system 映射成这些服务不支持的 `developer` 角色。
    */

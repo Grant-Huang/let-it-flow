@@ -50,6 +50,9 @@ export type PlanOutcome =
  * 规划入口：意图 → DAG / clarify / reject。
  */
 export async function plan(intent: string, config: PlannerConfig): Promise<PlanOutcome> {
+  // #region agent log
+  fetch('http://127.0.0.1:7845/ingest/b379246d-e95c-44b9-8a2e-1ef8ddffc36c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'594ab9'},body:JSON.stringify({sessionId:'594ab9',location:'planner.ts:plan-entry',message:'plan() 入口',data:{intent,useLlmRouter:config.useLlmRouter,maxRetries:config.maxRetries,hasTemplates:(config.consumerTemplates??[]).length},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
+  // #endregion
   const consumerTemplates = config.consumerTemplates ?? [];
   // 路由：优先消费应用模板，其次内核通用兜底（research/summary）
   const consumerMatch = routeConsumerTemplate(intent, consumerTemplates, config.registry);
@@ -57,9 +60,15 @@ export async function plan(intent: string, config: PlannerConfig): Promise<PlanO
   const guard = guardrailCheck(intent, templateId, consumerTemplates);
 
   if (guard.decision === "reject") {
+    // #region agent log
+    fetch('http://127.0.0.1:7845/ingest/b379246d-e95c-44b9-8a2e-1ef8ddffc36c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'594ab9'},body:JSON.stringify({sessionId:'594ab9',location:'planner.ts:guard-reject',message:'guardrail reject',data:{intent},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
+    // #endregion
     return { kind: "reject", reason: guard.reason ?? "不可服务", suggestRetry: guard.suggestRetry };
   }
   if (guard.decision === "clarify") {
+    // #region agent log
+    fetch('http://127.0.0.1:7845/ingest/b379246d-e95c-44b9-8a2e-1ef8ddffc36c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'594ab9'},body:JSON.stringify({sessionId:'594ab9',location:'planner.ts:guard-clarify',message:'guardrail clarify',data:{intent,questions:guard.questions?.length},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{});
+    // #endregion
     return { kind: "clarify", questions: guard.questions ?? [] };
   }
 
@@ -70,12 +79,21 @@ export async function plan(intent: string, config: PlannerConfig): Promise<PlanO
 
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
+      // #region agent log
+      fetch('http://127.0.0.1:7845/ingest/b379246d-e95c-44b9-8a2e-1ef8ddffc36c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'594ab9'},body:JSON.stringify({sessionId:'594ab9',location:'planner.ts:attempt-loop',message:'attempt 循环',data:{attempt,useLlmRouter,lastError},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
+      // #endregion
       // 优先：LLM 选工具路径（注入工具清单，LLM 自主编排 DAG）
       if (useLlmRouter) {
         const dag = await planWithLlmRouter(intent, config, attempt, lastError);
+        // #region agent log
+        fetch('http://127.0.0.1:7845/ingest/b379246d-e95c-44b9-8a2e-1ef8ddffc36c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'594ab9'},body:JSON.stringify({sessionId:'594ab9',location:'planner.ts:llm-returned',message:'LLM 路由返回',data:{attempt,hasDag:!!dag},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
+        // #endregion
         if (dag) {
           const errors = validateDag(dag, config.registry);
           if (errors.length === 0) {
+            // #region agent log
+            fetch('http://127.0.0.1:7845/ingest/b379246d-e95c-44b9-8a2e-1ef8ddffc36c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'594ab9'},body:JSON.stringify({sessionId:'594ab9',location:'planner.ts:llm-success',message:'采用 LLM DAG',data:{attempt,nodes:dag.nodes.map(n=>n.id)},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
+            // #endregion
             return { kind: "proceed", dag };
           }
           lastError = `LLM 路由 DAG 校验失败：${errors.join("; ")}`;
@@ -87,6 +105,9 @@ export async function plan(intent: string, config: PlannerConfig): Promise<PlanO
       const matchedTemplate = templateId
         ? findTemplate(templateId, consumerTemplates)
         : undefined;
+      // #region agent log
+      fetch('http://127.0.0.1:7845/ingest/b379246d-e95c-44b9-8a2e-1ef8ddffc36c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'594ab9'},body:JSON.stringify({sessionId:'594ab9',location:'planner.ts:template-fallback',message:'尝试模板兜底',data:{attempt,templateId,hasMatched:!!matchedTemplate},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
+      // #endregion
       if (matchedTemplate) {
         const params = await matchedTemplate.extractParams(intent, config.llm);
         const wantsFull = matchedTemplate.wantsFullPipeline?.(intent) ?? false;
@@ -94,6 +115,9 @@ export async function plan(intent: string, config: PlannerConfig): Promise<PlanO
         const dag = matchedTemplate.build(params, wantsFull && hasTools);
         const errors = validateDag(dag, config.registry);
         if (errors.length === 0) {
+          // #region agent log
+          fetch('http://127.0.0.1:7845/ingest/b379246d-e95c-44b9-8a2e-1ef8ddffc36c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'594ab9'},body:JSON.stringify({sessionId:'594ab9',location:'planner.ts:template-success',message:'采用模板 DAG',data:{attempt,templateId,nodes:dag.nodes.map(n=>n.id)},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
+          // #endregion
           return { kind: "proceed", dag };
         }
         lastError = errors.join("; ");
@@ -103,6 +127,9 @@ export async function plan(intent: string, config: PlannerConfig): Promise<PlanO
         break;
       }
     } catch (e) {
+      // #region agent log
+      fetch('http://127.0.0.1:7845/ingest/b379246d-e95c-44b9-8a2e-1ef8ddffc36c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'594ab9'},body:JSON.stringify({sessionId:'594ab9',location:'planner.ts:attempt-exception',message:'attempt 异常',data:{attempt,error:e instanceof Error?e.message:String(e)},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
+      // #endregion
       lastError = e instanceof Error ? e.message : String(e);
     }
   }
@@ -137,6 +164,9 @@ async function planWithLlmRouter(
   // P8.5：compatMode 改 per-callSite（按 planner 调用点解析 provider）
   const isWeakProvider = config.llm.compatModeFor("planner");
   const callArgs = llmCallArgs(system, user, isWeakProvider);
+  // #region agent log
+  fetch('http://127.0.0.1:7845/ingest/b379246d-e95c-44b9-8a2e-1ef8ddffc36c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'594ab9'},body:JSON.stringify({sessionId:'594ab9',location:'planner.ts:llm-router-entry',message:'调 LLM 路由',data:{intent,attempt,isWeakProvider,manifestsCount:manifests.length},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
+  // #endregion
 
   try {
     if (isWeakProvider) {

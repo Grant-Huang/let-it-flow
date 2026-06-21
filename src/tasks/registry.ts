@@ -60,8 +60,18 @@ export interface TaskRuntime {
    * 自定义 runner（应用可注入，绕过 planner+DAG 走自己的执行范式）。
    * 例：NexusOps 注入 ReAct Harness runner（runReactHarness）。
    * 注入后 start() 会优先调用它而非 runPlanned。
+   *
+   * @param taskId       新任务 id
+   * @param intent       用户意图
+   * @param hooks        事件/HITL 接口
+   * @param context      多轮会话上下文（parentTaskId 存在时为追问轮）
    */
-  customRunner?: (taskId: string, intent: string, hooks: TaskRunnerHooks) => Promise<void>;
+  customRunner?: (
+    taskId: string,
+    intent: string,
+    hooks: TaskRunnerHooks,
+    context?: { parentTaskId?: string; conversationId?: string },
+  ) => Promise<void>;
 }
 
 /** 传给 customRunner 的 hooks（与内核 runner 对齐的事件/HITL 接口）。 */
@@ -121,10 +131,25 @@ export class TaskRegistry {
     return this.runtime?.toolRegistry;
   }
 
-  /** 创建并启动一个任务，返回 meta。 */
-  start(intent: string, config: Record<string, unknown> = {}): TaskMeta {
-    const meta = this.store.create(intent, config);
-    const runner = this.pickRunner(meta.id, intent).catch((err) => {
+  /**
+   * 创建并启动一个任务，返回 meta。
+   *
+   * @param intent   用户意图
+   * @param config   触发请求体（配置、模板等）
+   * @param options  多轮会话参数：
+   *   - conversationId：追问时传入；缺省时 store 生成新会话
+   *   - parentTaskId：追问时显式指定上一轮 task id
+   */
+  start(
+    intent: string,
+    config: Record<string, unknown> = {},
+    options: { conversationId?: string; parentTaskId?: string } = {},
+  ): TaskMeta {
+    const meta = this.store.create(intent, config, options);
+    const runner = this.pickRunner(meta.id, intent, {
+      parentTaskId: meta.parentTaskId,
+      conversationId: meta.conversationId,
+    }).catch((err) => {
       this.emitError(meta.id, err instanceof Error ? err.message : String(err));
     });
     this.runners.set(meta.id, runner);
@@ -132,7 +157,11 @@ export class TaskRegistry {
   }
 
   /** 选择 runner：注入 customRunner 优先；否则 runtime → runPlanned；缺省 stub。 */
-  private pickRunner(taskId: string, intent: string): Promise<void> {
+  private pickRunner(
+    taskId: string,
+    intent: string,
+    context?: { parentTaskId?: string; conversationId?: string },
+  ): Promise<void> {
     const rt = this.runtime;
     if (rt?.customRunner) {
       const hooks: TaskRunnerHooks = {
@@ -147,7 +176,7 @@ export class TaskRegistry {
             detail: gate.detail,
           }),
       };
-      return rt.customRunner(taskId, intent, hooks);
+      return rt.customRunner(taskId, intent, hooks, context);
     }
     if (rt) return this.runPlanned(taskId, intent);
     return this.runStub(taskId, intent);

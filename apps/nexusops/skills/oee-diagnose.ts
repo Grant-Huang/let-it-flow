@@ -10,125 +10,14 @@
  *   3. 取对应域的根因证据
  *   4. 交叉验证（5M1E 框架）
  *   5. 汇总成诊断结论
+ *
+ * 动态 DSL 写法：步骤间用具名变量传递，类型自动推导（无需 prior[N] as {...} 断言）。
  */
 import { createSkill } from "../../../src/agent/skill-bridge.js";
 import { getOEE, getEquipment, getQuality, getProcess, ctxFromArgs, type ScenarioContext } from "../tools/mock-data/scenarios.js";
 import { wrapEvidence } from "../../../src/core/evidence-envelope.js";
-import type { SkillStep } from "../../../src/agent/skill-bridge.js";
-import type { ExecutionContext } from "../../../src/tools/base.js";
 
 export function createOeeDiagnoseSkill() {
-  const steps: SkillStep[] = [
-    {
-      description: "取实时 OEE + 损失分解",
-      execute: async (_ctx, params, _prior) => {
-        const args = params;
-        const sctx = ctxFromArgs(args);
-        const oee = getOEE(sctx);
-        return {
-          step: 1,
-          oee,
-          biggestLoss:
-            oee.availability < oee.performance && oee.availability < oee.quality
-              ? "availability"
-              : oee.performance < oee.quality
-                ? "performance"
-                : "quality",
-        };
-      },
-    },
-    {
-      description: "按最大损失项分流取证",
-      execute: async (_ctx, params, prior) => {
-        const args = params;
-        const sctx = ctxFromArgs(args);
-        const step1 = prior[0] as { biggestLoss: string };
-        const loss = step1.biggestLoss;
-        let evidence: Record<string, unknown> = { lossType: loss };
-        if (loss === "availability") {
-          const eq = getEquipment(sctx);
-          evidence = { ...evidence, downtimeEvents: eq.downtimeEvents, mtbfHours: eq.mtbfHours, healthScore: eq.healthScore };
-        } else if (loss === "performance") {
-          const pr = getProcess(sctx);
-          evidence = { ...evidence, deviations: Object.entries(pr.parameters).filter(([, v]) => !(v as { inSpec: boolean }).inSpec), deviationScore: pr.deviationScore };
-        } else {
-          const q = getQuality(sctx);
-          evidence = { ...evidence, topDefects: q.topDefects, cpk: q.cpk, defectRate: q.defectRate };
-        }
-        return { step: 2, evidence };
-      },
-    },
-    {
-      description: "交叉验证（5M1E 视角）",
-      execute: async (_ctx, params, prior) => {
-        const args = params;
-        const sctx = ctxFromArgs(args);
-        const step2 = prior[1] as { evidence: Record<string, unknown> };
-        // 无论主损失项，都附带设备健康 + 工艺偏差做交叉验证
-        const eq = getEquipment(sctx);
-        const pr = getProcess(sctx);
-        return {
-          step: 3,
-          crossCheck: {
-            equipmentHealth: eq.healthScore,
-            processDeviation: pr.deviationScore,
-            suspiciousDevice: eq.healthScore < 0.7,
-            suspiciousProcess: pr.deviationScore > 0.3,
-          },
-          primaryEvidence: step2.evidence,
-        };
-      },
-    },
-    {
-      description: "综合诊断结论",
-      execute: async (_ctx, params, prior) => {
-        const step3 = prior[2] as { crossCheck: Record<string, unknown>; primaryEvidence: Record<string, unknown> };
-        const cc = step3.crossCheck;
-        const rootCause =
-          cc.suspiciousDevice && cc.suspiciousProcess
-            ? "设备健康下降 + 工艺参数漂移（强关联，建议先治设备）"
-            : cc.suspiciousDevice
-              ? "设备健康下降（振动/温度异常），传导至质量/性能"
-              : cc.suspiciousProcess
-                ? "工艺参数漂移（温度/压力偏离标准）"
-                : "无单一明显根因，需进一步现场排查";
-        return {
-          step: 4,
-          diagnosis: rootCause,
-          confidence: cc.suspiciousDevice || cc.suspiciousProcess ? 0.8 : 0.5,
-          evidenceChain: step3.primaryEvidence,
-        };
-      },
-    },
-    {
-      description: "包成诊断 EvidenceEnvelope",
-      execute: async (_ctx, params, prior) => {
-        const args = params;
-        const sctx: ScenarioContext = ctxFromArgs(args);
-        const step1 = prior[0] as { oee: { oee: number } };
-        const step4 = prior[3] as { diagnosis: string; confidence: number; evidenceChain: Record<string, unknown> };
-        return wrapEvidence(
-          {
-            scenarioId: sctx.scenarioId,
-            line: sctx.line ?? "L01",
-            currentOEE: step1.oee.oee,
-            diagnosis: step4.diagnosis,
-            confidence: step4.confidence,
-            evidenceChain: step4.evidenceChain,
-            stepsExecuted: 5,
-          },
-          {
-            freshness: "realtime",
-            confidence: step4.confidence > 0.7 ? "measured" : "estimated",
-            system: "MES",
-            provenance: "skill.oee_diagnose",
-            caveat: "标准化诊断流，结论需现场工程师复核",
-          },
-        );
-      },
-    },
-  ];
-
   return createSkill({
     name: "skill.oee_diagnose",
     description:
@@ -163,9 +52,135 @@ export function createOeeDiagnoseSkill() {
       data: { diagnosis: "设备健康下降...", confidence: 0.8 },
       confidence: "measured",
     },
-    steps,
+
+    async steps(input) {
+      const { step } = input;
+      const scenarioId = typeof input.scenarioId === "string" ? input.scenarioId : "normal";
+      const line = typeof input.line === "string" ? input.line : undefined;
+      const sctx: ScenarioContext = ctxFromArgs({ scenarioId, line });
+
+      // Step 1: 取实时 OEE + 损失分解
+      const step1 = await step<{ oee: ReturnType<typeof getOEE>; biggestLoss: string }>(
+        "取实时 OEE + 损失分解",
+        async () => {
+          const oee = getOEE(sctx);
+          return {
+            oee,
+            biggestLoss:
+              oee.availability < oee.performance && oee.availability < oee.quality
+                ? "availability"
+                : oee.performance < oee.quality
+                  ? "performance"
+                  : "quality",
+          };
+        },
+      );
+
+      // Step 2: 按最大损失项分流取证
+      const step2 = await step<{ lossType: string; evidence: Record<string, unknown> }>(
+        "按最大损失项分流取证",
+        async () => {
+          const loss = step1.biggestLoss;
+          let evidence: Record<string, unknown> = { lossType: loss };
+          if (loss === "availability") {
+            const eq = getEquipment(sctx);
+            evidence = {
+              ...evidence,
+              downtimeEvents: eq.downtimeEvents,
+              mtbfHours: eq.mtbfHours,
+              healthScore: eq.healthScore,
+            };
+          } else if (loss === "performance") {
+            const pr = getProcess(sctx);
+            evidence = {
+              ...evidence,
+              deviations: Object.entries(pr.parameters).filter(
+                ([, v]) => !(v as { inSpec: boolean }).inSpec,
+              ),
+              deviationScore: pr.deviationScore,
+            };
+          } else {
+            const q = getQuality(sctx);
+            evidence = {
+              ...evidence,
+              topDefects: q.topDefects,
+              cpk: q.cpk,
+              defectRate: q.defectRate,
+            };
+          }
+          return { lossType: loss, evidence };
+        },
+      );
+
+      // Step 3: 交叉验证（5M1E 视角）
+      const step3 = await step<{
+        crossCheck: Record<string, unknown>;
+        primaryEvidence: Record<string, unknown>;
+      }>("交叉验证（5M1E 视角）", async () => {
+        const eq = getEquipment(sctx);
+        const pr = getProcess(sctx);
+        return {
+          crossCheck: {
+            equipmentHealth: eq.healthScore,
+            processDeviation: pr.deviationScore,
+            suspiciousDevice: eq.healthScore < 0.7,
+            suspiciousProcess: pr.deviationScore > 0.3,
+          },
+          primaryEvidence: step2.evidence,
+        };
+      });
+
+      // Step 4: 综合诊断结论
+      const step4 = await step<{
+        diagnosis: string;
+        confidence: number;
+        evidenceChain: Record<string, unknown>;
+      }>("综合诊断结论", async () => {
+        const cc = step3.crossCheck as {
+          suspiciousDevice: boolean;
+          suspiciousProcess: boolean;
+        };
+        const rootCause =
+          cc.suspiciousDevice && cc.suspiciousProcess
+            ? "设备健康下降 + 工艺参数漂移（强关联，建议先治设备）"
+            : cc.suspiciousDevice
+              ? "设备健康下降（振动/温度异常），传导至质量/性能"
+              : cc.suspiciousProcess
+                ? "工艺参数漂移（温度/压力偏离标准）"
+                : "无单一明显根因，需进一步现场排查";
+        return {
+          diagnosis: rootCause,
+          confidence: cc.suspiciousDevice || cc.suspiciousProcess ? 0.8 : 0.5,
+          evidenceChain: step3.primaryEvidence,
+        };
+      });
+
+      // Step 5: 包成诊断 EvidenceEnvelope
+      const step5 = await step<ReturnType<typeof wrapEvidence>>(
+        "包成诊断 EvidenceEnvelope",
+        async () => {
+          return wrapEvidence(
+            {
+              scenarioId: sctx.scenarioId,
+              line: sctx.line ?? "L01",
+              currentOEE: step1.oee.oee,
+              diagnosis: step4.diagnosis,
+              confidence: step4.confidence,
+              evidenceChain: step4.evidenceChain,
+              stepsExecuted: 5,
+            },
+            {
+              freshness: "realtime",
+              confidence: step4.confidence > 0.7 ? "measured" : "estimated",
+              system: "MES",
+              provenance: "skill.oee_diagnose",
+              caveat: "标准化诊断流，结论需现场工程师复核",
+            },
+          );
+        },
+      );
+
+      return step5;
+    },
   });
 }
-
-// skill 步骤通过 SkillStep.execute(ctx, params, priorResults) 拿到输入参数
-

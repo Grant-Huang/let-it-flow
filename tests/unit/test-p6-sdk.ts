@@ -4,7 +4,70 @@ import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { LetItFlow } from "../../src/sdk/let-it-flow.js";
 import type { StreamEvent } from "../../src/core/stream-events.js";
-import { podcastTemplate } from "../../examples/podcast-generator/template.js";
+import type { ConsumerTemplate } from "../../src/planner/consumer-template.js";
+import type { WorkflowDAG } from "../../src/planner/dag-schema.js";
+
+/**
+ * 内联最小 ConsumerTemplate（替代已废弃的 podcastTemplate）。
+ * 用 "研究/总结" 中性意图验证 SDK 的 HITL/clarify 机制，
+ * 不再耦合 podcast 业务模板（podcast-generator 已重构为 ai-content-factory + ReAct）。
+ *
+ * 设计：
+ *   - match：命中 "研究/总结/report" 关键词
+ *   - findMissingParams：意图过短（<8 字）时要求澄清主题（驱动 clarify 路径）
+ *   - build：2 节点文本链 fetch(requireConfirmation) → deliver，
+ *     复刻原 podcastTemplate 的 HITL 触发点，保留断言语义。
+ */
+const researchTemplate: ConsumerTemplate = {
+  templateId: "research",
+  description: "研究主题并交付：[topic: web_search→web_fetch | url: web_fetch] → deliver",
+  matchPattern: /研究|总结|report|做成|做一期|分析|播客|做播客/,
+  match: (intent: string) => /研究|总结|report|做成|做一期|分析|播客|做播客/.test(intent),
+  async extractParams(): Promise<unknown> {
+    return { sourceMode: "topic", topic: "test", style: "summary", language: "zh", maxSearchResults: 3 };
+  },
+  build(_params: unknown, _fullPipeline: boolean): WorkflowDAG {
+    const confirmed = { maxTokens: 4000, strip: true, summarize: false };
+    return {
+      schemaVersion: "1.0",
+      nodes: [
+        {
+          id: "fetch",
+          toolName: "core.web_fetch",
+          params: { urls: ["https://example.com"] },
+          inputRefs: {},
+          dependsOn: [],
+          requireConfirmation: true,
+          onNodeError: "abort",
+          contentPipeline: confirmed,
+        },
+        {
+          id: "deliver",
+          toolName: "core.deliver",
+          params: { artifactType: "research_report", title: "research" },
+          inputRefs: { "$.tasks.fetch.output[0].content": "items" },
+          dependsOn: ["fetch"],
+          requireConfirmation: false,
+          onNodeError: "abort",
+          contentPipeline: confirmed,
+        },
+      ],
+      onNodeError: "abort",
+      retryAttempts: 0,
+    };
+  },
+  wantsFullPipeline: () => false,
+  hasRequiredTools: () => true,
+  findMissingParams: (intent: string) => {
+    // 意图过短（无明确主题/URL）→ 要求澄清（驱动 clarify 路径）
+    const hasUrl = /https?:\/\//.test(intent);
+    const hasTopicSignal = intent.length > 8 || /关于|主题|topic|的/.test(intent);
+    if (!hasUrl && !hasTopicSignal) {
+      return [{ field: "topic", prompt: "请提供研究主题或素材 URL。" }];
+    }
+    return [];
+  },
+};
 
 let tmpRoot: string;
 beforeEach(() => {
@@ -58,12 +121,12 @@ describe("P6 SDK: execute() streaming", () => {
 
 describe("P6 SDK: HITL approve/reject", () => {
   it("confirm_gate → approve 释放后继续到终态", async () => {
-    const flow = new LetItFlow({ consumerTemplates: [podcastTemplate] });
-    // podcast url 意图 → fetch 节点 requireConfirmation → confirm_gate
+    const flow = new LetItFlow({ consumerTemplates: [researchTemplate] });
+    // research url 意图 → fetch 节点 requireConfirmation → confirm_gate
     // approve 后继续（可能因网络失败，但关键是闩锁被释放、不挂死）
     const { events, types } = await collect(
       flow,
-      "把 https://example.com 做成播客",
+      "把 https://example.com 做成研究报告",
       async (_ev, runId) => {
         await flow.approve(runId);
       },
@@ -71,13 +134,13 @@ describe("P6 SDK: HITL approve/reject", () => {
     expect(events.length).toBeGreaterThan(0);
     // 至少触发过 confirm_gate
     expect(types.filter((t) => t === "extension").length).toBeGreaterThan(0);
-  }, 20000);
+  }, 45000);
 
   it("confirm_gate → reject 后该节点跳过（HITL 拒绝不中止 DAG，下游按 onNodeError 处理）", async () => {
-    const flow = new LetItFlow({ consumerTemplates: [podcastTemplate] });
+    const flow = new LetItFlow({ consumerTemplates: [researchTemplate] });
     const { events } = await collect(
       flow,
-      "把 https://example.com 做成播客",
+      "把 https://example.com 做成研究报告",
       async (_ev, runId) => {
         await flow.reject(runId);
       },
@@ -101,11 +164,11 @@ describe("P6 SDK: HITL approve/reject", () => {
 
 describe("P6 SDK: clarify", () => {
   it("模糊意图 → clarification_required → clarify() 释放闩锁后重跑 planner", async () => {
-    const flow = new LetItFlow({ consumerTemplates: [podcastTemplate] });
+    const flow = new LetItFlow({ consumerTemplates: [researchTemplate] });
     const events: StreamEvent[] = [];
     let clarified = false;
     let gateCount = 0;
-    for await (const ev of flow.execute("做播客")) {
+    for await (const ev of flow.execute("做研究")) {
       events.push(ev);
       const name = ev.type === "extension" ? (ev.payload as { name?: string }).name : undefined;
       if (!clarified && name === "clarification_required") {
@@ -113,7 +176,6 @@ describe("P6 SDK: clarify", () => {
         await flow.clarify(ev.taskId, "主题是 AI 趋势，素材 https://example.com");
         clarified = true;
       }
-      // 重跑后每个 confirm_gate 都 reject，直到链路终止（fetch+rewrite 都有 HITL 门）
       if (clarified && name === "confirm_gate") {
         gateCount++;
         await flow.reject(ev.taskId);

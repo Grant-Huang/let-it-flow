@@ -19,6 +19,15 @@ export function createWorkflowsApp(registry: TaskRegistry): Hono {
   const bodySchema = z.object({
     intent: z.string().min(1),
     config: z.record(z.string(), z.unknown()).optional(),
+    /**
+     * 多轮追问：会话 id。传入时本次 task 归属该会话；缺省时 store 生成新会话。
+     */
+    conversationId: z.string().optional(),
+    /**
+     * 多轮追问：显式指定上一轮 task id（读取其产物构造压缩上下文）。
+     * 缺省时由会话链自动取最近一个 done task。
+     */
+    parentTaskId: z.string().optional(),
   });
 
   app.post("/", async (c) => {
@@ -29,7 +38,8 @@ export function createWorkflowsApp(registry: TaskRegistry): Hono {
         400,
       );
     }
-    const meta = registry.start(parsed.data.intent, parsed.data.config ?? {});
+    const { intent, config, conversationId, parentTaskId } = parsed.data;
+    const meta = registry.start(intent, config ?? {}, { conversationId, parentTaskId });
     return c.json(
       {
         status: "success",
@@ -37,6 +47,8 @@ export function createWorkflowsApp(registry: TaskRegistry): Hono {
           taskId: meta.id,
           status: meta.status,
           createdAt: meta.createdAt,
+          conversationId: meta.conversationId,
+          parentTaskId: meta.parentTaskId,
         },
       },
       201,

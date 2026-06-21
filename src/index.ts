@@ -41,7 +41,12 @@ export { PreconditionRegistry, calledToolNames } from "./agent/precondition.js";
 export { GovernanceChain } from "./agent/governance.js";
 export type { GovernanceRule } from "./agent/governance.js";
 export { createSkill } from "./agent/skill-bridge.js";
-export type { SkillConnector, SkillStep } from "./agent/skill-bridge.js";
+export type {
+  SkillConnector,
+  StepCtx,
+  StepsInput,
+  DynamicStepsFn,
+} from "./agent/skill-bridge.js";
 
 // ── 上下文（C 层）：KnowledgeProvider + EvidenceEnvelope ────────────────────
 export type {

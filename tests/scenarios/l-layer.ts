@@ -204,4 +204,112 @@ export const scenarioL4RegistryDismiss: Scenario = {
   },
 };
 
-export const lLayerScenarios: Scenario[] = [scenarioL1MiningPromotable, scenarioL2VetoedByAntiSignal, scenarioL3RegistryPromote, scenarioL4RegistryDismiss];
+export const scenarioL5MultiTurnFollowUp: Scenario = {
+  id: "L5",
+  layer: "L",
+  title: "多轮追问：上一轮 done task → 追问轮注入压缩上下文",
+  hypothesis: "用户首轮得出分析报告后，基于上轮结果继续追问（如'深挖 OEE 损失'）",
+  purpose: "验证会话链聚合（ConversationStore）+ compressTrace 能把上一轮取证轨迹压成上下文，供追问轮的 ReAct harness 注入",
+  procedure: [
+    "在临时 data 目录创建首轮 task，标记 done，并持久化 extension(react_step_trace) 事件",
+    "创建追问 task（同一 conversationId，parentTaskId 指向首轮）",
+    "用 ConversationStore.getLatestCompleted 取上一轮 done task",
+    "从上一轮 events 读回 react_step_trace，用 compressTrace 压成 traceDigest",
+    "构造 previousContext（intent + traceDigest + finalText）并断言内容完整",
+  ],
+  calls: [
+    { target: "FileTaskStore (create/setStatus/append/readByType)", kind: "real", note: "真实任务存储 + 事件落库 + 读取" },
+    { target: "ConversationStore (getLatestCompleted)", kind: "real", note: "真实会话链聚合（按 conversationId 扫描 meta）" },
+    { target: "compressTrace", kind: "real", note: "真实轨迹压缩（复用 review-pass 的产物）" },
+    { target: "StepTrace / finalText", kind: "synthetic", note: "手搓的上一轮取证轨迹（模拟 ReAct 产出）" },
+  ],
+  assertions: [
+    {
+      name: "会话聚合找到上一轮 done task",
+      expected: "getLatestCompleted 返回首轮 task（非 null）",
+    },
+    {
+      name: "压缩上下文含上一轮意图 + 轨迹 + 结论",
+      expected: "previousContext.intent/traceDigest/finalText 均非空，traceDigest 含 Thought",
+    },
+    {
+      name: "失败状态 task 不被选为 parent",
+      expected: "把首轮改为 error 后，getLatestCompleted 返回 null（不把失败上下文喂给 LLM）",
+    },
+  ],
+  async run() {
+    const { mkdtempSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { FileTaskStore } = await import("../../src/tasks/task-store.js");
+    const { ConversationStore } = await import("../../src/tasks/conversation-store.js");
+    const { compressTrace } = await import("../../src/agent/review-pass.js");
+    type StepTrace = import("../../src/agent/types.js").StepTrace;
+    type StreamEvent = import("../../src/core/stream-events.js").StreamEvent;
+
+    const dir = mkdtempSync(join(tmpdir(), "scn-l5-"));
+    const prevDataDir = process.env.LIF_DATA_DIR;
+    process.env.LIF_DATA_DIR = dir;
+    try {
+      const store = new FileTaskStore();
+      const convStore = new ConversationStore(store);
+
+      // 首轮 task：done + 持久化 stepTrace
+      const first = store.create("诊断 L01 OEE 偏低原因");
+      store.setStatus(first.id, "done");
+      const trace: StepTrace[] = [
+        {
+          stepNumber: 0,
+          thought: "先查 L01 实时 OEE 看损失结构",
+          toolCalls: [{
+            id: "tc_1", toolName: "oee.realtime", args: { line: "L01" },
+            result: { data: { oee: 0.65, availability: 0.9, performance: 0.72, quality: 0.99 } },
+            durationMs: 120,
+          }],
+          finishReason: "stop",
+          usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
+          durationMs: 200,
+        },
+      ];
+      const finalText = "L01 OEE=0.65，主要损失在性能率（0.72），疑为设备降速";
+      store.append(first.id, {
+        type: "extension", taskId: first.id, ts: Date.now(), channel: "status",
+        payload: { name: "react_step_trace", version: "1.0", data: { stepTrace: trace, finalText } },
+      } as Omit<StreamEvent, "seq">);
+
+      // 断言1：会话聚合找到上一轮 done task
+      const latest = convStore.getLatestCompleted(first.conversationId!);
+      this.assertions[0]!.actual = `getLatestCompleted = ${latest?.id ?? "null"}`;
+      this.assertions[0]!.passed = latest?.id === first.id;
+
+      // 断言2：从 events 读回 stepTrace → compressTrace → 构造 previousContext
+      const events = store.readByType(first.id, "extension");
+      const stEvent = events.find(
+        (e) => (e.payload as { name?: string }).name === "react_step_trace",
+      );
+      const stData = (stEvent!.payload as { data: { stepTrace: StepTrace[]; finalText: string } }).data;
+      const previousContext = {
+        intent: latest!.intent,
+        traceDigest: compressTrace(stData.stepTrace),
+        finalText: stData.finalText,
+      };
+      const hasIntent = previousContext.intent.includes("OEE");
+      const hasDigest = previousContext.traceDigest.includes("Thought");
+      const hasFinal = previousContext.finalText.includes("0.65");
+      this.assertions[1]!.actual = `intent非空=${hasIntent}, digest含Thought=${hasDigest}, final含结论=${hasFinal}`;
+      this.assertions[1]!.passed = hasIntent && hasDigest && hasFinal;
+
+      // 断言3：失败状态 task 不被选为 parent
+      store.setStatus(first.id, "error", "模拟失败");
+      const failed = convStore.getLatestCompleted(first.conversationId!);
+      this.assertions[2]!.actual = `改为 error 后 getLatestCompleted = ${failed?.id ?? "null"}`;
+      this.assertions[2]!.passed = failed === null;
+    } finally {
+      if (prevDataDir === undefined) delete process.env.LIF_DATA_DIR;
+      else process.env.LIF_DATA_DIR = prevDataDir;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  },
+};
+
+export const lLayerScenarios: Scenario[] = [scenarioL1MiningPromotable, scenarioL2VetoedByAntiSignal, scenarioL3RegistryPromote, scenarioL4RegistryDismiss, scenarioL5MultiTurnFollowUp];

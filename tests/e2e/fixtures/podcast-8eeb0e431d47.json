@@ -1,9 +1,34 @@
 {
   "intent": "做一期关于 2025 年 AI Agent 技术落地的播客，方向是 Agent 在企业场景的应用，时长 15 分钟",
-  "recordedAt": "2026-06-21T01:31:32.899Z",
-  "status": "error",
-  "calledTools": [],
-  "finalText": "",
-  "stepCount": 0,
-  "toolErrors": []
+  "recordedAt": "2026-06-21T03:07:56.967Z",
+  "status": "failed",
+  "calledTools": [
+    "core.web_search",
+    "core.web_search",
+    "core.web_search",
+    "core.web_search",
+    "core.web_search",
+    "core.web_search",
+    "core.knowledge_base",
+    "core.knowledge_base",
+    "core.web_fetch",
+    "core.web_fetch",
+    "skill.thread_focuser",
+    "skill.thread_focuser",
+    "core.llm_node"
+  ],
+  "finalText": "{\n  \"threads\": [\n    {\n      \"id\": \"1\",\n      \"summary\": \"为什么95%的企业AI Agent项目死在原型阶段？探讨技术理想与工程现实的巨大鸿沟。\",\n      \"evidence\": \"Lyzr.ai：约5%的企业AI Agent能进入生产环境，其余95%死在原型阶段。中国信息化周刊：核心矛盾在于“技术理想”与“工程现实”的割裂，数据地基薄弱、系统脆弱性、进化机制缺失。\",\n      \"argumentSpace\": 9\n    },\n    {\n      \"id\": \"2\",\n      \"summary\": \"从3天到47秒的金融审批革命：AI Agent如何让坏账率下降9.3%？\",\n      \"evidence\": \"BetterYeah：金融风控场景，AI Agent将审批时间从3天缩短至47秒，坏账率下降9.3%。这背后是智能分析、风险模型与自动化流程的结合。\",\n      \"argumentSpace\": 8\n    },\n    {\n      \"id\": \"3\",\n      \"summary\": \"AI Agent ≠ 大模型套壳：自主规划、长期记忆与多智能体协同的核心技术挑战\",\n      \"evidence\": \"CCF YOCSEF：AI Agent的核心在于自主性、交互性、主动性、进化性，关键技术包括任务分解与规划、长期记忆、决策与执行、多智能体协同等。大模型+AI Agent+MCP正在重塑智能化应用。\",\n      \"argumentSpace\": 9\n    },\n    {\n      \"id\": \"4\",\n      \"summary\": \"从数字看AI Agent真实回报：客服效率提升62%、加班减少70%、质检准确率99.3%\",\n      \"evidence\": \"LargitData：智慧客服处理时间缩短62%；财务合规加班时数减少70%，差错率从2.3%降至0.4%；BetterYeah：制造质检准确率99.3%，人工复检减少90%。\",\n      \"argumentSpace\": 8\n    },\n    {\n      \"id\": \"5\",\n      \"summary\": \"企业AI Agent市场将在2028年达3.3万亿元，狂飙背后的规模化陷阱\",\n      \"evidence\": \"中国信息化周刊：中国AI Agent行业市场规模预计2028年达3.3万亿元。IDC：34%企业正测试验证，但仅3%成功扩展到多部门。从试验到规模化应用仍面临系统脆弱性和进化机制缺失的挑战。\",\n      \"argumentSpace\": 8\n    },\n    {\n      \"id\": \"6\",\n      \"summary\": \"医疗AI Agent的0.7%误诊率：效率与信任的终极平衡\",\n      \"evidence\": \"BetterYeah：医疗诊断AI Agent使门诊效率提升40%，误诊率降至0.7%。但如此低的误诊率是否真能在临床大规模推广？责任归属和监管空白仍是悬而未决的问题。\",\n      \"argumentSpace\": 7\n    }\n  ]\n}",
+  "stepCount": 4,
+  "toolErrors": [
+    {
+      "toolName": "core.web_fetch",
+      "kind": "tool_error",
+      "message": "HTTP 403"
+    },
+    {
+      "toolName": "core.web_fetch",
+      "kind": "tool_error",
+      "message": "HTTP 403"
+    }
+  ]
 }

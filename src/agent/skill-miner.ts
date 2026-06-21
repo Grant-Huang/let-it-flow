@@ -6,7 +6,7 @@
  *   - 三硬信号 AND：簇内 ≥3 次 + 成本占比 >60% + 成功率 ≥80%
  *   - 反信号一票否决：含 inferred 硬结论 / HITL 决策 / governance 阻断 / _skill.errors
  *
- * 输出候选列表（不直接造 skill），由 skill-confirm.ts 转成 draft SkillStep。
+ * 输出候选列表（不直接造 skill），由 skill-confirm.ts 转成 draft DynamicStepsFn。
  *
  * 不做分类器：宁可多召回（多提示几次），用 SkillRegistry 跨会话去重消化噪音。
  */

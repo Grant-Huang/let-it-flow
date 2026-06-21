@@ -23,7 +23,7 @@ export default function NexusChatPage() {
   const [history, setHistory] = useState<Message[]>([]);
   const [artifactVisible, setArtifactVisible] = useState(false);
 
-  const { state, taskId, isStreaming, start, replay, confirm, clarify, abort, reset } = useNexusStream();
+  const { state, taskId, conversationId, isStreaming, start, followUp, replay, confirm, clarify, abort, reset } = useNexusStream();
 
   const navItems: NavItem[] = [
     { id: "analyze", label: "分析", icon: <IconChart />, active: activeNav === "analyze", onClick: () => setActiveNav("analyze") },
@@ -34,13 +34,20 @@ export default function NexusChatPage() {
   const handleSend = async () => {
     const intent = input.trim();
     if (!intent || isStreaming) return;
+    // 把用户意图压入历史轮次（多轮展示）
     setHistory((prev) => [
       ...prev,
       { id: `u-${Date.now()}`, role: "user", content: intent, timestamp: new Date().toISOString() },
     ]);
     setInput("");
-    reset();
-    await start(intent);
+    // 多轮追问：有 conversationId 且上一轮已完成 → followUp；否则 start（新会话）
+    const canFollowUp = !!conversationId && state.status === "idle";
+    if (canFollowUp) {
+      await followUp(intent);
+    } else {
+      reset();
+      await start(intent);
+    }
   };
 
   const handleAbort = () => {

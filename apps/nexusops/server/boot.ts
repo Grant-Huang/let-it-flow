@@ -30,8 +30,8 @@ import { loadConfig } from "../../../src/llm/config-loader.js";
 import { ensureSeedConfig } from "../../../src/llm/seed.js";
 import { globalEventBus } from "../../../src/core/event-bus.js";
 import { runReactHarness } from "../../../src/agent/react-harness.js";
-import { runReviewPass } from "../../../src/agent/review-pass.js";
-import type { HarnessConfig, EmitFn } from "../../../src/agent/types.js";
+import { runReviewPass, compressTrace } from "../../../src/agent/review-pass.js";
+import type { HarnessConfig, EmitFn, StepTrace } from "../../../src/agent/types.js";
 import { governanceToHooks } from "../../../src/agent/governance.js";
 import { SkillRegistry } from "../../../src/agent/skill-registry.js";
 import { promotableCandidates } from "../../../src/agent/skill-miner.js";
@@ -43,6 +43,8 @@ import { buildNexusPreconditions, nexusPreconditionList } from "./preconditions.
 import { buildNexusGovernance } from "./governance.js";
 import { buildNexusPrepareStep } from "./prepare-step.js";
 import { buildNexusPostToolUseChain } from "./post-rules.js";
+import { FileTaskStore } from "../../../src/tasks/task-store.js";
+import { ConversationStore } from "../../../src/tasks/conversation-store.js";
 import type { TaskRuntime, TaskRunnerHooks } from "../../../src/tasks/registry.js";
 
 /** 解析 MCP server 配置（NEXUS_MCP_SERVERS env，JSON 数组）。 */
@@ -189,13 +191,21 @@ export async function bootNexusOps(opts: NexusBootOptions = {}): Promise<NexusRu
   // review pass 开关（默认关，生产可开；用便宜模型事后审计）
   const reviewPassEnabled = process.env.NEXUS_REVIEW_PASS === "1";
 
+  // 会话存储（多轮追问：读上一轮产物构造压缩上下文）
+  const taskStore = new FileTaskStore();
+  const conversationStore = new ConversationStore(taskStore);
+
   const customRunner: NonNullable<TaskRuntime["customRunner"]> = async (
     taskId: string,
     intent: string,
     hooks: TaskRunnerHooks,
+    context?: { parentTaskId?: string; conversationId?: string },
   ) => {
     hooks.setStatus("running");
     hooks.emit("phase", { stage: "react", label: "ReAct 智能分析", state: "running" } as never);
+
+    // 多轮追问：从 parentTask 读取上一轮压缩上下文（仅 done 状态的 task 可作 parent）
+    const previousContext = resolvePreviousContext(context, conversationStore, taskStore);
 
     // emit 桥：harness 事件 → 内核 store（落库 + SSE）
     const emit: EmitFn = async (event) => {
@@ -235,6 +245,8 @@ export async function bootNexusOps(opts: NexusBootOptions = {}): Promise<NexusRu
       prepareStep,
       requireConfirmation,
       emit,
+      // 多轮追问：注入上一轮压缩上下文（首轮缺省）
+      previousContext,
       // 兼容模式（DeepSeek 等）：折叠 system 进 user，规避 developer 角色
       compatMode: llm.compatModeFor ? llm.compatModeFor("nexus_agent") : false,
       systemPrompt: NEXUS_SYSTEM_PROMPT,
@@ -282,6 +294,16 @@ export async function bootNexusOps(opts: NexusBootOptions = {}): Promise<NexusRu
           stepCount: result.stepTrace.length,
           usage: result.usage,
         },
+      } as never,
+    );
+
+    // 持久化完整 stepTrace（供多轮追问还原上一轮压缩上下文）
+    hooks.emit(
+      "extension",
+      {
+        name: "react_step_trace",
+        version: "1.0",
+        data: { stepTrace: result.stepTrace, finalText: result.finalText },
       } as never,
     );
 
@@ -375,3 +397,68 @@ const NEXUS_SYSTEM_PROMPT = `
   - mcp.process.adjust_parameters（工艺参数回调，参数漂移首选）
 - destructive 动作（停线/批量报废）仅在确有安全/不可挽回风险时建议，且必须附具体 reason；正常工况绝不建议 destructive 动作。
 `.trim();
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 多轮追问辅助：从 parentTask 还原上一轮压缩上下文
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 多轮追问上下文解析。
+ *
+ * 策略（按优先级）：
+ *   1. context.parentTaskId 显式指定 → 读该 task
+ *   2. context.conversationId 存在 → 取会话内最近一个 done task
+ *   3. 无 parent（首轮）→ 返回 undefined
+ *
+ * 仅 done 状态的 task 可作 parent（避免把失败上下文喂给 LLM）。
+ */
+function resolvePreviousContext(
+  context: { parentTaskId?: string; conversationId?: string } | undefined,
+  conversationStore: ConversationStore,
+  taskStore: FileTaskStore,
+): HarnessConfig["previousContext"] {
+  if (!context) return undefined;
+
+  // 1. 显式 parentTaskId
+  let parentMeta = context.parentTaskId ? taskStore.get(context.parentTaskId) : null;
+
+  // 2. 回退：取会话最近 done task
+  if (!parentMeta && context.conversationId) {
+    parentMeta = conversationStore.getLatestCompleted(context.conversationId);
+  }
+
+  if (!parentMeta || parentMeta.status !== "done") return undefined;
+
+  const extracted = extractStepTraceFromTask(parentMeta.id, taskStore);
+  if (!extracted) return undefined;
+
+  return {
+    intent: parentMeta.intent,
+    traceDigest: compressTrace(extracted.stepTrace),
+    finalText: extracted.finalText,
+  };
+}
+
+/**
+ * 从 task 的 events.jsonl 还原 stepTrace + finalText。
+ *
+ * 读取 customRunner 在成功路径落库的 extension(react_step_trace) 事件。
+ * 兼容旧 task（无此事件）时返回 null（首轮/降级为无上下文）。
+ */
+function extractStepTraceFromTask(
+  taskId: string,
+  taskStore: FileTaskStore,
+): { stepTrace: StepTrace[]; finalText: string } | null {
+  const events = taskStore.readByType(taskId, "extension");
+  for (const ev of events) {
+    const payload = ev.payload as { name?: string; data?: Record<string, unknown> };
+    if (payload?.name !== "react_step_trace") continue;
+    const data = payload.data ?? {};
+    const stepTrace = data.stepTrace;
+    const finalText = typeof data.finalText === "string" ? data.finalText : "";
+    if (Array.isArray(stepTrace)) {
+      return { stepTrace: stepTrace as StepTrace[], finalText };
+    }
+  }
+  return null;
+}

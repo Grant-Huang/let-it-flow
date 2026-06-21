@@ -9,10 +9,67 @@ import { ToolRegistry } from "../../src/tools/registry.js";
 import { registerBuiltinTools } from "../../src/tools/index.js";
 import { LlmService } from "../../src/services/llm-service.js";
 import { plan, type PlannerConfig } from "../../src/planner/planner.js";
-import { podcastTemplate } from "../../examples/podcast-generator/template.js";
+import type { ConsumerTemplate } from "../../src/planner/consumer-template.js";
+import type { WorkflowDAG } from "../../src/planner/dag-schema.js";
 import type { FlowConnector, ToolTrigger, ToolResult } from "../../src/tools/base.js";
 import type { ToolEvent } from "../../src/core/stream-events.js";
 import type { ToolManifest } from "../../src/tools/registry.js";
+
+/**
+ * 内联最小 ConsumerTemplate（替代已废弃的 podcastTemplate）。
+ * 仅用于验证 planner 模板兜底机制，不耦合 podcast 业务。
+ * 结构复刻原 podcast 文本子链：fetch → rewrite(llm_node) → deliver，
+ * 保留断言对 fetch/rewrite/deliver 三节点的验证语义。
+ */
+const fallbackTemplate: ConsumerTemplate = {
+  templateId: "research",
+  description: "研究主题并交付（最小兜底模板，复刻 fetch→rewrite→deliver 三节点）",
+  matchPattern: /研究|总结|report|做成|做一期|分析|播客/,
+  match: (intent: string) => /研究|总结|report|做成|做一期|分析|播客/.test(intent),
+  async extractParams(): Promise<unknown> {
+    return { topic: "test", style: "summary", language: "zh" };
+  },
+  build(_params: unknown, _fullPipeline: boolean): WorkflowDAG {
+    const confirmed = { maxTokens: 4000, strip: true, summarize: false };
+    return {
+      schemaVersion: "1.0",
+      nodes: [
+        {
+          id: "fetch",
+          toolName: "core.web_fetch",
+          params: { urls: ["https://example.com"] },
+          inputRefs: {},
+          dependsOn: [],
+          requireConfirmation: false,
+          onNodeError: "skip",
+          contentPipeline: confirmed,
+        },
+        {
+          id: "rewrite",
+          toolName: "core.llm_node",
+          params: { prompt: "改写素材", style: "summary", role: "writer" },
+          inputRefs: { "$.tasks.fetch.output[0].content": "context" },
+          dependsOn: ["fetch"],
+          requireConfirmation: false,
+          onNodeError: "skip",
+          contentPipeline: { maxTokens: 6000, strip: true, summarize: false },
+        },
+        {
+          id: "deliver",
+          toolName: "core.deliver",
+          params: { artifactType: "research_report" },
+          inputRefs: { "$.tasks.rewrite.output": "items" },
+          dependsOn: ["rewrite"],
+          requireConfirmation: false,
+          onNodeError: "skip",
+          contentPipeline: confirmed,
+        },
+      ],
+      onNodeError: "skip",
+      retryAttempts: 0,
+    };
+  },
+};
 
 let tmpRoot: string;
 beforeEach(() => {
@@ -148,19 +205,19 @@ describe("P7 planner LLM 选工具路径", () => {
   }
 
   it("LLM 不可用时回退模板路由（向后兼容）", async () => {
-    // mock LLM 调真 generateText 会失败 → LLM 路径返回 null → 回退消费模板 buildPodcastDag
+    // mock LLM 调真 generateText 会失败 → LLM 路径返回 null → 回退消费模板
     const reg = coreRegistry();
     const config: PlannerConfig = {
       llm: mockLlm(),
       registry: reg,
       maxRetries: 1,
       useLlmRouter: true,
-      consumerTemplates: [podcastTemplate],
+      consumerTemplates: [fallbackTemplate],
     };
-    const outcome = await plan("把 https://example.com 做成播客", config);
+    const outcome = await plan("把 https://example.com 做成研究报告", config);
     expect(outcome.kind).toBe("proceed");
     if (outcome.kind === "proceed") {
-      // 兜底走 buildPodcastDag，应含 fetch + rewrite + deliver（文本子链）
+      // 兜底走 fallback 模板，应含 fetch + rewrite + deliver（三节点文本子链）
       const ids = outcome.dag.nodes.map((n) => n.id);
       expect(ids).toContain("fetch");
       expect(ids).toContain("rewrite");
@@ -175,9 +232,9 @@ describe("P7 planner LLM 选工具路径", () => {
       registry: reg,
       maxRetries: 1,
       useLlmRouter: false,
-      consumerTemplates: [podcastTemplate],
+      consumerTemplates: [fallbackTemplate],
     };
-    const outcome = await plan("把 https://example.com 做成播客", config);
+    const outcome = await plan("把 https://example.com 做成研究报告", config);
     expect(outcome.kind).toBe("proceed");
     if (outcome.kind === "proceed") {
       const ids = outcome.dag.nodes.map((n) => n.id);

@@ -42,6 +42,10 @@ export interface TaskCreated {
   taskId: string;
   status: string;
   createdAt: string;
+  /** 多轮追问：本次 task 归属的会话 id。 */
+  conversationId?: string;
+  /** 多轮追问：上一轮 task id（追问轮）。 */
+  parentTaskId?: string;
 }
 
 export interface TaskMeta {
@@ -52,6 +56,8 @@ export interface TaskMeta {
   updatedAt?: string;
   lastSeq?: number;
   config?: Record<string, unknown>;
+  conversationId?: string;
+  parentTaskId?: string;
 }
 
 export interface ConfirmDecision {
@@ -60,9 +66,19 @@ export interface ConfirmDecision {
   note?: string;
 }
 
-/** 创建并启动 NexusOps 分析任务 */
-export function createWorkflow(intent: string, config?: object): Promise<TaskCreated> {
-  return api.post<TaskCreated>("/api/workflows", { intent, config });
+/** 创建并启动 NexusOps 分析任务（支持多轮追问） */
+export function createWorkflow(
+  intent: string,
+  options?: {
+    config?: object;
+    /** 追问时传入：归属已有会话。 */
+    conversationId?: string;
+    /** 追问时传入：显式指定上一轮 task。 */
+    parentTaskId?: string;
+  },
+): Promise<TaskCreated> {
+  const { config, conversationId, parentTaskId } = options ?? {};
+  return api.post<TaskCreated>("/api/workflows", { intent, config, conversationId, parentTaskId });
 }
 
 /** 查询单个任务 meta */
@@ -81,6 +97,23 @@ export interface TaskSummary {
   status: string;
   createdAt: number;
   updatedAt: number;
+  conversationId?: string;
+  parentTaskId?: string;
+}
+
+/** 会话摘要（GET /api/conversations 返回） */
+export interface ConversationSummary {
+  conversationId: string;
+  title: string;
+  taskCount: number;
+  createdAt: number;
+  lastActiveAt: number;
+  lastStatus: string;
+}
+
+/** 查询会话列表（按最近活跃降序） */
+export function listConversations(): Promise<ConversationSummary[]> {
+  return api.get<ConversationSummary[]>("/api/conversations");
 }
 
 /** HITL 确认门 */

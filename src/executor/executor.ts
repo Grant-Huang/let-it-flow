@@ -48,6 +48,9 @@ export async function executeDag(
     registry: ToolRegistry;
   },
 ): Promise<ExecuteDagResult> {
+  // #region agent log
+  fetch('http://127.0.0.1:7845/ingest/b379246d-e95c-44b9-8a2e-1ef8ddffc36c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'594ab9'},body:JSON.stringify({sessionId:'594ab9',location:'executor.ts:execute-entry',message:'executeDag 入口',data:{taskId:args.taskId,nodes:dag.nodes.map(n=>({id:n.id,tool:n.toolName,confirm:n.requireConfirmation}))},timestamp:Date.now(),hypothesisId:'H4'})}).catch(()=>{});
+  // #endregion
   const ctx = new ExecutionContext({
     taskId: args.taskId,
     runId: args.runId,
@@ -61,10 +64,16 @@ export async function executeDag(
 
   for (const layer of layers) {
     // 同层并发；任一 abort 抛错则 Promise.all reject → 整体终止
+    // #region agent log
+    fetch('http://127.0.0.1:7845/ingest/b379246d-e95c-44b9-8a2e-1ef8ddffc36c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'594ab9'},body:JSON.stringify({sessionId:'594ab9',location:'executor.ts:layer-start',message:'执行 layer',data:{taskId:args.taskId,nodes:layer.map(n=>n.id)},timestamp:Date.now(),hypothesisId:'H4'})}).catch(()=>{});
+    // #endregion
     try {
       await Promise.all(layer.map((node) => runLayerNode(node, dag, ctx, args.registry)));
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      // #region agent log
+      fetch('http://127.0.0.1:7845/ingest/b379246d-e95c-44b9-8a2e-1ef8ddffc36c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'594ab9'},body:JSON.stringify({sessionId:'594ab9',location:'executor.ts:layer-error',message:'layer 异常',data:{taskId:args.taskId,msg},timestamp:Date.now(),hypothesisId:'H4'})}).catch(()=>{});
+      // #endregion
       await ctx.emit({
         type: "error",
         channel: "meta",
