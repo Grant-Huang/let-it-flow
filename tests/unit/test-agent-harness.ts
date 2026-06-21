@@ -308,7 +308,7 @@ describe("governance：GovernanceChain", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("skill-bridge：createSkill", () => {
-  it("产出 SkillConnector 含 kind=skill + steps", () => {
+  it("产出 SkillConnector 含 kind=skill + dynamicSteps", () => {
     const skill = createSkill({
       name: "skill.demo",
       description: "演示 skill",
@@ -316,13 +316,15 @@ describe("skill-bridge：createSkill", () => {
       inputSchema: { type: "object", properties: {} },
       outputSchema: { type: "object", properties: {} },
       outputExample: {},
-      steps: [
-        { description: "第一步", execute: async () => "r1" },
-        { description: "第二步", execute: async (_ctx, prior) => `${prior.length} done` },
-      ],
+      async steps(input) {
+        const { step } = input;
+        const a = await step("第一步", async () => "r1");
+        await step("第二步", async () => `${a} done`);
+        return {};
+      },
     });
     expect(skill.kind).toBe("skill");
-    expect(skill.steps.length).toBe(2);
+    expect(typeof skill.dynamicSteps).toBe("function");
     expect(skill.tier).toBe("domain");
     expect(skill.description).toContain("[Skill]");
   });
@@ -335,15 +337,18 @@ describe("skill-bridge：createSkill", () => {
       inputSchema: { type: "object", properties: {} },
       outputSchema: { type: "object", properties: {} },
       outputExample: {},
-      steps: [
-        { description: "s1", execute: async () => "a" },
-        { description: "s2", execute: async () => "b" },
-      ],
+      async steps(input) {
+        const { step } = input;
+        const a = await step("s1", async () => "a");
+        const b = await step("s2", async () => "b");
+        return { last: b, first: a };
+      },
     });
     const ctx = {
       taskId: "t", runId: "r", nodeId: "n", intent: "",
       emit: async () => ({}), requireConfirmation: async () => ({ approved: true }),
-      resolveRef: () => undefined, recordOutput: () => {}, getOutput: () => undefined,
+      resolveRef: () => undefined, resolveTool: () => undefined,
+      recordOutput: () => {}, getOutput: () => undefined,
       bindNode: () => ({}), setIntent: () => {},
     } as unknown as Parameters<FlowConnector["execute"]>[1];
     const gen = skill.execute({}, ctx);
@@ -372,15 +377,18 @@ describe("skill-bridge：createSkill", () => {
       inputSchema: { type: "object", properties: {} },
       outputSchema: { type: "object", properties: {} },
       outputExample: {},
-      steps: [
-        { description: "ok", execute: async () => "ok" },
-        { description: "boom", execute: async () => { throw new Error("炸了"); } },
-      ],
+      async steps(input) {
+        const { step } = input;
+        await step("ok", async () => "ok");
+        await step("boom", async () => { throw new Error("炸了"); });
+        return {};
+      },
     });
     const ctx = {
       taskId: "t", runId: "r", nodeId: "n", intent: "",
       emit: async () => ({}), requireConfirmation: async () => ({ approved: true }),
-      resolveRef: () => undefined, recordOutput: () => {}, getOutput: () => undefined,
+      resolveRef: () => undefined, resolveTool: () => undefined,
+      recordOutput: () => {}, getOutput: () => undefined,
       bindNode: () => ({}), setIntent: () => {},
     } as unknown as Parameters<FlowConnector["execute"]>[1];
     const gen = skill.execute({}, ctx);
@@ -403,7 +411,11 @@ describe("skill-bridge：createSkill", () => {
       inputSchema: { type: "object", properties: {} },
       outputSchema: { type: "object", properties: {} },
       outputExample: {},
-      steps: [{ description: "s", execute: async () => 1 }],
+      async steps(input) {
+        const { step } = input;
+        await step("s", async () => 1);
+        return {};
+      },
     }) as SkillConnector;
     reg.register(skill);
     expect(reg.has("skill.reg")).toBe(true);

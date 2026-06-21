@@ -81,10 +81,14 @@ describe("S5 skill.oee_diagnose 执行", () => {
   const skills = buildNexusSkills();
   const oeeSkill = skills.find((s) => s.name === "skill.oee_diagnose") as SkillConnector;
 
-  it("skill 存在且 kind=skill", () => {
+  it("skill 存在且 kind=skill + 动态流程", async () => {
     expect(oeeSkill).toBeDefined();
     expect(oeeSkill.kind).toBe("skill");
-    expect(oeeSkill.steps.length).toBe(5);
+    expect(typeof oeeSkill.dynamicSteps).toBe("function");
+    // 执行一次验证步骤数为 5（固定序列）
+    const result = await runSkill(oeeSkill, { scenarioId: "anomaly", line: "L01" });
+    const meta = (result.output as { data: { _skill: { stepCount: number } } }).data._skill;
+    expect(meta.stepCount).toBe(5);
   });
 
   it("anomaly 场景诊断出设备/工艺问题", async () => {
@@ -113,9 +117,13 @@ describe("S5 skill.downtime_root_cause 执行", () => {
   const skills = buildNexusSkills();
   const downtimeSkill = skills.find((s) => s.name === "skill.downtime_root_cause") as SkillConnector;
 
-  it("skill 存在且 4 步", () => {
+  it("skill 存在且 4 步", async () => {
     expect(downtimeSkill).toBeDefined();
-    expect(downtimeSkill.steps.length).toBe(4);
+    expect(typeof downtimeSkill.dynamicSteps).toBe("function");
+    // 执行一次验证步骤数为 4（固定序列）
+    const result = await runSkill(downtimeSkill, { scenarioId: "crisis", line: "L01" });
+    const meta = (result.output as { data: { _skill: { stepCount: number } } }).data._skill;
+    expect(meta.stepCount).toBe(4);
   });
 
   it("crisis 场景识别设备退化根因", async () => {

@@ -25,7 +25,12 @@ export interface FetchedDoc {
 }
 
 const inputSchema = z.object({
-  urls: z.array(z.string().url()).min(1).describe("要抓取的 URL 列表"),
+  /**
+   * 要抓取的 URL 列表。
+   * 可选：当通过 fromInputRefs 注入时（podcast topic 模式等）可不传 urls。
+   * execute 内校验 urls 与 fromInputRefs 至少其一非空。
+   */
+  urls: z.array(z.string().url()).min(1).optional().describe("要抓取的 URL 列表（与 fromInputRefs 二选一）"),
   /** 当通过 inputRefs 引用上游 web_search 结果时，executor 解析后注入此处。 */
   fromInputRefs: z
     .array(z.object({ url: z.string(), title: z.string().optional() }))
@@ -75,8 +80,14 @@ export function createWebFetchTool(): FlowConnector<FetchedDoc[]> {
 
     async *execute(params, ctx): AsyncGenerator<ToolEvent, ToolResult<FetchedDoc[]>> {
       const args = inputSchema.parse(params);
+      // urls 与 fromInputRefs 二选一：解决 topic 模式（只注入 fromInputRefs）的 schema 冲突
+      const hasUrls = args.urls && args.urls.length > 0;
+      const hasRefs = args.fromInputRefs && args.fromInputRefs.length > 0;
+      if (!hasUrls && !hasRefs) {
+        throw new Error("web_fetch 需要 urls 或 fromInputRefs 至少其一非空");
+      }
       const targets: Array<{ url: string; title?: string }> =
-        args.fromInputRefs && args.fromInputRefs.length > 0 ? args.fromInputRefs : args.urls.map((url) => ({ url }));
+        args.fromInputRefs && args.fromInputRefs.length > 0 ? args.fromInputRefs : (args.urls ?? []).map((url) => ({ url }));
 
       const callId = `c_${randomUUID().slice(0, 8)}`;
       yield {

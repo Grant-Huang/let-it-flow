@@ -44,6 +44,13 @@ export interface ExecutionContext {
   }) => Promise<{ approved: boolean; params?: Record<string, unknown> }>;
   /** 解析 JSONPath 引用到上游节点输出（由 executor 的 context 提供）。 */
   resolveRef: (ref: string) => unknown;
+  /**
+   * 按名查注册表工具（DSL ctx.call 用，ReAct 模式下由 tool-adapter 注入）。
+   * skill 的动态 DSL 用 ctx.call("thought", params) 调已注册工具，
+   * 此函数把别名解析后查 ToolRegistry 返回 FlowConnector。
+   * DAG executor 模式无注册表，此字段缺省 undefined。
+   */
+  resolveTool?: (name: string) => FlowConnector | undefined;
 }
 
 /** 工具执行结果：最终结构化输出（供下游节点 $.tasks[id].output 引用）。 */

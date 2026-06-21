@@ -30,6 +30,13 @@ export interface ToolAdapterDeps {
   /** 事件发射器（→ SSE）。 */
   emit?: EmitFn;
   /**
+   * 按名查注册表工具（DSL ctx.call 用）。
+   * skill 的动态 DSL 用 ctx.call("thought", params) 调已注册工具，
+   * 此函数把别名解析后查 ToolRegistry 返回 FlowConnector。
+   * 缺省 undefined（非 DSL 场景不需要）。
+   */
+  resolveTool?: (name: string) => FlowConnector | undefined;
+  /**
    * Governance preToolUse 钩子（G 层阻断规则）。
    * 工具执行前调用；返回 allow=false 则拒绝执行（不发请求）。
    * 注意：与 HITL 不同，governance 是确定性阻断（不询问用户）。
@@ -284,6 +291,7 @@ function buildAdapterContext(
       return deps.requireConfirmation(gate);
     },
     resolveRef: (_ref: string) => undefined, // ReAct 模式无 DAG inputRefs
+    resolveTool: deps.resolveTool, // DSL ctx.call 用（查注册表调其他工具）
     recordOutput: () => {},
     getOutput: () => undefined,
     bindNode: () => ({}),

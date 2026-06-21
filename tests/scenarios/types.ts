@@ -41,8 +41,8 @@ export interface CallProvenance {
 export interface Scenario {
   /** 场景 ID。 */
   id: string;
-  /** 所属层（ETCLOVG）。 */
-  layer: "V" | "G" | "C" | "L" | "T";
+  /** 所属层（ETCLOVG）。E=端到端 fixture 回放。 */
+  layer: "V" | "G" | "C" | "L" | "T" | "E";
   /** 场景标题。 */
   title: string;
   /** 背景假设（"如果……"）。 */

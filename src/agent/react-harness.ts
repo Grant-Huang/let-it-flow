@@ -49,6 +49,7 @@ export async function runReactHarness(
     preconditions = [],
     emit,
     systemPrompt,
+    previousContext,
     abortSignal,
   } = config;
   const compatMode = config.compatMode ?? false;
@@ -67,9 +68,12 @@ export async function runReactHarness(
 
   // 收集工具名 → 风险评级映射（供 step trace 还原）
   const riskMap = new Map<string, "safe" | "write" | "destructive">();
+  // AI SDK key 形态 → 原始工具名的精确映射（避免 _ → . 的有损字符串替换）
+  const keyToName = new Map<string, string>();
   for (const c of connectors) {
     const risk = (c as { risk?: "safe" | "write" | "destructive" }).risk ?? "safe";
     riskMap.set(c.name, risk);
+    keyToName.set(toolNameToKey(c.name), c.name);
   }
   // finalize sentinel 工具名（SDK key 形态）
   const finalizeKey = toolNameToKey(stopPolicy?.finalizeTool ?? "nexus_finalize");
@@ -80,6 +84,8 @@ export async function runReactHarness(
     {
       requireConfirmation: config.requireConfirmation,
       emit,
+      // DSL ctx.call 需要：把 registry 查询能力透传给 skill 的动态步骤上下文
+      resolveTool: config.registry.get?.bind(config.registry),
       governancePreToolUse: config.governanceHooks?.preToolUse,
       governancePostToolUse: config.governanceHooks?.postToolUse,
     },
@@ -100,10 +106,12 @@ export async function runReactHarness(
 
   // 5. 发起 streamText（多步循环）
   try {
+    // 构造 user 消息内容：多轮追问时前置历史摘要
+    const userContent = buildUserContent(intent, previousContext);
     // 兼容模式（DeepSeek 等）：把 system 折叠进 user 消息，规避 `developer` 角色
     const streamArgs = compatMode
-      ? { messages: [{ role: "user" as const, content: `${system}\n\n---\n${intent}` }] }
-      : { system, messages: [{ role: "user" as const, content: intent }] };
+      ? { messages: [{ role: "user" as const, content: `${system}\n\n---\n${userContent}` }] }
+      : { system, messages: [{ role: "user" as const, content: userContent }] };
     const result = streamText({
       model,
       ...streamArgs,
@@ -112,7 +120,7 @@ export async function runReactHarness(
       abortSignal,
       onStepFinish: async (ev) => {
         // O 层：转 StepTrace 累积
-        const trace = convertStep(ev, riskMap, confirmedSet, rejectedSet);
+        const trace = convertStep(ev, riskMap, confirmedSet, rejectedSet, keyToName);
         accumulator.push(trace);
         // E 层：发 phase 事件（前端可见）
         await emitStepPhase(emit, ev.stepNumber, "done");
@@ -120,7 +128,7 @@ export async function runReactHarness(
       prepareStep: ({ steps, stepNumber }) => {
         // C 层钩子：应用自定义裁剪/注入
         if (!prepareStep) return undefined;
-        const stepTraces = steps.map((s) => convertStep(s, riskMap, confirmedSet, rejectedSet));
+        const stepTraces = steps.map((s) => convertStep(s, riskMap, confirmedSet, rejectedSet, keyToName));
         const stepResult = prepareStep({ steps: stepTraces, stepNumber, intent });
         if (!stepResult) return undefined;
         // 透传成 SDK 的 PrepareStepResult（activeTools 转成 SDK key 形态）
@@ -191,14 +199,24 @@ function resolveFinishReason(
   preconditions: Precondition[],
 ): HarnessResult["finishReason"] {
   // 触发 finalize sentinel
+  // 注：stepTrace 里的 toolName 经 keyToToolName 转换（_ → .），
+  // 故 finalizeTool（原始名如 nexus_finalize）需同时匹配转换后的形态（nexus.finalize）
   if (finalizeTool) {
+    const finalizeKeyForm = finalizeTool.replace(/_/g, ".");
     const calledFinalize = traces.some((t) =>
-      t.toolCalls.some((tc) => tc.toolName === finalizeTool),
+      t.toolCalls.some((tc) => tc.toolName === finalizeTool || tc.toolName === finalizeKeyForm),
     );
     if (calledFinalize) return "finalize_tool";
   }
 
-  // 检查 on_finalize 型前置条件
+  // 澄清反问场景：LLM 第一步就没调任何工具直接输出文本（如反问用户补全意图）。
+  // 这是合法的早期返回，不应触发 on_finalize 前置条件判定。
+  const hasAnyToolCall = traces.some((t) => t.toolCalls.length > 0);
+  if (!hasAnyToolCall) {
+    return rawFinishReason === "stop" ? "no_tool_call" : "no_tool_call";
+  }
+
+  // 检查 on_finalize 型前置条件（仅当 LLM 已做过工具调用后才检查）
   for (const p of preconditions) {
     if ((p.phase ?? "on_finalize") !== "on_finalize") continue;
     const r = p.check(traces);
@@ -240,18 +258,51 @@ function buildSystemPrompt(
   return parts.join("\n");
 }
 
+/**
+ * 构造 user 消息内容：多轮追问时前置上一轮的压缩历史摘要。
+ *
+ * previousContext 存在时拼接：
+ *   ## 上一轮分析（已压缩）
+ *   意图：...
+ *   轨迹：<compressTrace 产出>
+ *   结论：...
+ *
+ *   ## 本轮追问
+ *   <intent>
+ *
+ * 缺省（首轮）直接返回 intent。
+ */
+function buildUserContent(
+  intent: string,
+  previousContext: HarnessConfig["previousContext"],
+): string {
+  if (!previousContext) return intent;
+  return [
+    "## 上一轮分析（已压缩）",
+    `意图：${previousContext.intent}`,
+    `轨迹：\n${previousContext.traceDigest}`,
+    `结论：${previousContext.finalText}`,
+    "",
+    "## 本轮追问",
+    intent,
+  ].join("\n");
+}
+
 /** 转 StepTrace。SDK step 事件的 TOOLS 泛型与本模块无关，故入参用 any 规避泛型穿透。 */
 function convertStep(
   ev: any,
   riskMap: Map<string, "safe" | "write" | "destructive">,
   confirmedSet: Set<string>,
   rejectedSet: Set<string>,
+  keyToName?: Map<string, string>,
 ): StepTrace {
   const toolCalls: StepTrace["toolCalls"] = ((ev?.toolCalls ?? []) as any[]).map((tc, i) => {
     const isDynamic = typeof tc?.type === "string" && tc.type.startsWith("dynamic");
+    const rawName: string = tc.toolName ?? "unknown";
+    // 优先用 keyToName 精确还原原始工具名；无映射时退回字符串替换（兼容未传映射的旧调用）
     const toolName = isDynamic
-      ? (tc.toolName ?? "unknown")
-      : (tc.toolName ?? "unknown").replace(/_/g, ".");
+      ? rawName
+      : (keyToName?.get(rawName) ?? rawName.replace(/_/g, "."));
     const result = ev?.toolResults?.[i] ?? {};
     const id: string = tc?.id ?? `tc_${i}`;
     return {
