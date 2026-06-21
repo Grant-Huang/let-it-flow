@@ -2,9 +2,9 @@ import type { Precondition, StepTrace } from "../../../src/agent/types.js";
 import { calledToolNames } from "../../../src/agent/precondition.js";
 
 /**
- * 构建 podcast-skill 应用的业务前置条件（V 层）。
+ * 构建 AI Content Factory 应用的业务前置条件（V 层）。
  */
-export function buildPodcastSkillPreconditions(): Precondition[] {
+export function buildAiContentFactoryPreconditions(): Precondition[] {
   return [
     {
       id: "has_focused_thread",
@@ -49,12 +49,12 @@ export function buildPodcastSkillPreconditions(): Precondition[] {
         const hasPodcast = tools.has("skill.write_podcast_script");
         const hasArticle = tools.has("skill.write_wechat_article");
         if (!hasPodcast || !hasArticle) {
-          const missing = [];
+          const missing: string[] = [];
           if (!hasPodcast) missing.push("skill.write_podcast_script");
           if (!hasArticle) missing.push("skill.write_wechat_article");
           return {
             met: false,
-            missingTool: missing[0],
+            missingTool: missing[0] ?? "unknown",
             prompt: `必须同时生成口播稿和公众号文章。缺少: ${missing.join("、")}`,
           };
         }

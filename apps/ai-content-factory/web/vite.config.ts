@@ -1,8 +1,8 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-// podcast-generator 消费应用前端（见 docs/14-podcast-generator-frontend.md）。
-// dev 模式下 Vite 代理 /api 到 Hono 后端（默认 :8787）。
+// AI Content Factory 消费应用前端（见 docs/14-podcast-generator-frontend.md）。
+// dev 模式下 Vite 代理 /api 到内核 Hono 后端（默认 :8787），也可设 LIF_BACKEND_URL 指向独立后端（如 :8789）。
 export default defineConfig({
   plugins: [react()],
   server: {

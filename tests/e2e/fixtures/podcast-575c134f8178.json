@@ -1,0 +1,9 @@
+{
+  "intent": "做一期关于 AI 技术趋势的播客",
+  "recordedAt": "2026-06-20T22:44:51.615Z",
+  "status": "failed",
+  "calledTools": [],
+  "finalText": "",
+  "stepCount": 0,
+  "toolErrors": []
+}

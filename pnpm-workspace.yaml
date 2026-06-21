@@ -1,9 +1,9 @@
 packages:
   - "web"
-  - "apps/podcast-generator"
   - "apps/nexusops"
   - "apps/nexusops/web"
-  - "apps/podcast-skill"
+  - "apps/ai-content-factory"
+  - "apps/ai-content-factory/web"
 allowBuilds:
   esbuild: set this to true or false
 minimumReleaseAgeExclude:

@@ -26,7 +26,12 @@ export default function PodcastChatPage() {
   const navItems: NavItem[] = [
     { id: "generate", label: "生成", icon: <IconWave />, active: activeNav === "generate", onClick: () => setActiveNav("generate") },
     { id: "history", label: "历史", icon: <IconClock />, active: activeNav === "history", onClick: () => setActiveNav("history") },
-    { id: "settings", label: "设置", icon: <IconGear />, active: activeNav === "settings", onClick: () => setActiveNav("settings") },
+    { id: "settings", label: "设置", icon: <IconGear />, active: activeNav === "settings", onClick: () => {
+      // #region agent log
+      fetch('http://127.0.0.1:7845/ingest/b379246d-e95c-44b9-8a2e-1ef8ddffc36c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'594ab9'},body:JSON.stringify({sessionId:'594ab9',location:'apps/ai-content-factory/web/src/pages/PodcastChatPage.tsx:navSettings',message:'点击设置导航',data:{from: activeNav, to: 'settings'},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{});
+      // #endregion
+      setActiveNav("settings");
+    } },
   ];
 
   const handleSend = async () => {

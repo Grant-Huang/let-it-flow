@@ -2,8 +2,8 @@
  * 把 kb-seed/vault/* 拷贝到 OBSIDIAN_VAULT_PATH 指定的目标 vault。
  *
  * 用法：
- *   OBSIDIAN_VAULT_PATH=./data/podcast-vault \
- *     tsx apps/podcast-skill/kb-seed/install-vault.ts
+ *   OBSIDIAN_VAULT_PATH=./data/aicf-vault \
+ *     tsx apps/ai-content-factory/kb-seed/install-vault.ts
  */
 import { mkdirSync, readdirSync, readFileSync, writeFileSync, statSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
@@ -37,7 +37,7 @@ function main(): void {
   }
   mkdirSync(target, { recursive: true });
   const n = copyTree(seedRoot, target);
-  console.log(`[podcast-skill] 已铺 ${n} 篇笔记到 ${relative(process.cwd(), target)}`);
+  console.log(`[ai-content-factory] 已铺 ${n} 篇笔记到 ${relative(process.cwd(), target)}`);
 }
 
 main();

@@ -1,5 +1,5 @@
 import { createSkill } from "../../../src/agent/skill-bridge.js";
-import type { EvidenceEnvelope } from "../../../src/core/evidence-envelope.js";
+import { wrapEvidence } from "../../../src/core/evidence-envelope.js";
 
 export interface Thread {
   id: string;
@@ -13,12 +13,16 @@ export interface ThreadFocuserOutput {
   discarded: Thread[];
   contentType: "rigorous" | "comprehensive";
   rationale: string;
-  evidence: EvidenceEnvelope;
+  evidence: ReturnType<typeof wrapEvidence>;
 }
 
 export const threadFocuserSkill = createSkill({
   name: "skill.thread_focuser",
   description: "从多条内容线索中聚焦出单一主线索，判定内容类型（严谨型 vs 综合型）",
+  whenToUse: {
+    triggers: ["聚焦单一主线", "从多个线索选一个", "判定内容类型"],
+    notFor: ["已经有明确单一线索", "需要写稿（走 write_podcast_script）"],
+  },
   inputSchema: {
     type: "object" as const,
     properties: {
@@ -49,9 +53,25 @@ export const threadFocuserSkill = createSkill({
     },
     required: ["sourceText"],
   },
+  outputSchema: {
+    type: "object",
+    properties: {
+      selected: { type: "object" },
+      contentType: { type: "string" },
+      rationale: { type: "string" },
+    },
+  },
+  outputExample: {
+    selected: { id: "t1", summary: "示例线索", evidence: "...", argumentSpace: 8 },
+    contentType: "rigorous",
+    rationale: "聚焦该线索",
+  },
 
   async steps(input) {
     const { step } = input;
+    const sourceText = typeof input.sourceText === "string" ? input.sourceText : "";
+    const durationMinutes = typeof input.durationMinutes === "number" ? input.durationMinutes : 30;
+    const focusHint = typeof input.focusHint === "string" ? input.focusHint : "";
 
     // Step 1: 使用 LLM 列举所有可独立撑起一期的线索
     const listStep = await step("列举线索", async (ctx) => {
@@ -63,10 +83,9 @@ export const threadFocuserSkill = createSkill({
           argumentSpace: number;
         }>;
       }>("thought", {
-        // 通过 thought 工具分析源内容，列举线索
-        directive: `分析以下源内容，找出所有"能独立撑起一期${input.durationMinutes || 30}分钟播客"的线索。
+        directive: `分析以下源内容，找出所有"能独立撑起一期${durationMinutes}分钟播客"的线索。
 
-源内容：${input.sourceText || JSON.stringify(input.sourceBundle)}
+源内容：${sourceText}
 
 对每条线索，输出：
 1. id: 唯一标识
@@ -79,42 +98,41 @@ export const threadFocuserSkill = createSkill({
       return analysis;
     });
 
-    const threads: Thread[] = listStep.threads || [];
-
-    // Step 2: 判定数量，决定是直接选还是需要反问
-    let selected: Thread;
-    let discarded: Thread[] = [];
+    const threads: Thread[] = listStep?.threads || [];
 
     if (threads.length === 0) {
       throw new Error("未找到任何可独立成篇的线索，请补充内容或调整关键词");
     }
 
-    if (threads.length === 1) {
-      selected = threads[0];
-    } else {
-      // 多条线索情况
-      if (input.focusHint) {
-        // 用户提示命中
-        selected = threads.find((t) => t.summary.includes(input.focusHint)) || threads[0];
-        discarded = threads.filter((t) => t.id !== selected.id);
-      } else {
-        // 需要用户选择
-        const choiceStep = await step("请用户选择线索", async (ctx) => {
-          const choice = await ctx.requireConfirmation({
-            prompt: `发现 ${threads.length} 条独立线索，请选择一条作为本期核心：`,
-            options: threads.map((t) => ({
-              id: t.id,
-              label: `${t.summary} (论证空间: ${t.argumentSpace}/10)`,
-              preview: t.evidence,
-            })),
-          });
-          return choice;
-        });
+    // Step 2: 判定数量，决定是直接选还是需要反问
+    let selected: Thread;
+    let discarded: Thread[] = [];
 
-        const selectedId = (choiceStep as { id: string }).id;
-        selected = threads.find((t) => t.id === selectedId) || threads[0];
-        discarded = threads.filter((t) => t.id !== selected.id);
-      }
+    if (threads.length === 1) {
+      selected = threads[0]!;
+    } else if (focusHint) {
+      // 用户提示命中
+      selected = threads.find((t) => t.summary.includes(focusHint)) || threads[0]!;
+      discarded = threads.filter((t) => t.id !== selected.id);
+    } else {
+      // 需要用户选择：用 requireConfirmation 的 options 传线索摘要，params.choice 传回选中 id
+      const choiceStep = await step<{ choice?: string } | undefined>("请用户选择线索", async (ctx) => {
+        const result = await ctx.requireConfirmation({
+          prompt: `发现 ${threads.length} 条独立线索，请选择一条作为本期核心：\n${threads
+            .map((t, i) => `${i + 1}. ${t.summary} (论证空间: ${t.argumentSpace}/10)`)
+            .join("\n")}`,
+          options: threads.map((t) => t.summary),
+          detail: { threadIds: threads.map((t) => t.id) },
+        });
+        // approved=false 表示用户未明确选择，降级取第一个
+        if (!result.approved) return { choice: threads[0]!.id } as { choice?: string };
+        const chosen = typeof result.params?.choice === "string" ? result.params.choice : threads[0]!.id;
+        return { choice: chosen };
+      });
+
+      const selectedId = choiceStep?.choice ?? threads[0]!.id;
+      selected = threads.find((t) => t.id === selectedId) || threads[0]!;
+      discarded = threads.filter((t) => t.id !== selected.id);
     }
 
     // Step 3: 推断内容类型
@@ -131,25 +149,31 @@ export const threadFocuserSkill = createSkill({
       return result;
     });
 
-    const contentType = (typeStep.contentType as "rigorous" | "comprehensive") || "comprehensive";
+    const contentType: "rigorous" | "comprehensive" =
+      typeStep?.contentType === "rigorous" ? "rigorous" : "comprehensive";
 
     const rationale = `聚焦线索"${selected.summary}"（论证空间 ${selected.argumentSpace}/10），内容类型为${contentType === "rigorous" ? "严谨型" : "综合型"}。${discarded.length > 0 ? `并弃置 ${discarded.length} 条线索。` : ""}`;
+
+    const evidence = wrapEvidence(
+      {
+        selectedThread: selected.id,
+        threadCount: threads.length,
+        contentType,
+      },
+      {
+        freshness: "realtime",
+        confidence: "inferred",
+        system: "llm",
+        provenance: "skill.thread_focuser",
+      },
+    );
 
     const output: ThreadFocuserOutput = {
       selected,
       discarded,
       contentType,
       rationale,
-      evidence: {
-        provenance: "skill.thread_focuser",
-        confidence: "reasoned",
-        freshness: new Date().toISOString(),
-        data: {
-          selectedThread: selected.id,
-          threadCount: threads.length,
-          contentType,
-        },
-      },
+      evidence,
     };
 
     return output;

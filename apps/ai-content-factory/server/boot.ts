@@ -1,0 +1,319 @@
+/**
+ * AI Content Factory 后端装配（应用层 —— 组装平台 harness + 应用工具/KB/规则）。
+ *
+ * 职责边界（ETCLOVG，镜像 apps/nexusops/server/boot.ts 模式）：
+ *   - E/L/O：复用平台 runReactHarness（不重写执行循环）
+ *   - T 框架：复用平台 ToolRegistry / tool-adapter；内容：注册 core.* + skill.*
+ *   - C 框架：复用平台 ObsidianProvider / createKnowledgeBaseTool；内容：vault seed
+ *   - V 机制：复用平台 PreconditionRegistry；内容：buildAiContentFactoryPreconditions
+ *   - G 机制：复用平台 governanceToHooks；内容：buildAiContentFactoryGovernance
+ */
+import "dotenv/config";
+import { ToolRegistry } from "../../../src/tools/registry.js";
+import { createDefaultToolRegistry } from "../../../src/executor/default-tools.js";
+import {
+  registerBuiltinTools,
+  createTavilyProvider,
+} from "../../../src/tools/index.js";
+import { createKnowledgeBaseTool } from "../../../src/tools/builtin/knowledge-base.js";
+import { ObsidianProvider } from "../../../src/tools/knowledge/obsidian-provider.js";
+import type { IKnowledgeProvider } from "../../../src/tools/knowledge/provider.js";
+import { LlmService } from "../../../src/services/llm-service.js";
+import { loadConfig } from "../../../src/llm/config-loader.js";
+import { ensureSeedConfig } from "../../../src/llm/seed.js";
+import { globalEventBus } from "../../../src/core/event-bus.js";
+import { runReactHarness } from "../../../src/agent/react-harness.js";
+import type { HarnessConfig, EmitFn, StepTrace } from "../../../src/agent/types.js";
+import { governanceToHooks } from "../../../src/agent/governance.js";
+import type { FlowConnector, ToolResult } from "../../../src/tools/base.js";
+import type { ToolEvent } from "../../../src/core/stream-events.js";
+import { toolCallPayload, toolResultPayload } from "../../../src/core/stream-events.js";
+import { randomUUID } from "node:crypto";
+import type { TaskRuntime, TaskRunnerHooks } from "../../../src/tasks/registry.js";
+import { threadFocuserSkill, writePodcastScriptSkill, writeWechatArticleSkill } from "../skills/index.js";
+import { buildAiContentFactoryPreconditions } from "./preconditions.js";
+import { buildAiContentFactoryGovernance } from "./governance.js";
+
+/** AI Content Factory 装配选项（测试可注入）。 */
+export interface AiContentFactoryBootOptions {
+  /** Obsidian vault 路径（缺省读 OBSIDIAN_VAULT_PATH env）。 */
+  vaultPath?: string;
+  /** 注入测试用 LlmService（缺省按 .env 构造真实 service）。 */
+  llm?: LlmService;
+  /** 注入测试用 toolRegistry。 */
+  toolRegistry?: ToolRegistry;
+  /** 注入 emit（HTTP 入口用；缺省 no-op）。 */
+  emit?: EmitFn;
+  /** 注入 requireConfirmation（HTTP 入口用；缺省 auto-approve）。 */
+  requireConfirmation?: NonNullable<HarnessConfig["requireConfirmation"]>;
+}
+
+/** 装配产物。 */
+export interface AiContentFactoryRuntime {
+  /** 注入 customRunner 的 TaskRuntime（喂给 TaskRegistry）。 */
+  taskRuntime: TaskRuntime;
+  /** 装配好的 tool registry。 */
+  toolRegistry: ToolRegistry;
+  /** 装配好的 KB providers。 */
+  knowledgeProviders: IKnowledgeProvider[];
+}
+
+/**
+ * 装配 AI Content Factory 运行时。
+ *
+ * 顺序：config seed → LlmService → ToolRegistry（core builtin + skill + kb）
+ *       → ObsidianProvider init → preconditions/governance → 组 customRunner → 返回 taskRuntime。
+ */
+export async function bootAiContentFactory(
+  opts: AiContentFactoryBootOptions = {},
+): Promise<AiContentFactoryRuntime> {
+  // 1. 配置 seed + LlmService
+  ensureSeedConfig();
+  const runtimeConfig = loadConfig();
+  const llm =
+    opts.llm ??
+    new LlmService({
+      apiKey: process.env.OPENAI_API_KEY,
+      baseURL: process.env.OPENAI_BASE_URL || undefined,
+      runtimeConfig,
+    });
+  if (!opts.llm) llm.subscribeConfigChanges(globalEventBus);
+
+  // 2. ToolRegistry：core 内置 + podcast skill + kb
+  const toolRegistry = opts.toolRegistry ?? createDefaultToolRegistry();
+
+  // core.* 内置工具（web_search/web_fetch/llm_node/deliver）
+  registerBuiltinTools(toolRegistry, {
+    llm,
+    searchProvider: process.env.TAVILY_API_KEY
+      ? createTavilyProvider(process.env.TAVILY_API_KEY)
+      : undefined,
+  });
+
+  // podcast skill.* 沉淀流程（动态 DSL 写法）
+  for (const skill of [threadFocuserSkill, writePodcastScriptSkill, writeWechatArticleSkill]) {
+    if (!toolRegistry.has(skill.name)) toolRegistry.register(skill);
+  }
+
+  // nexus_finalize sentinel（复用 nexusops 的收尾工具模式）
+  if (!toolRegistry.has("nexus_finalize")) {
+    toolRegistry.register(createFinalizeTool());
+  }
+
+  // 3. 知识库（C 层）：Obsidian vault
+  const knowledgeProviders: IKnowledgeProvider[] = [];
+  const vaultPath = opts.vaultPath ?? process.env.OBSIDIAN_VAULT_PATH ?? "";
+  if (vaultPath) {
+    const obsidian = new ObsidianProvider({ vaultPath });
+    await obsidian.init();
+    if (obsidian.ready()) {
+      knowledgeProviders.push(obsidian);
+    }
+  }
+
+  // 注册 core.knowledge_base 工具
+  if (!toolRegistry.has("core.knowledge_base")) {
+    toolRegistry.register(createKnowledgeBaseTool(knowledgeProviders));
+  }
+
+  // 4. V + G：业务前置条件 + 治理规则
+  const preconditionList = buildAiContentFactoryPreconditions();
+  const governanceChain = buildAiContentFactoryGovernance();
+  const governanceHooks = governanceToHooks(governanceChain);
+
+  // 5. customRunner：把 ReAct Harness 接到内核 task store + HITL
+  const maxSteps = Number(process.env.PODCAST_MAX_STEPS ?? "20");
+
+  const toolTiers: ("core" | "domain" | "custom")[] = ["core", "domain", "custom"];
+
+  const customRunner: NonNullable<TaskRuntime["customRunner"]> = async (
+    taskId: string,
+    intent: string,
+    hooks: TaskRunnerHooks,
+  ) => {
+    hooks.setStatus("running");
+    hooks.emit("phase", { stage: "react", label: "播客内容生成", state: "running" } as never);
+
+    // emit 桥：harness 事件 → 内核 store（落库 + SSE）
+    const emit: EmitFn = opts.emit ?? (async (event) => {
+      hooks.emit(event.type as never, event.payload as never);
+    });
+    // HITL 桥：harness requireConfirmation → 内核 awaitConfirmation
+    const requireConfirmation = opts.requireConfirmation ?? (async (gate) => {
+      const result = await hooks.awaitConfirmation({
+        nodeId: (gate.detail?.tool as string) ?? "react_tool",
+        runId: taskId,
+        prompt: gate.prompt,
+        options: gate.options,
+        detail: gate.detail,
+      });
+      return { approved: result.approved, params: result.params };
+    });
+
+    const model = llm.model("podcast_skill_agent");
+    const harnessConfig: HarnessConfig = {
+      callSite: "podcast_skill_agent",
+      model,
+      registry: toolRegistry,
+      toolTiers,
+      stopPolicy: {
+        maxSteps,
+        finalizeTool: "nexus_finalize",
+      },
+      preconditions: preconditionList,
+      governanceHooks,
+      requireConfirmation,
+      emit,
+      compatMode: llm.compatModeFor ? llm.compatModeFor("podcast_skill_agent") : false,
+      systemPrompt: PODCAST_SYSTEM_PROMPT,
+    };
+
+    const result = await runReactHarness(intent, harnessConfig);
+
+    hooks.emit("phase", { stage: "react", label: "播客内容生成", state: "done" } as never);
+
+    // 无论何种 finishReason，都先发送完整 stepTrace（供下游诊断 + artifact 提取）
+    hooks.emit(
+      "extension",
+      {
+        name: "react_step_trace",
+        version: "1.0",
+        data: { stepTrace: result.stepTrace as StepTrace[], finalText: result.finalText },
+      } as never,
+    );
+
+    if (result.finishReason === "precondition_unmet") {
+      hooks.emit(
+        "extension",
+        {
+          name: "precondition_unmet",
+          version: "1.0",
+          data: { finishReason: result.finishReason, finalText: result.finalText, usage: result.usage },
+        } as never,
+      );
+      hooks.setStatus("failed", "前置条件未满足");
+      return;
+    }
+
+    if (result.finishReason === "error") {
+      hooks.emit("error", { message: result.error ?? "执行出错" } as never);
+      hooks.setStatus("error", result.error);
+      return;
+    }
+
+    if (result.finalText) {
+      hooks.emit("text", { delta: result.finalText } as never);
+    }
+    hooks.emit(
+      "extension",
+      {
+        name: "react_result",
+        version: "1.0",
+        data: { finishReason: result.finishReason, stepCount: result.stepTrace.length, usage: result.usage },
+      } as never,
+    );
+
+    hooks.emit("done", {} as never);
+    hooks.setStatus("done");
+  };
+
+  const taskRuntime: TaskRuntime = {
+    llm,
+    toolRegistry,
+    customRunner,
+  };
+
+  return { taskRuntime, toolRegistry, knowledgeProviders };
+}
+
+/** nexus_finalize：收尾 sentinel（harness stopWhen 检测此工具调用即终止循环）。 */
+function createFinalizeTool(): FlowConnector {
+  return {
+    name: "nexus_finalize",
+    tier: "core",
+    description:
+      "收尾工具。当口播稿和公众号文章都生成完毕时调用此工具结束流程。不要在内容未完成时调用。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        summary: { type: "string", description: "本次播客内容生成的总结" },
+      },
+      required: ["summary"],
+    },
+    whenToUse: {
+      triggers: ["口播稿已完成", "公众号文章已完成", "可以收尾", "已经交付全部内容"],
+      notFor: ["口播稿未生成", "公众号文章未生成", "还有未完成的步骤"],
+    },
+    outputSchema: { type: "object", properties: { finalized: { type: "boolean" } } },
+    outputExample: { finalized: true },
+    async *execute(params): AsyncGenerator<ToolEvent, ToolResult> {
+      const callId = `c_${randomUUID().slice(0, 8)}`;
+      yield {
+        type: "tool_call",
+        channel: "status",
+        payload: toolCallPayload({ id: callId, name: "nexus_finalize", args: params, risk: "safe", groupId: "podcast" }),
+      };
+      const output = { finalized: true, summary: params.summary };
+      yield {
+        type: "tool_result",
+        channel: "status",
+        payload: toolResultPayload({ tool_call_id: callId, output: JSON.stringify(output), duration_ms: 0 }),
+      };
+      return { output, summary: "播客流程收尾" };
+    },
+  };
+}
+
+/** AI Content Factory 默认 system prompt（精简，铁律在 KB 里）。 */
+const PODCAST_SYSTEM_PROMPT = `
+你是一个播客内容策划 + 写稿助手，用 ReAct 模式工作。
+
+## 任务流程（严格按序）
+
+1. **判断输入模式**
+   - 用户给了素材或 URL → 模式 B，用 core.web_fetch 抓全文
+   - 用户只给主题/领域 → 模式 A，用 core.web_search 检索
+   - 检索范围不清（"最近 X 天" 缺失）→ 直接反问用户
+
+2. **聚焦单一主线索**
+   - 检索/读取完成后，调用 skill.thread_focuser 分析所有可独立成篇的线索
+   - 若线索唯一 → 直接选中
+   - 若线索多条 → 让用户选择（绝不堆砌多条）
+
+3. **判定内容类型**
+   - skill.thread_focuser 同步输出 contentType：rigorous（严谨型）或 comprehensive（综合型）
+
+4. **选择叙事结构**
+   - 基于线索特征和用户输入，选择四种之一：悬念驱动、分析师独白、简报、双线对照
+   - 用 core.knowledge_base 查询各结构的适用标准
+
+5. **撰写口播稿**
+   - 调用 skill.write_podcast_script
+   - 内部自校验：字数（±5%）、单句长度（≤25字）、术语过滤
+   - 包含引用和信源
+
+6. **撰写公众号长文**
+   - 调用 skill.write_wechat_article
+   - 基于口播稿决策，扩展为 6500 字公众号文章
+   - 自校验字数
+
+7. **收尾 + 交付**
+   - 调用 nexus_finalize 汇总：口播稿 + 公众号长文 + 证据链
+
+## 可用工具
+
+- core.web_search：搜索内容
+- core.web_fetch：拉取完整网页内容
+- core.knowledge_base：查询本地知识库（叙事结构、写稿铁律）
+- skill.thread_focuser：聚焦线索 + 判定类型
+- skill.write_podcast_script：生成口播稿
+- skill.write_wechat_article：生成公众号文章
+- nexus_finalize：最终收尾
+
+## 关键约束
+
+- 一期一个核心判断：多线索时必须让用户选，不要混合
+- 先写口播再写文章：公众号文章基于口播稿的决策展开
+- 必须聚焦：无论如何都要经过 skill.thread_focuser
+- 知识库优先：遇到写稿规则问题，先 core.knowledge_base 再生成
+`.trim();

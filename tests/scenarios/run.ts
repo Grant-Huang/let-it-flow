@@ -25,6 +25,7 @@ import { gLayerScenarios } from "./g-layer.js";
 import { cLayerScenarios } from "./c-layer.js";
 import { lLayerScenarios } from "./l-layer.js";
 import { tLayerScenarios } from "./t-layer.js";
+import { eLayerScenarios } from "./e-layer.js";
 
 const ROOT = cwd();
 const REPORT_DIR = join(ROOT, "tests", "reports");
@@ -36,6 +37,7 @@ const LAYER_NAMES: Record<string, string> = {
   C: "C 层 · 准确度（输出结构自检）",
   L: "L 层 · 生命周期（Skill 沉淀）",
   T: "T 层 · 工具协议（EvidenceEnvelope + 动态裁剪）",
+  E: "E 层 · 端到端（AI Content Factory fixture 回放）",
 };
 
 async function main() {
@@ -45,6 +47,7 @@ async function main() {
     ...gLayerScenarios,
     ...cLayerScenarios,
     ...lLayerScenarios,
+    ...eLayerScenarios,
   ];
 
   console.log(`\n运行 ${allScenarios.length} 个全流程场景...\n`);
@@ -156,7 +159,7 @@ function renderReport(results: ScenarioResult[], meta: ReportMeta): string {
     if (!byLayer.has(r.scenario.layer)) byLayer.set(r.scenario.layer, []);
     byLayer.get(r.scenario.layer)!.push(r);
   }
-  for (const layer of ["T", "V", "G", "C", "L"]) {
+  for (const layer of ["T", "V", "G", "C", "L", "E"]) {
     const items = byLayer.get(layer);
     if (!items || items.length === 0) continue;
     L.push(`---`);

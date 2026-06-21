@@ -4,7 +4,7 @@
  * 后续可加 domain.* 工具（如 RSS feed、播客平台 API）。
  */
 
-import type { ToolRegistry } from "../../../src/agent/types.js";
+import type { ToolRegistry } from "../../../src/tools/registry.js";
 
 export function buildPodcastSkillTools(registry: ToolRegistry): ToolRegistry {
   // 当前直接复用平台内置工具
