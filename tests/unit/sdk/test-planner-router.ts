@@ -170,3 +170,37 @@ describe("P7 planner LLM 选工具成功路径", () => {
     }
   });
 });
+
+describe("P7 planner 双失败路径：LLM 失败 + 无消费模板 → 重试耗尽抛错", () => {
+  it("LLM 路由无产出 + 未注入 consumerTemplates → 抛错含「无匹配的消费应用模板」", async () => {
+    // 复刻项目初期 bug：web 后端漏注入 consumerTemplates，LLM 又没产出有效 DAG
+    mockOutput = null;
+
+    const reg = coreRegistry();
+    // 不传 consumerTemplates（等价于 consumerTemplates: []）
+    await expect(
+      plan("把 https://example.com 做成播客", {
+        llm: mockLlm(),
+        registry: reg,
+        maxRetries: 3,
+        useLlmRouter: true,
+      }),
+    ).rejects.toThrow(/无匹配的消费应用模板.*LLM 路由未产出有效 DAG/);
+  });
+
+  it("LLM 路由抛错 + 无消费模板 → 同样抛错（异常路径走 catch → 回退 → 仍无模板）", async () => {
+    // generateText mock 抛错（模拟真实 LLM 不可用）
+    const { generateText } = await import("ai");
+    (generateText as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("网络超时"));
+
+    const reg = coreRegistry();
+    await expect(
+      plan("分析最新趋势", {
+        llm: mockLlm(),
+        registry: reg,
+        maxRetries: 2,
+        useLlmRouter: true,
+      }),
+    ).rejects.toThrow(/planner 重试/);
+  });
+});
