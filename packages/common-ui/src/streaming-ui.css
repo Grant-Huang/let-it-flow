@@ -1,0 +1,230 @@
+/**
+ * Streaming UI Styles
+ *
+ * 平台级流式界面的通用样式规范。
+ * 用于 ProcessTrace 的简化和工具调用链的可折叠展示。
+ *
+ * 设计原则：
+ *  - 简洁的可折叠面板（<details>）
+ *  - 清晰的状态指示（✓/✗/⟳）
+ *  - 按需展示的元数据
+ *  - 易读的工具调用卡片
+ */
+
+/* ============================================================================
+   可折叠面板（details 元素）
+   ============================================================================ */
+
+.streaming-details {
+  margin-top: 12px;
+  border: 1px solid var(--color-border-light);
+  border-radius: 8px;
+  background: var(--color-bg-elevated);
+  overflow: hidden;
+}
+
+.streaming-summary {
+  padding: 10px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: background-color 0.15s ease;
+}
+
+.streaming-summary:hover {
+  background: var(--color-bg-hover);
+}
+
+.streaming-details[open] > .streaming-summary {
+  border-bottom: 1px solid var(--color-border-light);
+  background: var(--color-bg-hover);
+}
+
+/* ============================================================================
+   工具调用链容器
+   ============================================================================ */
+
+.streaming-step-trace {
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+/* 滚动条样式 */
+.streaming-step-trace::-webkit-scrollbar {
+  width: 6px;
+}
+
+.streaming-step-trace::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.streaming-step-trace::-webkit-scrollbar-thumb {
+  background: var(--color-border-light);
+  border-radius: 3px;
+}
+
+.streaming-step-trace::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border);
+}
+
+/* ============================================================================
+   单个步骤项
+   ============================================================================ */
+
+.streaming-step-item {
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--color-bg);
+  border-left: 3px solid var(--color-info);
+  transition: background-color 0.1s ease;
+}
+
+.streaming-step-item[data-status="done"] {
+  border-left-color: var(--color-success);
+  background: var(--color-success-subtle, rgba(34, 197, 94, 0.05));
+}
+
+.streaming-step-item[data-status="error"] {
+  border-left-color: var(--color-error);
+  background: var(--color-error-subtle, rgba(239, 68, 68, 0.05));
+}
+
+.streaming-step-item[data-status="running"] {
+  border-left-color: var(--color-info);
+  background: var(--color-info-subtle, rgba(59, 130, 246, 0.05));
+}
+
+/* ============================================================================
+   步骤头部（步号 + 工具名 + 状态）
+   ============================================================================ */
+
+.streaming-step-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+
+.streaming-step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--color-info);
+  color: white;
+  font-weight: 600;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.streaming-step-item[data-status="done"] .streaming-step-num {
+  background: var(--color-success);
+}
+
+.streaming-step-item[data-status="error"] .streaming-step-num {
+  background: var(--color-error);
+}
+
+.streaming-step-name {
+  font-weight: 600;
+  color: var(--color-accent);
+  font-size: 12px;
+}
+
+.streaming-step-status {
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+/* ============================================================================
+   参数行
+   ============================================================================ */
+
+.streaming-step-args {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 4px;
+  font-size: 11px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.streaming-step-args-label {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.streaming-step-args-value {
+  color: var(--color-text-secondary);
+  word-break: break-all;
+  font-size: 11px;
+  font-family: monospace;
+}
+
+/* ============================================================================
+   结果行
+   ============================================================================ */
+
+.streaming-step-result {
+  display: flex;
+  gap: 4px;
+  font-size: 11px;
+  margin-top: 4px;
+  flex-direction: column;
+}
+
+.streaming-step-result-label {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.streaming-step-result-value {
+  color: var(--color-text-secondary);
+  word-break: break-all;
+  max-height: 60px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre-wrap;
+  font-family: monospace;
+  font-size: 11px;
+}
+
+.streaming-step-item[data-status="error"] .streaming-step-result-value {
+  color: var(--color-error);
+}
+
+/* ============================================================================
+   暗黑模式支持（如果有）
+   ============================================================================ */
+
+@media (prefers-color-scheme: dark) {
+  .streaming-step-item {
+    background: var(--color-bg-elevated);
+  }
+
+  .streaming-step-item[data-status="done"] {
+    background: rgba(34, 197, 94, 0.08);
+  }
+
+  .streaming-step-item[data-status="error"] {
+    background: rgba(239, 68, 68, 0.08);
+  }
+
+  .streaming-step-item[data-status="running"] {
+    background: rgba(59, 130, 246, 0.08);
+  }
+}

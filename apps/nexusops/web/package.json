@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@let-it-flow/common-ui": "0.1.0",
     "@meso.ai/client": "^0.1.0",
     "@meso.ai/types": "^2.0.0",
     "@meso.ai/ui": "^3.0.0",
