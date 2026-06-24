@@ -1,0 +1,37 @@
+{
+  "name": "@let-it-flow/common-ui",
+  "version": "0.1.0",
+  "description": "Common UI components and styles for streaming interfaces in let-it-flow applications",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./styles": "./src/streaming-ui.css"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@meso.ai/types": "^2.0.0",
+    "react": "^18.3.0"
+  },
+  "peerDependencies": {
+    "@meso.ai/types": ">=2.0.0",
+    "react": ">=18.0.0"
+  },
+  "keywords": [
+    "streaming-ui",
+    "workflow",
+    "let-it-flow",
+    "components"
+  ],
+  "license": "MIT"
+}
