@@ -13,11 +13,13 @@
 import { serve } from "@hono/node-server";
 import { createApp } from "../../../src/api/app.js";
 import { TaskRegistry } from "../../../src/tasks/registry.js";
-import { getDataDir } from "../../../src/core/config.js";
+import { getDataDir, resolveAppDataDir } from "../../../src/core/config.js";
 import { bootAiContentFactory } from "./boot.js";
 
 async function main(): Promise<void> {
-  const runtime = await bootAiContentFactory();
+  // 每个 App 默认用独立 dataDir（./data/ai-content-factory），实现 tasks/config 历史会话隔离；
+  // 设了 LIF_DATA_DIR 则尊重用户配置（向后兼容全局共享 ./data 的形态）
+  const runtime = await bootAiContentFactory({ dataDir: resolveAppDataDir("ai-content-factory") });
 
   // 用装配好的 taskRuntime 构造 TaskRegistry（customRunner 接管执行）
   const registry = new TaskRegistry(undefined, runtime.taskRuntime);

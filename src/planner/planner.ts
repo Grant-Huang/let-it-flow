@@ -72,15 +72,21 @@ export async function plan(intent: string, config: PlannerConfig): Promise<PlanO
     try {
       // 优先：LLM 选工具路径（注入工具清单，LLM 自主编排 DAG）
       if (useLlmRouter) {
-        const dag = await planWithLlmRouter(intent, config, attempt, lastError);
-        if (dag) {
-          const errors = validateDag(dag, config.registry);
+        const result = await planWithLlmRouter(intent, config, attempt, lastError);
+        if ("dag" in result) {
+          const errors = validateDag(result.dag, config.registry);
           if (errors.length === 0) {
-            return { kind: "proceed", dag };
+            return { kind: "proceed", dag: result.dag };
           }
           lastError = `LLM 路由 DAG 校验失败：${errors.join("; ")}`;
           continue;
         }
+        if ("error" in result) {
+          // LLM 调用或解析失败：透出真实错误，作为下次重试的反馈
+          lastError = result.error;
+          continue;
+        }
+        // fallback：LLM 不可用 → 进入下面模板路径
       }
 
       // 兜底：消费应用模板（extractParams + build）
@@ -99,7 +105,9 @@ export async function plan(intent: string, config: PlannerConfig): Promise<PlanO
         lastError = errors.join("; ");
       } else {
         // 无消费模板命中 → 内核无法兜底业务 DAG
-        lastError = "无匹配的消费应用模板，且 LLM 路由未产出有效 DAG";
+        lastError = lastError
+          ? `LLM 路由未产出有效 DAG（${lastError}），且无匹配的消费应用模板`
+          : "无匹配的消费应用模板，且 LLM 路由未产出有效 DAG";
         break;
       }
     } catch (e) {
@@ -115,21 +123,32 @@ export async function plan(intent: string, config: PlannerConfig): Promise<PlanO
  * LLM 工具选择路径：注入 forPlanner() 清单，LLM 据 whenToUse/outputExample
  * 自主选工具并编排依赖，产出 WorkflowDAG。
  *
- * 返回 null 表示 LLM 不可用/拒绝路由（调用方回退模板路径）。
+ * 返回类型：
+ *   { dag }            —— 成功
+ *   { fallback: true } —— LLM 不可用（网络/鉴权/SDK/拒绝路由）→ 调用方回退模板路径
+ *   { error }          —— LLM 已成功返回，但输出无法解析；调用方把 error 反馈给下次重试
+ *
+ * 区分 fallback 和 error 的关键：fallback 是"LLM 完全不可用"（应有兜底），
+ * error 是"LLM 给了答复但不合规"（值得带错误反馈重试）。
  *
  * 按 provider 能力分两条路径（见 docs/02 §2.8 多模型平替）：
  *   - native（OpenAI 官方等）：AI SDK Output.object 原生 json_schema 约束
  *   - weak（openai-compatible/ollama，如 DeepSeek）：纯文本 prompt + 鲁棒 JSON 提取，
  *     避免发送 provider 不支持的 response_format: json_schema
  */
+type LlmRouterResult =
+  | { dag: WorkflowDAG }
+  | { fallback: true }
+  | { error: string };
+
 async function planWithLlmRouter(
   intent: string,
   config: PlannerConfig,
   attempt: number,
   prevError?: string,
-): Promise<WorkflowDAG | null> {
+): Promise<LlmRouterResult> {
   const manifests = config.registry.forPlanner(["core", "domain"]);
-  if (manifests.length === 0) return null;
+  if (manifests.length === 0) return { fallback: true };
 
   const model = config.llm.model(config.role ?? "planner");
   const system = buildToolRouterSystemPrompt(manifests);
@@ -148,8 +167,10 @@ async function planWithLlmRouter(
         ...llmCallArgs(weakSystem, weakUser, true),
         temperature: 0.2,
       });
-      const parsed = extractAndParseDag(text);
-      return parsed;
+      const result = extractAndParseDag(text);
+      if (result.dag) return { dag: result.dag };
+      // 解析失败：透出真实原因供下次重试反馈，不再静默 null
+      return { error: result.error };
     }
 
     // native 路径：AI SDK Output.object 原生约束
@@ -159,11 +180,12 @@ async function planWithLlmRouter(
       output: Output.object({ schema: WorkflowDAG }),
       temperature: 0.2,
     });
-    if (!output) return null;
-    return WorkflowDAG.parse(output);
-  } catch {
-    // LLM 不可用 / 输出不合法 → 返回 null，由调用方回退模板路由
-    return null;
+    if (!output) return { fallback: true };
+    return { dag: WorkflowDAG.parse(output) };
+  } catch (e) {
+    // LLM 调用本身失败（网络/鉴权/SDK 不兼容/超时）→ 回退模板路径（向后兼容）
+    // 这里不返回 error，因为模板路径本身就是兜底机制，LLM 不可用时不应让整个 planner 失败
+    return { fallback: true };
   }
 }
 
@@ -200,10 +222,14 @@ function buildWeakProviderUserMsg(
 /**
  * 从 LLM 文本响应中鲁棒提取并解析 WorkflowDAG。
  * 处理 ```json 包裹、前导废话、尾逗号等常见 weak 模型输出问题。
- * 解析或 schema 校验失败返回 null。
+ *
+ * 返回结构：
+ *   { dag, error: undefined } —— 成功
+ *   { dag: null, error: "..." } —— 解析失败，error 描述真实原因（供下次重试反馈）
  */
-function extractAndParseDag(text: string): WorkflowDAG | null {
-  if (!text) return null;
+type DagParseResult = { dag: WorkflowDAG; error: undefined } | { dag: null; error: string };
+function extractAndParseDag(text: string): DagParseResult {
+  if (!text) return { dag: null, error: "LLM 返回空文本" };
   // 1) 尝试直接提取最大的 {...} 块
   let jsonStr = text.trim();
   // 剥离 markdown 代码块包裹
@@ -214,15 +240,26 @@ function extractAndParseDag(text: string): WorkflowDAG | null {
   // 定位首个 { 到末尾 } 的范围
   const start = jsonStr.indexOf("{");
   const end = jsonStr.lastIndexOf("}");
-  if (start === -1 || end === -1 || end <= start) return null;
+  if (start === -1 || end === -1 || end <= start) {
+    return { dag: null, error: "响应中找不到 JSON 对象（缺少 { 或 }）" };
+  }
   jsonStr = jsonStr.slice(start, end + 1);
 
+  let obj: unknown;
   try {
-    const obj = JSON.parse(jsonStr);
-    return WorkflowDAG.parse(obj);
-  } catch {
-    return null;
+    obj = JSON.parse(jsonStr);
+  } catch (e) {
+    const reason = e instanceof Error ? e.message : String(e);
+    return { dag: null, error: `JSON 解析失败：${reason}` };
   }
+  const parsed = WorkflowDAG.safeParse(obj);
+  if (!parsed.success) {
+    const issues = parsed.error.issues
+      .map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`)
+      .join("; ");
+    return { dag: null, error: `schema 校验失败：${issues}` };
+  }
+  return { dag: parsed.data, error: undefined };
 }
 
 /** 构造 LLM 工具路由的系统提示：注入全部工具契约清单。 */
@@ -252,11 +289,44 @@ function buildToolRouterSystemPrompt(manifests: ToolManifest[]): string {
     "",
     "## 规划规则",
     "1. 只能使用上述工具清单中的 toolName（如 core.web_search）。",
-    "2. 节点间通过 dependsOn 声明依赖顺序；通过 inputRefs（JSONPath → 参数键）串联上游输出。",
+    "2. 节点间通过 dependsOn 声明依赖顺序；通过 inputRefs 串联上游输出。",
     "3. 第一个节点通常是数据获取（web_search/web_fetch），末尾通常是 core.deliver 交付产物。",
     "4. contentPipeline 每个节点必填（含 maxTokens/strip/summarize 字段，summarize 固定 false）。",
     "5. 只输出符合 schema 的结构化对象，不要输出解释。",
     '6. schemaVersion 固定 "1.0"，onNodeError 默认 "skip"，retryAttempts 默认 0。',
+    "",
+    "## inputRefs 格式（关键）",
+    "inputRefs 是 { JSONPath来源: 目标参数键 } 的 map，键和值都必须是字符串。",
+    "- 键：指向已执行节点输出的 JSONPath，固定格式 $.tasks.{nodeId}.output 或 $.tasks.{nodeId}.output.{field}",
+    "- 值：要把上游输出注入到本节点 params 的哪个键（参考工具的 inputSchema）",
+    "",
+    "重要：JSONPath 的起点永远是 $.tasks.{nodeId}.output，对应工具返回的原始 output 对象。",
+    "不要在 output 后面再加 outputSchema 里的外层字段名（如 results/docs/text）——那些只是文档描述，不是 JSONPath 层级。",
+    "",
+    "正确示例：",
+    '- {"$.tasks.search_1.output": "items"} —— 把 search_1 整个输出注入到 params.items',
+    '- {"$.tasks.fetch_1.output[0].content": "context"} —— 取 fetch_1 输出数组首项的 content 字段，注入到 params.context',
+    "",
+    "## 典型链路 1：web_search → web_fetch",
+    "web_search 输出是 SearchResult[]（含 title/url/snippet 字段），web_fetch 接收 fromInputRefs 参数（{url,title?}[]）。",
+    "正确串联：把 web_search 整个输出数组注入到 web_fetch 的 fromInputRefs 键。",
+    '示例：fetch 节点 inputRefs = {"$.tasks.search_1.output": "fromInputRefs"}',
+    "不要写成 $.tasks.search_1.output.results（不存在 results 字段）。",
+    "",
+    "## 典型链路 2：web_fetch → llm_node",
+    "web_fetch 输出是 FetchedDoc[]（含 url/title/content 字段），llm_node 接收 context 参数（字符串或数组）。",
+    "正确串联：把 web_fetch 整个输出数组注入到 llm_node 的 context 键（llm_node 会自动识别 FetchedDoc[] 并拼接为可读文本）。",
+    '示例：llm 节点 inputRefs = {"$.tasks.fetch_1.output": "context"}',
+    "",
+    "## 典型链路 3：llm_node → deliver",
+    "llm_node 输出是字符串（生成的文本），deliver 接收 items 参数（字符串或字符串数组）。",
+    "正确串联：把 llm_node 整个输出注入到 deliver 的 items 键。",
+    '示例：deliver 节点 inputRefs = {"$.tasks.llm_1.output": "items"}',
+    "",
+    "错误示例（会导致 schema 校验失败，绝对不要这样写）：",
+    '- {"url": "search_1.results[0].url"} —— 反了，键值顺序颠倒',
+    '- {"url": {"nodeId": "search_1", "outputKey": "results[0].url"}} —— 值不能是对象',
+    '- {"$.tasks.search_1.output.results": "fromInputRefs"} —— 多了 .results 层级',
   ].join("\n");
 }
 

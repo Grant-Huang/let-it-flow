@@ -5,6 +5,7 @@ import { toolCallPayload, toolResultPayload } from "../../core/stream-events.js"
 import type { ToolEvent } from "../../core/stream-events.js";
 import { randomUUID } from "node:crypto";
 import { getSearchMaxResults } from "../../core/system-settings.js";
+import { narrate } from "../../core/narrate.js";
 
 /**
  * web_search —— 网络检索（见 04 §4.4 内置工具，podcast MVP 数据源双路径之一）。
@@ -170,11 +171,15 @@ export function createWebSearchTool(opts: WebSearchToolOptions = {}): FlowConnec
       const t0 = Date.now();
       let results: SearchResult[];
       let errMsg: string | undefined;
+      await narrate(ctx, `正在检索：${args.query}…`);
       try {
         results = await provider.search(args.query, { maxResults: args.maxResults });
       } catch (e) {
         results = [];
         errMsg = e instanceof Error ? e.message : String(e);
+      }
+      if (!errMsg) {
+        await narrate(ctx, `找到 ${results.length} 条结果。`);
       }
       yield {
         type: "tool_result",
@@ -193,7 +198,12 @@ export function createWebSearchTool(opts: WebSearchToolOptions = {}): FlowConnec
 }
 
 function resolveProvider(pref?: "tavily" | "native"): SearchProvider {
-  const chosen = pref ?? (RUNTIME.tavilyApiKey ? "tavily" : "native");
+  // 优先级：显式 pref > LIF_SEARCH_PROVIDER > 有 key 用 tavily
+  const cfg = RUNTIME.searchProvider;
+  const chosen = pref
+    ?? (cfg === "native" ? "native"
+      : cfg === "tavily" ? "tavily"
+      : (RUNTIME.tavilyApiKey ? "tavily" : "native"));
   if (chosen === "tavily") {
     if (!RUNTIME.tavilyApiKey) throw new Error("TAVILY_API_KEY not set; set it or use provider=native");
     return createTavilyProvider(RUNTIME.tavilyApiKey);

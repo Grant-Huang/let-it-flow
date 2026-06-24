@@ -16,7 +16,7 @@ import {
 } from "../tools/index.js";
 import { LlmService } from "../services/llm-service.js";
 import { globalEventBus } from "../core/event-bus.js";
-import { getDataDir } from "../core/config.js";
+import { getDataDir, RUNTIME } from "../core/config.js";
 import { loadConfig } from "../llm/config-loader.js";
 import { ensureSeedConfig } from "../llm/seed.js";
 
@@ -67,9 +67,15 @@ export function createDefaultRegistry(): TaskRegistry {
     );
   }
   const toolRegistry = createDefaultToolRegistry();
+  // LIF_SEARCH_PROVIDER: native=强制 DuckDuckGo / tavily=强制 Tavily / auto=有 key 用 Tavily（默认）
+  const searchPref = RUNTIME.searchProvider;
+  const useTavily = !!process.env.TAVILY_API_KEY &&
+    (searchPref === "tavily" || searchPref === "auto");
   registerBuiltinTools(toolRegistry, {
     llm,
-    searchProvider: process.env.TAVILY_API_KEY ? createTavilyProvider(process.env.TAVILY_API_KEY) : undefined,
+    searchProvider: useTavily
+      ? createTavilyProvider(process.env.TAVILY_API_KEY!)
+      : undefined,
   });
 
   const runtime: TaskRuntime = { llm, toolRegistry };

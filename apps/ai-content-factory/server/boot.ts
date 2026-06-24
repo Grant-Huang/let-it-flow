@@ -38,6 +38,8 @@ import { buildAiContentFactoryGovernance } from "./governance.js";
 export interface AiContentFactoryBootOptions {
   /** Obsidian vault 路径（缺省读 OBSIDIAN_VAULT_PATH env）。 */
   vaultPath?: string;
+  /** 数据根目录（缺省读 LIF_DATA_DIR env；设了会覆盖 process.env.LIF_DATA_DIR）。 */
+  dataDir?: string;
   /** 注入测试用 LlmService（缺省按 .env 构造真实 service）。 */
   llm?: LlmService;
   /** 注入测试用 toolRegistry。 */
@@ -67,6 +69,9 @@ export interface AiContentFactoryRuntime {
 export async function bootAiContentFactory(
   opts: AiContentFactoryBootOptions = {},
 ): Promise<AiContentFactoryRuntime> {
+  // 数据目录隔离：显式 dataDir 覆盖 LIF_DATA_DIR（与 NexusOps boot 对齐）
+  if (opts.dataDir) process.env.LIF_DATA_DIR = opts.dataDir;
+
   // 1. 配置 seed + LlmService
   ensureSeedConfig();
   const runtimeConfig = loadConfig();
@@ -134,12 +139,16 @@ export async function bootAiContentFactory(
     hooks.setStatus("running");
     hooks.emit("phase", { stage: "react", label: "播客内容生成", state: "running" } as never);
 
+    // 用户在 HITL 确认门 reject 时置位，runReactHarness 结束后据此中止任务
+    let userAborted = false;
+
     // emit 桥：harness 事件 → 内核 store（落库 + SSE）
     const emit: EmitFn = opts.emit ?? (async (event) => {
       hooks.emit(event.type as never, event.payload as never);
     });
     // HITL 桥：harness requireConfirmation → 内核 awaitConfirmation
-    const requireConfirmation = opts.requireConfirmation ?? (async (gate) => {
+    // 外层统一包裹：无论是否注入 opts.requireConfirmation，reject 都置 userAborted
+    const innerConfirm = opts.requireConfirmation ?? (async (gate: Parameters<NonNullable<HarnessConfig["requireConfirmation"]>>[0]) => {
       const result = await hooks.awaitConfirmation({
         nodeId: (gate.detail?.tool as string) ?? "react_tool",
         runId: taskId,
@@ -149,6 +158,11 @@ export async function bootAiContentFactory(
       });
       return { approved: result.approved, params: result.params };
     });
+    const requireConfirmation = async (gate: Parameters<typeof innerConfirm>[0]) => {
+      const decision = await innerConfirm(gate);
+      if (!decision.approved) userAborted = true;
+      return decision;
+    };
 
     const model = llm.model("podcast_skill_agent");
     const harnessConfig: HarnessConfig = {
@@ -182,6 +196,20 @@ export async function bootAiContentFactory(
       } as never,
     );
 
+    // 用户在 HITL 确认门 reject：任务终止（优先于 finishReason 判定）
+    if (userAborted) {
+      hooks.emit(
+        "extension",
+        {
+          name: "user_rejected",
+          version: "1.0",
+          data: { finishReason: "aborted", finalText: result.finalText },
+        } as never,
+      );
+      hooks.setStatus("aborted", "用户终止了任务");
+      return;
+    }
+
     if (result.finishReason === "precondition_unmet") {
       hooks.emit(
         "extension",
@@ -198,6 +226,21 @@ export async function bootAiContentFactory(
     if (result.finishReason === "error") {
       hooks.emit("error", { message: result.error ?? "执行出错" } as never);
       hooks.setStatus("error", result.error);
+      return;
+    }
+
+    // 步数耗尽：未调用 nexus_finalize 收尾，视为失败
+    if (result.finishReason === "step_count") {
+      hooks.emit("error", { message: `已达到最大步数（${maxSteps}），任务未完成收尾` } as never);
+      hooks.setStatus("failed", "步数耗尽未收尾");
+      return;
+    }
+
+    // no_tool_call 且无 finalText：LLM 既没调工具也没输出文本，视为异常
+    // （no_tool_call + 有 finalText 是合法的"反问用户"场景，走下面的成功分支发 text）
+    if (result.finishReason === "no_tool_call" && !result.finalText.trim()) {
+      hooks.emit("error", { message: "执行未产生任何输出" } as never);
+      hooks.setStatus("failed", "执行未产生输出");
       return;
     }
 

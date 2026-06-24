@@ -27,8 +27,12 @@ export type RewriteStyle = "dialogue" | "narration" | "summary";
 const inputSchema = z.object({
   prompt: z.string().min(1).describe("用户 prompt / 指令"),
   systemPrompt: z.string().optional().describe("系统提示词；与 style 模板拼接"),
-  /** 由 executor 从 inputRefs 解析注入的上游正文（字符串）。 */
-  context: z.string().optional().describe("上游节点输出经 Content Pipeline 压缩后的正文"),
+  /**
+   * 由 executor 从 inputRefs 解析注入的上游正文。
+   * 支持字符串（直接拼入）或结构化数据（数组/对象 → 序列化为可读文本），
+   * 让上游 web_fetch 的 FetchedDoc[] 等数组形态可被直接消费，无需中间转换节点。
+   */
+  context: z.union([z.string(), z.array(z.unknown()), z.record(z.unknown())]).optional().describe("上游节点输出经 Content Pipeline 压缩后的正文（字符串或结构化数据）"),
   style: z.enum(["dialogue", "narration", "summary"]).optional().describe("rewrite 形式（podcast）"),
   role: z.enum(["planner", "writer", "summarizer", "default"]).optional().default("writer"),
   model: z.string().optional().describe("直接指定模型 id（覆盖 role）"),
@@ -70,9 +74,11 @@ export function createLlmNodeTool(opts: LlmNodeToolOptions): FlowConnector<strin
 
     async *execute(params, ctx): AsyncGenerator<ToolEvent, ToolResult<string>> {
       const args = inputSchema.parse(params);
-      const model = args.model ? opts.llm.modelById(args.model) : opts.llm.model(args.role as LlmRole);
-      // P8.5：compatMode 按 role 对应的 callSite 解析（per-callSite）
+      // role → callSite，优先走 callSite 路径（命中 registry 绑定，含 DeepSeek 等兼容服务）；
+      // 仅当显式指定 model id 时才绕过（调试场景）。这样避免 legacy role 体系在配置了
+      // openai-compatible endpoint 时仍回退到 DEFAULT_MODELS（如 gpt-4o-mini）。
       const callSite = ROLE_TO_CALLSITE[args.role as LlmRole] ?? "rewrite";
+      const model = args.model ? opts.llm.modelById(args.model) : opts.llm.model(callSite);
       const foldSystem = opts.llm.compatModeFor(callSite);
       const system = composeSystem(args.systemPrompt, args.style);
       const callId = `c_${randomUUID().slice(0, 8)}`;
@@ -139,11 +145,12 @@ function composeSystem(base?: string, style?: RewriteStyle): string | undefined 
 function buildMessages(
   system: string | undefined,
   prompt: string,
-  context?: string,
+  context?: string | unknown[] | Record<string, unknown>,
   foldSystem = false,
 ): Array<{ role: "system" | "user"; content: string }> {
   const msgs: Array<{ role: "system" | "user"; content: string }> = [];
-  const userContent = context ? `${prompt}\n\n---\n素材正文：\n${context}` : prompt;
+  const contextText = serializeContext(context);
+  const userContent = contextText ? `${prompt}\n\n---\n素材正文：\n${contextText}` : prompt;
   if (system && !foldSystem) {
     msgs.push({ role: "system", content: system });
     msgs.push({ role: "user", content: userContent });
@@ -155,6 +162,42 @@ function buildMessages(
     msgs.push({ role: "user", content: userContent });
   }
   return msgs;
+}
+
+/**
+ * 把 context（可能是字符串、数组、对象）序列化为可读文本。
+ * - 字符串：直接返回
+ * - FetchedDoc[] 等数组：按字段拼接成 [n/N] title\ncontent 的可读块
+ * - 对象：JSON 序列化（pretty）
+ * - undefined/null/空：返回 undefined（不拼入 user 消息）
+ */
+function serializeContext(
+  context?: string | unknown[] | Record<string, unknown>,
+): string | undefined {
+  if (context === undefined || context === null) return undefined;
+  if (typeof context === "string") return context || undefined;
+  if (Array.isArray(context)) {
+    if (context.length === 0) return undefined;
+    // 识别 FetchedDoc 形态（含 url/title/content 字段的对象数组）
+    const isDocArray = context.every(
+      (item) => item && typeof item === "object" && "content" in (item as object),
+    );
+    if (isDocArray) {
+      return context
+        .map((item, i) => {
+          const doc = item as { url?: string; title?: string; content?: string; error?: string };
+          const header = `[${i + 1}/${context.length}] ${doc.title ?? doc.url ?? ""}`;
+          const body = doc.error ? `(抓取失败：${doc.error})` : doc.content ?? "";
+          return `${header}\n${body}`;
+        })
+        .join("\n\n---\n\n");
+    }
+    // 通用数组：JSON 序列化
+    return JSON.stringify(context, null, 2);
+  }
+  // 对象：JSON 序列化
+  const s = JSON.stringify(context, null, 2);
+  return s === "{}" ? undefined : s;
 }
 
 function truncatePreview(s: string, n: number): string {
