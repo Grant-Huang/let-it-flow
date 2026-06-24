@@ -2,9 +2,13 @@
 
 Common UI components and styles for streaming interfaces in let-it-flow applications.
 
+⚠️ **Status**: This package is **ready for upstream integration** into @meso.ai/ui. See [UPSTREAM_READY.md](./UPSTREAM_READY.md) for migration timeline and details.
+
 ## Overview
 
 This package provides platform-level components and styling for streaming execution displays, following the design pattern established by Claude Code: **keep main message flow clean and linear, hide process details by default, provide collapsible details panels for power users**.
+
+> **Note**: These patterns are being contributed to @meso.ai/ui to make them available to all AI applications. Long-term, consumers should depend on @meso.ai/ui directly. See [docs/22-upstream-migration-plan.md](../docs/22-upstream-migration-plan.md) for details.
 
 ## Components
 
