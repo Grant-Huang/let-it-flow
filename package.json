@@ -16,10 +16,14 @@
     "dev:aicf": "tsx watch apps/ai-content-factory/server/index.ts",
     "dev:nexus:web": "pnpm --filter @let-it-flow/nexusops-web dev",
     "dev:aicf:web": "pnpm --filter @let-it-flow/ai-content-factory-web dev",
+    "start:aicf": "tsx scripts/start-aicf.ts",
+    "start:aicf:dev": "tsx scripts/start-aicf.ts --dev",
     "lint": "eslint .",
     "full-test": "tsx scripts/full-test.ts",
     "full-test:online": "tsx scripts/full-test.ts --online",
     "scenarios": "tsx tests/scenarios/run.ts",
+    "check": "pnpm typecheck && pnpm scenarios",
+    "check:full": "pnpm typecheck && pnpm test && pnpm scenarios",
     "smoke": "tsx -e \"import('./src/index.ts').then(m => console.log('import ok', typeof m.LetItFlow))\""
   },
   "dependencies": {

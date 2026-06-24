@@ -1,5 +1,6 @@
 import { createSkill } from "../../../src/agent/skill-bridge.js";
 import { wrapEvidence } from "../../../src/core/evidence-envelope.js";
+import { narrate, narrateSummary } from "../../../src/core/narrate.js";
 
 export interface PodcastScriptOutput {
   script: string;
@@ -59,7 +60,7 @@ export const writePodcastScriptSkill = createSkill({
   },
 
   async steps(input) {
-    const { step } = input;
+    const { step, narrate: skillNarrate, narrateSummary: skillSummary } = input;
     const targetMinutes = typeof input.durationMinutes === "number" ? input.durationMinutes : 30;
     const targetWords = targetMinutes * 210; // 字数公式
     const tolerance = targetWords * 0.05; // ±5% 容差
@@ -67,8 +68,11 @@ export const writePodcastScriptSkill = createSkill({
     const focusedThread = input.focusedThread;
     const narrative = typeof input.narrative === "string" ? input.narrative : "briefing";
 
+    await skillNarrate(`我来写这期 ${targetMinutes} 分钟的口播稿。`);
+
     // Step 1: 从知识库拉取写稿铁律
     const rulesStep = await step<string | undefined>("获取写稿铁律", async (ctx) => {
+      await narrate(ctx, "正在从知识库取写稿铁律…");
       const envelope = await ctx.call<{
         data?: { results?: Array<{ data?: { content?: string } }> };
       }>("kb.search", {
@@ -77,6 +81,7 @@ export const writePodcastScriptSkill = createSkill({
       // kb.search 返回 EvidenceEnvelope<{results: EvidenceEnvelope<Snippet>[]}>
       // 把命中的片段正文拼接成铁律上下文
       const results = envelope?.data?.results ?? [];
+      await narrate(ctx, `找到 ${results.length} 条写稿铁律。`);
       return results.map((r) => r?.data?.content ?? "").filter(Boolean).join("\n\n");
     });
 
@@ -84,6 +89,7 @@ export const writePodcastScriptSkill = createSkill({
 
     // Step 2: 第一轮生成
     const draftStep = await step<{ script: string; segments: string[] } | undefined>("初稿生成", async (ctx) => {
+      await narrate(ctx, "正在生成口播稿初稿…");
       const draft = await ctx.call<{ script: string; segments: string[] }>("generate", {
         systemPrompt: `你是播客写稿专家。按照叙事结构写稿。
 
@@ -110,6 +116,7 @@ ${rulesContext}
       needsRevise: boolean;
       violations: string[];
     } | undefined>("字数/句长/术语校验", async (ctx) => {
+      await narrate(ctx, "正在校验字数、句长和术语…");
       const result = await ctx.call<{
         wordCount: number;
         needsRevise: boolean;
@@ -130,7 +137,10 @@ ${rulesContext}
 
     let finalScript = scriptDraft;
     if (validateStep?.needsRevise) {
+      const violationSummary = (validateStep.violations || []).slice(0, 2).join("；");
+      await skillNarrate(`校验未通过（${violationSummary || "字数/句长偏差"}），触发自动重写。`);
       const reviseStep = await step<{ script: string } | undefined>("自动重写", async (ctx) => {
+        await narrate(ctx, "正在重写修复…");
         const revised = await ctx.call<{ script: string }>("generate", {
           systemPrompt: `修改播客稿件，修复以下问题：${(validateStep.violations || []).join("；")}`,
           userPrompt: `原稿件：\n${scriptDraft}\n\n修改后的完整稿件（JSON: {script:"..."}）：`,
@@ -144,6 +154,7 @@ ${rulesContext}
     const citationsStep = await step<{ citations: Array<{ text: string; source: string }> } | undefined>(
       "提取引用",
       async (ctx) => {
+        await narrate(ctx, "正在提取信源和直接引用…");
         const citations = await ctx.call<{
           citations: Array<{ text: string; source: string }>;
         }>("thought", {
@@ -163,6 +174,10 @@ ${finalScript}
       wordCount: seg.length,
       estimatedDuration: Math.round(seg.length / 210),
     }));
+
+    await skillSummary(
+      `口播稿完成，${segments.length} 段约 ${wordCount} 字，预计 ${estimatedMin} 分钟。`,
+    );
 
     const evidence = wrapEvidence(
       {

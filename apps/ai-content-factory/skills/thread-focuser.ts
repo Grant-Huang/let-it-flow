@@ -1,5 +1,6 @@
 import { createSkill } from "../../../src/agent/skill-bridge.js";
 import { wrapEvidence } from "../../../src/core/evidence-envelope.js";
+import { narrate, narrateSummary } from "../../../src/core/narrate.js";
 
 export interface Thread {
   id: string;
@@ -68,13 +69,16 @@ export const threadFocuserSkill = createSkill({
   },
 
   async steps(input) {
-    const { step } = input;
+    const { step, narrate: skillNarrate, narrateSummary: skillSummary } = input;
     const sourceText = typeof input.sourceText === "string" ? input.sourceText : "";
     const durationMinutes = typeof input.durationMinutes === "number" ? input.durationMinutes : 30;
     const focusHint = typeof input.focusHint === "string" ? input.focusHint : "";
 
+    await skillNarrate("我先从源内容里聚焦本期主线。");
+
     // Step 1: 使用 LLM 列举所有可独立撑起一期的线索
     const listStep = await step("列举线索", async (ctx) => {
+      await narrate(ctx, `正在分析源内容，找出能撑起 ${durationMinutes} 分钟的线索…`);
       const analysis = await ctx.call<{
         threads: Array<{
           id: string;
@@ -104,6 +108,8 @@ export const threadFocuserSkill = createSkill({
       throw new Error("未找到任何可独立成篇的线索，请补充内容或调整关键词");
     }
 
+    await skillNarrate(`找到 ${threads.length} 条候选线索。`);
+
     // Step 2: 判定数量，决定是直接选还是需要反问
     let selected: Thread;
     let discarded: Thread[] = [];
@@ -116,6 +122,7 @@ export const threadFocuserSkill = createSkill({
       discarded = threads.filter((t) => t.id !== selected.id);
     } else {
       // 需要用户选择：用 requireConfirmation 的 options 传线索摘要，params.choice 传回选中 id
+      await skillNarrate(`发现 ${threads.length} 条独立线索，需要你选一条。`);
       const choiceStep = await step<{ choice?: string } | undefined>("请用户选择线索", async (ctx) => {
         const result = await ctx.requireConfirmation({
           prompt: `发现 ${threads.length} 条独立线索，请选择一条作为本期核心：\n${threads
@@ -137,6 +144,7 @@ export const threadFocuserSkill = createSkill({
 
     // Step 3: 推断内容类型
     const typeStep = await step("判断内容类型", async (ctx) => {
+      await narrate(ctx, "正在判断内容类型（严谨型 vs 综合型）…");
       const result = await ctx.call<{ contentType: string }>("thought", {
         directive: `根据以下线索特征，判断是"rigorous"(严谨型阐述)还是"comprehensive"(综合型分析)：
 
@@ -153,6 +161,10 @@ export const threadFocuserSkill = createSkill({
       typeStep?.contentType === "rigorous" ? "rigorous" : "comprehensive";
 
     const rationale = `聚焦线索"${selected.summary}"（论证空间 ${selected.argumentSpace}/10），内容类型为${contentType === "rigorous" ? "严谨型" : "综合型"}。${discarded.length > 0 ? `并弃置 ${discarded.length} 条线索。` : ""}`;
+
+    await skillSummary(
+      `已聚焦：${selected.summary}（论证空间 ${selected.argumentSpace}/10），内容类型为${contentType === "rigorous" ? "严谨型" : "综合型"}。`,
+    );
 
     const evidence = wrapEvidence(
       {

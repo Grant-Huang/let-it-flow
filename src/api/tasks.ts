@@ -55,18 +55,16 @@ export function createTasksApp(registry: TaskRegistry): Hono {
       const coalescer = new StreamCoalescer({
         maxBuffer: sys.coalescerMaxBuffer,
         maxDelayMs: sys.coalescerMaxDelayMs,
-        emit: (event) => {
-          // 写 SSE data 行：data: {信封}\n\n 由 stream.sendSSE 处理 id/event/data
-          // 这里用 data 字段携带序列化信封
-          void stream.writeSSE({ data: serializeSSEData(event) });
+        emit: async (event) => {
+          await stream.writeSSE({ data: serializeSSEData(event) });
         },
       });
       for (const ev of buffered) {
-        coalescer.push(ev);
+        await coalescer.push(ev);
       }
-      coalescer.flush();
+      await coalescer.flush();
 
-      // 3) 若任务已终结，结束流
+      // 3) 若任务已终结，结束流（coalescer 已 flush 完毕，error 事件先于 [DONE]）
       if (isTerminal(meta.status)) {
         await stream.writeSSE({ data: "[DONE]" });
         return;
@@ -83,10 +81,10 @@ export function createTasksApp(registry: TaskRegistry): Hono {
         if (!cur) break;
         const fresh = registry.getStore().readSince(taskId, lastSent);
         for (const ev of fresh) {
-          coalescer.push(ev);
+          await coalescer.push(ev);
           lastSent = ev.seq;
         }
-        coalescer.flush();
+        await coalescer.flush();
         if (isTerminal(cur.status)) {
           await stream.writeSSE({ data: "[DONE]" });
           return;

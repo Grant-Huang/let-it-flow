@@ -44,7 +44,11 @@ export function usePodcastStream() {
       const created = await createWorkflow(intent, config);
       createdTaskId = created.taskId;
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg);
+      const failed = { ...createInitialStreamState(), status: "error" as const, errorMessage: msg };
+      stateRef.current = failed;
+      setState(failed);
       return;
     }
 
@@ -161,6 +165,9 @@ export function usePodcastStream() {
       if (ctrl.signal.aborted) return;
       const msg = e instanceof Error ? e.message : String(e);
       setError(msg);
+      const failed = { ...createInitialStreamState(), status: "error" as const, errorMessage: msg };
+      stateRef.current = failed;
+      setState(failed);
     }
   }, []);
 

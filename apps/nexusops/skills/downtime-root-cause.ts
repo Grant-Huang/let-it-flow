@@ -13,6 +13,7 @@ import {
   ctxFromArgs,
 } from "../tools/mock-data/scenarios.js";
 import { wrapEvidence } from "../../../src/core/evidence-envelope.js";
+import { narrate, narrateSummary } from "../../../src/core/narrate.js";
 
 export function createDowntimeRootCauseSkill() {
   return createSkill({
@@ -49,10 +50,12 @@ export function createDowntimeRootCauseSkill() {
     },
 
     async steps(input) {
-      const { step } = input;
+      const { step, narrate: skillNarrate, narrateSummary: skillSummary } = input;
       const scenarioId = typeof input.scenarioId === "string" ? input.scenarioId : "normal";
       const line = typeof input.line === "string" ? input.line : undefined;
       const sctx = ctxFromArgs({ scenarioId, line });
+
+      await skillNarrate(`我开始停机根因分析（场景：${scenarioId}${line ? `，产线 ${line}` : ""}）。`);
 
       // Step 1: 取停机事件清单 + 设备状态
       const step1 = await step<{
@@ -60,8 +63,10 @@ export function createDowntimeRootCauseSkill() {
         totalDowntimeMinutes: number;
         events: ReturnType<typeof getEquipment>["downtimeEvents"];
         topReason: string;
-      }>("取停机事件清单 + 设备状态", async () => {
+      }>("取停机事件清单 + 设备状态", async (ctx) => {
+        await narrate(ctx, "正在取停机事件清单与设备状态…");
         const eq = getEquipment(sctx);
+        await narrate(ctx, `设备状态：${eq.status}，累计停机 ${eq.downtimeEvents.reduce((s, e) => s + e.minutes, 0)} 分钟。`);
         return {
           status: eq.status,
           totalDowntimeMinutes: eq.downtimeEvents.reduce((s, e) => s + e.minutes, 0),
@@ -77,7 +82,8 @@ export function createDowntimeRootCauseSkill() {
         failureRisk30d: number;
         healthScore: number;
         overdueMaintenance: boolean;
-      }>("查维护历史 + 备件", async () => {
+      }>("查维护历史 + 备件", async (ctx) => {
+        await narrate(ctx, "正在查维护历史与备件状态…");
         const eq = getEquipment(sctx);
         return {
           mtbfHours: eq.mtbfHours,
@@ -93,7 +99,8 @@ export function createDowntimeRootCauseSkill() {
         processDeviation: number;
         materialShortageRisk: number;
         externalCauseRuled: boolean;
-      }>("交叉查工艺/物料排除外部因素", async () => {
+      }>("交叉查工艺/物料排除外部因素", async (ctx) => {
+        await narrate(ctx, "正在交叉查工艺与物料，排除外部因素…");
         const pr = getProcess(sctx);
         const m = getMaterial(sctx);
         return {
@@ -106,7 +113,8 @@ export function createDowntimeRootCauseSkill() {
       // Step 4: 综合根因结论（包成 EvidenceEnvelope）
       const step4 = await step<ReturnType<typeof wrapEvidence>>(
         "综合根因结论",
-        async () => {
+        async (ctx) => {
+          await narrate(ctx, "正在汇总根因结论…");
           let rootCause = step1.topReason;
           let category: string;
           if (step2.healthScore < 0.5) {
@@ -149,6 +157,9 @@ export function createDowntimeRootCauseSkill() {
           );
         },
       );
+
+      const rootCauseData = step4.data as { rootCause?: string; category?: string };
+      await skillSummary(`根因分析完成：${rootCauseData.rootCause ?? "已定位"}。`);
 
       return step4;
     },

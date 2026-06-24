@@ -1,5 +1,6 @@
 import { createSkill } from "../../../src/agent/skill-bridge.js";
 import { wrapEvidence } from "../../../src/core/evidence-envelope.js";
+import { narrate, narrateSummary } from "../../../src/core/narrate.js";
 
 export interface WechatArticleOutput {
   article: string;
@@ -56,21 +57,25 @@ export const writeWechatArticleSkill = createSkill({
   },
 
   async steps(input) {
-    const { step } = input;
+    const { step, narrate: skillNarrate, narrateSummary: skillSummary } = input;
     const targetWords = typeof input.targetWords === "number" ? input.targetWords : 6500;
     const tolerance = targetWords * 0.05; // ±5% 容差
     const focusedThread = input.focusedThread;
     const narrativeReason = typeof input.narrativeReason === "string" ? input.narrativeReason : "";
     const podcastScript = typeof input.podcastScript === "string" ? input.podcastScript : "";
 
+    await skillNarrate(`我来扩展成公众号长文（${targetWords} 字左右）。`);
+
     // Step 1: 获取图文写作规范
     const rulesStep = await step<string | undefined>("获取图文规范", async (ctx) => {
+      await narrate(ctx, "正在从知识库取图文规范…");
       const envelope = await ctx.call<{
         data?: { results?: Array<{ data?: { content?: string } }> };
       }>("kb.search", {
         query: "图文写作规范 公众号",
       });
       const results = envelope?.data?.results ?? [];
+      await narrate(ctx, `找到 ${results.length} 条图文规范。`);
       return results.map((r) => r?.data?.content ?? "").filter(Boolean).join("\n\n");
     });
 
@@ -81,6 +86,7 @@ export const writeWechatArticleSkill = createSkill({
       article: string;
       sections: Array<{ title: string; content: string }>;
     } | undefined>("长文生成", async (ctx) => {
+      await narrate(ctx, "正在生成长文稿…");
       const draft = await ctx.call<{
         article: string;
         sections: Array<{ title: string; content: string }>;
@@ -113,6 +119,7 @@ ${podcastScript}`,
       needsRevise: boolean;
       issue: string;
     } | undefined>("字数校验", async (ctx) => {
+      await narrate(ctx, "正在校验字数…");
       const result = await ctx.call<{
         wordCount: number;
         needsRevise: boolean;
@@ -131,8 +138,11 @@ ${podcastScript}`,
 
     let finalArticle = articleDraft;
     if (validateStep?.needsRevise) {
+      const issue = validateStep.issue || "字数偏差";
+      await skillNarrate(`字数不达标（${issue}），触发调整。`);
       const reviseStep = await step<{ article: string } | undefined>("字数调整", async (ctx) => {
-        const issue = validateStep.issue || "";
+        await narrate(ctx, "正在调整字数…");
+        const issueInner = validateStep.issue || "";
         const revised = await ctx.call<{ article: string }>("generate", {
           systemPrompt: `修改公众号文章，调整字数到 ${targetWords} 字（${issue}）`,
           userPrompt: `原文：\n${articleDraft}\n\n修改后的完整文章（JSON: {article:"..."}）：`,
@@ -146,6 +156,7 @@ ${podcastScript}`,
     const citationsStep = await step<{ citations: Array<{ text: string; source: string }> } | undefined>(
       "提取引用",
       async (ctx) => {
+        await narrate(ctx, "正在提取信源…");
         const citations = await ctx.call<{
           citations: Array<{ text: string; source: string }>;
         }>("thought", {
@@ -163,6 +174,10 @@ ${finalArticle}
       title: sec.title,
       wordCount: sec.content?.length || 0,
     }));
+
+    await skillSummary(
+      `公众号长文完成，${sections.length} 章节约 ${wordCount} 字。`,
+    );
 
     const evidence = wrapEvidence(
       {

@@ -4,6 +4,7 @@ import type { FlowConnector, ToolResult } from "../base.js";
 import { toolCallPayload, toolResultPayload } from "../../core/stream-events.js";
 import type { ToolEvent } from "../../core/stream-events.js";
 import { getFetchMaxBytes } from "../../core/system-settings.js";
+import { narrate } from "../../core/narrate.js";
 
 /**
  * web_fetch —— 网页抓取（见 04 §4.4，podcast MVP 数据源双路径之二）。
@@ -105,7 +106,10 @@ export function createWebFetchTool(): FlowConnector<FetchedDoc[]> {
 
       const t0 = Date.now();
       const docs: FetchedDoc[] = [];
+      let idx = 0;
       for (const t of targets) {
+        idx++;
+        await narrate(ctx, `抓取 [${idx}/${targets.length}] ${t.url}…`);
         const doc = await fetchOne(t.url, args.maxBytes);
         docs.push({ ...doc, title: t.title ?? doc.title });
       }

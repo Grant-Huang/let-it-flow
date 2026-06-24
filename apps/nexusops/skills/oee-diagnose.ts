@@ -16,6 +16,7 @@
 import { createSkill } from "../../../src/agent/skill-bridge.js";
 import { getOEE, getEquipment, getQuality, getProcess, ctxFromArgs, type ScenarioContext } from "../tools/mock-data/scenarios.js";
 import { wrapEvidence } from "../../../src/core/evidence-envelope.js";
+import { narrate, narrateSummary } from "../../../src/core/narrate.js";
 
 export function createOeeDiagnoseSkill() {
   return createSkill({
@@ -54,16 +55,20 @@ export function createOeeDiagnoseSkill() {
     },
 
     async steps(input) {
-      const { step } = input;
+      const { step, narrate: skillNarrate, narrateSummary: skillSummary } = input;
       const scenarioId = typeof input.scenarioId === "string" ? input.scenarioId : "normal";
       const line = typeof input.line === "string" ? input.line : undefined;
       const sctx: ScenarioContext = ctxFromArgs({ scenarioId, line });
 
+      await skillNarrate(`我开始 OEE 诊断（场景：${scenarioId}${line ? `，产线 ${line}` : ""}）。`);
+
       // Step 1: 取实时 OEE + 损失分解
       const step1 = await step<{ oee: ReturnType<typeof getOEE>; biggestLoss: string }>(
         "取实时 OEE + 损失分解",
-        async () => {
+        async (ctx) => {
+          await narrate(ctx, "正在取实时 OEE 与损失分解…");
           const oee = getOEE(sctx);
+          await narrate(ctx, `OEE = ${(oee.oee * 100).toFixed(1)}%，最大损失项：${oee.availability < oee.performance && oee.availability < oee.quality ? "可用率" : oee.performance < oee.quality ? "性能" : "质量"}。`);
           return {
             oee,
             biggestLoss:
@@ -79,8 +84,10 @@ export function createOeeDiagnoseSkill() {
       // Step 2: 按最大损失项分流取证
       const step2 = await step<{ lossType: string; evidence: Record<string, unknown> }>(
         "按最大损失项分流取证",
-        async () => {
+        async (ctx) => {
           const loss = step1.biggestLoss;
+          const lossLabel = loss === "availability" ? "可用率" : loss === "performance" ? "性能" : "质量";
+          await narrate(ctx, `按最大损失项（${lossLabel}）取证…`);
           let evidence: Record<string, unknown> = { lossType: loss };
           if (loss === "availability") {
             const eq = getEquipment(sctx);
@@ -116,7 +123,8 @@ export function createOeeDiagnoseSkill() {
       const step3 = await step<{
         crossCheck: Record<string, unknown>;
         primaryEvidence: Record<string, unknown>;
-      }>("交叉验证（5M1E 视角）", async () => {
+      }>("交叉验证（5M1E 视角）", async (ctx) => {
+        await narrate(ctx, "正在用 5M1E 视角交叉验证…");
         const eq = getEquipment(sctx);
         const pr = getProcess(sctx);
         return {
@@ -135,7 +143,8 @@ export function createOeeDiagnoseSkill() {
         diagnosis: string;
         confidence: number;
         evidenceChain: Record<string, unknown>;
-      }>("综合诊断结论", async () => {
+      }>("综合诊断结论", async (ctx) => {
+        await narrate(ctx, "正在汇总诊断结论…");
         const cc = step3.crossCheck as {
           suspiciousDevice: boolean;
           suspiciousProcess: boolean;
@@ -158,7 +167,8 @@ export function createOeeDiagnoseSkill() {
       // Step 5: 包成诊断 EvidenceEnvelope
       const step5 = await step<ReturnType<typeof wrapEvidence>>(
         "包成诊断 EvidenceEnvelope",
-        async () => {
+        async (ctx) => {
+          await narrate(ctx, "正在封装诊断结论…");
           return wrapEvidence(
             {
               scenarioId: sctx.scenarioId,
@@ -179,6 +189,8 @@ export function createOeeDiagnoseSkill() {
           );
         },
       );
+
+      await skillSummary(`OEE 诊断完成：${step4.diagnosis}（置信度 ${(step4.confidence * 100).toFixed(0)}%）。`);
 
       return step5;
     },

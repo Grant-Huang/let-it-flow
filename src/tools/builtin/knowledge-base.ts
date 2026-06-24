@@ -7,10 +7,11 @@
  * ReAct 主循环把此工具暴露给 LLM，LLM 用自然语言查询专有知识。
  */
 import { randomUUID } from "node:crypto";
-import type { FlowConnector, ToolResult } from "../base.js";
+import type { FlowConnector, ToolResult, ExecutionContext } from "../base.js";
 import type { ToolEvent } from "../../core/stream-events.js";
 import { toolCallPayload, toolResultPayload } from "../../core/stream-events.js";
 import { wrapEvidence } from "../../core/evidence-envelope.js";
+import { narrate } from "../../core/narrate.js";
 import {
   type IKnowledgeProvider,
   type KnowledgeQuery,
@@ -93,6 +94,7 @@ export function createKnowledgeBaseTool(
 
     async *execute(
       params: Record<string, unknown>,
+      ctx: ExecutionContext,
     ): AsyncGenerator<ToolEvent, ToolResult> {
       const callId = `c_${randomUUID().slice(0, 8)}`;
       const startedAt = Date.now();
@@ -123,9 +125,11 @@ export function createKnowledgeBaseTool(
       }> = [];
       const providersQueried: string[] = [];
 
+      await narrate(ctx, `正在检索知识库：${query}…`);
       for (const provider of targets) {
         if (!provider.ready()) continue;
         providersQueried.push(provider.id);
+        await narrate(ctx, `检索 ${provider.id}…`);
         try {
           const snippets = await provider.search(queryObj);
           for (const snippet of snippets) {
@@ -134,6 +138,9 @@ export function createKnowledgeBaseTool(
         } catch {
           // 单 provider 失败不阻塞
         }
+      }
+      if (allResults.length > 0) {
+        await narrate(ctx, `知识库命中 ${allResults.length} 条片段。`);
       }
 
       // 跨 provider 合并 + 按 score 降序 + 截 topK

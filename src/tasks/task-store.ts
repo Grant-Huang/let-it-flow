@@ -12,6 +12,30 @@ import {
   listTaskIds,
 } from "../storage/file-store.js";
 import type { StreamEvent, StreamEventType } from "../core/stream-events.js";
+import { getLogVerbose } from "../core/config.js";
+
+/**
+ * 判断事件是否应被当前 verbose 级别落盘（不影响 SSE 推送与 seq 单调性）。
+ *
+ *   verbose=0 (off)  → 全部不落盘
+ *   verbose=1 (basic)→ 只保留工具调用元信息 + 终态，不含 narrative text / workflow_node
+ *   verbose=2 (full) → 全部落盘（缺省）
+ */
+function shouldPersist(type: StreamEventType): boolean {
+  const verbose = getLogVerbose();
+  if (verbose >= 2) return true;
+  if (verbose <= 0) return false;
+  // basic：只保留工具调用元信息 + 终态
+  return (
+    type === "tool_call" ||
+    type === "tool_result" ||
+    type === "tool_status" ||
+    type === "phase" ||
+    type === "done" ||
+    type === "error" ||
+    type === "extension"
+  );
+}
 
 /**
  * 任务状态机（见 12 §12.3）：
@@ -124,16 +148,25 @@ export class FileTaskStore {
   }
 
   /**
-   * 追加一个事件并分配 seq，原子落库到 events.jsonl。
-   * 返回带 seq 的完整事件。
+   * 追加一个事件并分配 seq（seq 始终单调递增，保证 SSE 断线重连正确）。
+   *
+   * verbose 级别只控制**是否落盘到 events.jsonl**，不影响 seq 分配与 SSE 推送：
+   *   - verbose=0：不落盘（仍返回带 seq 的事件，SSE 正常工作）
+   *   - verbose=1：仅落盘工具调用元信息 + 终态（不含 narrative text / workflow_node）
+   *   - verbose=2：全部落盘（缺省）
+   *
+   * 返回带 seq 的完整事件（无论是否落盘）。
    */
   append(taskId: string, event: Omit<StreamEvent, "seq">): StreamEvent {
     const meta = this.get(taskId);
     if (!meta) throw new Error(`task not found: ${taskId}`);
     const seq = meta.lastSeq + 1;
     const full: StreamEvent = { ...event, seq } as StreamEvent;
-    appendJsonlLine(taskEventsPath(taskId), full);
+    // seq 始终递增（保证 SSE 断线重连），仅落盘按 verbose 过滤
     this.update(taskId, { lastSeq: seq });
+    if (shouldPersist(event.type)) {
+      appendJsonlLine(taskEventsPath(taskId), full);
+    }
     return full;
   }
 

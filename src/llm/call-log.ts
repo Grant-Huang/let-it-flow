@@ -1,6 +1,6 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { getTasksDir } from "../core/config.js";
+import { getTasksDir, getLogVerbose } from "../core/config.js";
 import type { CallSite } from "./call-sites.js";
 
 /**
@@ -87,6 +87,8 @@ export class CallLogWriter {
 
   /** 追加一条事件到任务的 ndjson 日志。 */
   append(taskId: string, event: LlmCallEvent): Promise<void> {
+    // verbose=0 时完全不写 LLM 调用日志（与 events.jsonl 一致）
+    if (getLogVerbose() <= 0) return Promise.resolve();
     return Promise.resolve().then(() => {
       // dataDir 是 LIF_DATA_DIR；tasks 目录是 dataDir/tasks
       const dir = join(this.dataDir, "tasks", taskId);

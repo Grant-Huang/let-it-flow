@@ -70,6 +70,24 @@ export interface StepsInput {
    * @returns fn 的返回值（供后续步骤引用）
    */
   step: <T = unknown>(name: string, fn: (ctx: StepCtx) => Promise<T>) => Promise<T>;
+  /**
+   * skill 级叙述入口（step 外可用）。
+   * 直接走 ctx.emit → SSE，绕过 pendingEvents 批量队列，保证叙述实时下发。
+   * 用于 skill 开始/结束/分支决策等 step 外场景的人类可读叙述。
+   * 详见 docs/20-narrative-output-rules.md。
+   *
+   * @example
+   * async steps(input) {
+   *   const { step, narrate } = input;
+   *   await narrate("我来写这期口播稿。");
+   *   ...
+   * }
+   */
+  narrate: (text: string) => Promise<void>;
+  /**
+   * skill 结束总结叙述（前置换行，便于前端分隔气泡）。
+   */
+  narrateSummary: (text: string) => Promise<void>;
 }
 
 /** 动态 steps 函数签名。入参是 StepsInput（含 skill params + step 工厂），返回 skill 业务输出。 */
@@ -307,6 +325,10 @@ async function* runDynamicSteps(
   // 把 skill 输入参数合并进 stepsInput（让 dynamicSteps 能直接访问 input.xxx）
   const stepsInput: StepsInput = {
     ...params,
+    narrate: (text: string): Promise<void> =>
+      ctx.emit({ type: "text", channel: "content", payload: { delta: text } }).then(() => undefined),
+    narrateSummary: (text: string): Promise<void> =>
+      ctx.emit({ type: "text", channel: "content", payload: { delta: `\n${text}` } }).then(() => undefined),
     step: async <T = unknown>(stepName: string, fn: (c: StepCtx) => Promise<T>): Promise<T> => {
       const idx = ++stepCallCount;
       try {

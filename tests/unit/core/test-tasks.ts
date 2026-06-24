@@ -97,32 +97,49 @@ describe("AsyncLatch", () => {
 });
 
 describe("StreamCoalescer", () => {
-  it("buffers content channel and flushes on demand", () => {
+  it("buffers content channel and flushes on demand", async () => {
     const emitted: unknown[] = [];
-    const c = new StreamCoalescer({ emit: (e) => emitted.push(e), maxBuffer: 100, maxDelayMs: 10_000 });
-    c.push(makeEv(1, "content"));
-    c.push(makeEv(2, "content"));
+    const c = new StreamCoalescer({ emit: (e) => { emitted.push(e); }, maxBuffer: 100, maxDelayMs: 10_000 });
+    await c.push(makeEv(1, "content"));
+    await c.push(makeEv(2, "content"));
     expect(emitted).toHaveLength(0); // content 缓冲中
     expect(c.pendingCount).toBe(2);
-    c.flush();
+    await c.flush();
     expect(emitted).toHaveLength(2);
     expect(c.pendingCount).toBe(0);
   });
 
-  it("flushes content buffer immediately when a status event arrives", () => {
+  it("flushes content buffer immediately when a status event arrives", async () => {
     const emitted: unknown[] = [];
-    const c = new StreamCoalescer({ emit: (e) => emitted.push(e), maxBuffer: 100, maxDelayMs: 10_000 });
-    c.push(makeEv(1, "content"));
-    c.push(makeEv(2, "status")); // status 触发先 flush content 再立即 emit
+    const c = new StreamCoalescer({ emit: (e) => { emitted.push(e); }, maxBuffer: 100, maxDelayMs: 10_000 });
+    await c.push(makeEv(1, "content"));
+    await c.push(makeEv(2, "status")); // status 触发先 flush content 再立即 emit
     expect(emitted.map((e) => (e as { seq: number }).seq)).toEqual([1, 2]);
   });
 
-  it("auto-flushes when buffer reaches maxBuffer", () => {
+  it("auto-flushes when buffer reaches maxBuffer", async () => {
     const emitted: unknown[] = [];
-    const c = new StreamCoalescer({ emit: (e) => emitted.push(e), maxBuffer: 2, maxDelayMs: 10_000 });
-    c.push(makeEv(1, "content"));
-    c.push(makeEv(2, "content")); // 达到 maxBuffer=2
+    const c = new StreamCoalescer({ emit: (e) => { emitted.push(e); }, maxBuffer: 2, maxDelayMs: 10_000 });
+    await c.push(makeEv(1, "content"));
+    await c.push(makeEv(2, "content")); // 达到 maxBuffer=2
     expect(emitted).toHaveLength(2);
+  });
+
+  it("await async emit to completion before flush returns", async () => {
+    // 验证 emit 回调为 async 时，flush 会逐条 await（修复 SSE 终态竞态）
+    const order: string[] = [];
+    const c = new StreamCoalescer({
+      emit: (e) => {
+        order.push(`emit:${(e as { seq: number }).seq}`);
+        return Promise.resolve();
+      },
+      maxBuffer: 100,
+      maxDelayMs: 10_000,
+    });
+    await c.push(makeEv(1, "content"));
+    await c.push(makeEv(2, "content"));
+    await c.flush();
+    expect(order).toEqual(["emit:1", "emit:2"]);
   });
 });
 

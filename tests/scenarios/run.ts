@@ -21,11 +21,15 @@ import { join } from "node:path";
 import { versions, platform, cwd } from "node:process";
 import type { Scenario, ScenarioResult, CallProvenance } from "./types.js";
 import { vLayerScenarios } from "./v-layer.js";
+import { aicfVLayerScenarios } from "./v-layer-aicf.js";
 import { gLayerScenarios } from "./g-layer.js";
+import { aicfGLayerScenarios } from "./g-layer-aicf.js";
 import { cLayerScenarios } from "./c-layer.js";
 import { lLayerScenarios } from "./l-layer.js";
 import { tLayerScenarios } from "./t-layer.js";
 import { eLayerScenarios } from "./e-layer.js";
+import { nexusELayerScenarios } from "./e-layer-nexus.js";
+import { narrativeScenarios } from "./narrative-layer.js";
 
 const ROOT = cwd();
 const REPORT_DIR = join(ROOT, "tests", "reports");
@@ -44,10 +48,14 @@ async function main() {
   const allScenarios: Scenario[] = [
     ...tLayerScenarios,
     ...vLayerScenarios,
+    ...aicfVLayerScenarios,
     ...gLayerScenarios,
+    ...aicfGLayerScenarios,
     ...cLayerScenarios,
     ...lLayerScenarios,
     ...eLayerScenarios,
+    ...nexusELayerScenarios,
+    ...narrativeScenarios,
   ];
 
   console.log(`\n运行 ${allScenarios.length} 个全流程场景...\n`);
@@ -128,7 +136,7 @@ function renderReport(results: ScenarioResult[], meta: ReportMeta): string {
   L.push("");
   L.push(`> 生成时间：${meta.generatedAt}`);
   L.push(`> 环境：Node ${meta.env.node} / ${meta.env.platform}`);
-  L.push(`> 性质说明：本报告验证 NexusOps + let-it-flow 在**离线条件**下，各层机制（V/G/C/L/T）能否确定性输出符合预期的可信结果。真实 LLM 决策链路（ReAct 全流程）属 e2e 职责，不在此报告范围。`);
+  L.push(`> 性质说明：本报告验证 NexusOps + AI Content Factory + let-it-flow 在**离线条件**下，各层机制（V/G/C/L/T/E）能否确定性输出符合预期的可信结果。真实 LLM 决策链路（ReAct 全流程）属 e2e 职责，不在此报告范围。`);
   L.push("");
 
   // ── 汇总 ──
