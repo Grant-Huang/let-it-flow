@@ -1,5 +1,6 @@
 packages:
   - "web"
+  - "packages/*"
   - "apps/nexusops"
   - "apps/nexusops/web"
   - "apps/ai-content-factory"
