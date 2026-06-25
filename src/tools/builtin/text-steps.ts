@@ -174,7 +174,11 @@ export function createTranslateTool(
           output: JSON.stringify({ ok, len: text.length }),
         }),
       };
-      return { output: { text }, summary: `${name} 完成 → ${text.length} 字` };
+      return {
+        output: { text },
+        summary: `${name} 完成 → ${text.length} 字`,
+        narration: `${name}完成：${text.length} 字符`,
+      };
     },
   };
 }
@@ -306,7 +310,11 @@ export function createSeamRepairTool(
           output: JSON.stringify({ ok, len: text.length }),
         }),
       };
-      return { output: { text }, summary: `${name} 完成 → ${text.length} 字` };
+      return {
+        output: { text },
+        summary: `${name} 完成 → ${text.length} 字`,
+        narration: `${name}完成：${text.length} 字符`,
+      };
     },
   };
 }
@@ -502,7 +510,11 @@ export function createTerminologyTool(
           output: JSON.stringify({ ok, len: text.length }),
         }),
       };
-      return { output: { text }, summary: `${name} 完成 → ${text.length} 字` };
+      return {
+        output: { text },
+        summary: `${name} 完成 → ${text.length} 字`,
+        narration: `${name}完成：${text.length} 字符`,
+      };
     },
   };
 }
@@ -591,7 +603,11 @@ export function createSubtitleTool(runtime: SubtitleRuntime): FlowConnector<{ sr
           output: JSON.stringify({ ok: res.ok, hasSrt: srt.length > 0 }),
         }),
       };
-      return { output: { srtPath: srt ? `${workDir}/scripts/final.srt` : "" }, summary: "字幕对齐完成" };
+      return {
+        output: { srtPath: srt ? `${workDir}/scripts/final.srt` : "" },
+        summary: "字幕对齐完成",
+        narration: "字幕对齐完成",
+      };
     },
   };
 }
@@ -691,7 +707,11 @@ export function createImagePromptsTool(
           output: JSON.stringify({ ok, planBytes: plan.length }),
         }),
       };
-      return { output: { plan }, summary: `图片提示词生成完成 → ${plan.length} bytes` };
+      return {
+        output: { plan },
+        summary: `图片提示词生成完成 → ${plan.length} bytes`,
+        narration: `图片提示词生成完成：${plan.length} 字节`,
+      };
     },
   };
 }

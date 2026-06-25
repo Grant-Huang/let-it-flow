@@ -20,22 +20,22 @@ export function EvidenceBadge({ data }: { data: EvidenceBadgeData }) {
     <div style={{ display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
       {data.freshness && (
         <span className="nexus-badge" style={freshnessStyle(data.freshness)}>
-          ⏱ {freshnessLabel(data.freshness)}
+          {freshnessLabel(data.freshness)}
         </span>
       )}
       {data.confidence && (
         <span className="nexus-badge" style={confidenceStyle(data.confidence)}>
-          {confidenceIcon(data.confidence)} {confidenceLabel(data.confidence)}
+          {confidenceLabel(data.confidence)}
         </span>
       )}
       {data.source?.system && (
         <span className="nexus-badge" style={sourceStyle}>
-          ◇ {data.source.system}
+          {data.source.system}
         </span>
       )}
       {data.caveat && (
         <span className="nexus-badge" style={caveatStyle} title={data.caveat}>
-          ! 注意
+          ⚠ {data.caveat}
         </span>
       )}
     </div>

@@ -11,6 +11,72 @@
 /* NexusOps 业务专属覆盖 */
 .nexus-live-trace {
   margin: 8px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* 执行轨迹可折叠区域 */
+.live-trace-section {
+  border-left: 1px solid var(--color-border-light);
+  padding-left: 12px;
+  margin-left: 4px;
+}
+
+.live-trace-toggle {
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.95em;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  margin: 8px 0;
+  padding: 4px 0;
+  transition: color 0.2s;
+}
+
+.live-trace-toggle:hover {
+  color: var(--color-text);
+}
+
+.live-trace-toggle:focus {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.toggle-icon {
+  display: inline-flex;
+  align-items: center;
+  width: 16px;
+  justify-content: center;
+  font-size: 0.9em;
+  transition: transform 0.2s;
+}
+
+.step-count {
+  font-size: 0.85em;
+  color: var(--color-text-muted);
+  font-weight: normal;
+}
+
+.live-trace-content {
+  padding: 8px 0;
+  animation: slideDown 0.2s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    max-height: 0;
+    overflow: hidden;
+  }
+  to {
+    opacity: 1;
+    max-height: 100%;
+  }
 }
 .nexus-welcome h1 {
   color: var(--color-accent);

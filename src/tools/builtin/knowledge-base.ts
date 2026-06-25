@@ -180,6 +180,7 @@ export function createKnowledgeBaseTool(
       return {
         output: envelope,
         summary: `KB 检索 "${query}" 命中 ${envelopes.length}/${allResults.length}（${providersQueried.length} providers）`,
+        narration: `知识库检索完成：找到 ${envelopes.length} 条相关片段`,
       };
     },
   };

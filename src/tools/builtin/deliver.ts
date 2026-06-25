@@ -77,7 +77,11 @@ export function createDeliverTool(): FlowConnector<{ type: string; title?: strin
         payload: toolResultPayload({ tool_call_id: callId, output: JSON.stringify(artifact) }),
       };
 
-      return { output: artifact, summary: truncatePreview(content, 120) };
+      return {
+        output: artifact,
+        summary: truncatePreview(content, 120),
+        narration: `产物聚合完成：${content.length} 字符`,
+      };
     },
   };
 }

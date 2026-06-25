@@ -126,7 +126,11 @@ export function createLlmNodeTool(opts: LlmNodeToolOptions): FlowConnector<strin
         payload: toolResultPayload({ tool_call_id: callId, output: full, duration_ms: Date.now() - t0 }),
       };
 
-      return { output: full, summary: truncatePreview(full, 120) };
+      return {
+        output: full,
+        summary: truncatePreview(full, 120),
+        narration: `生成完成：${full.length} 字符`,
+      };
     },
   };
 }

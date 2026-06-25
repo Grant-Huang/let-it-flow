@@ -12,8 +12,8 @@
   "dependencies": {
     "@let-it-flow/common-ui": "workspace:*",
     "@meso.ai/client": "^0.1.0",
-    "@meso.ai/types": "~2.1.0",
-    "@meso.ai/ui": "~3.1.0",
+    "@meso.ai/types": "^2.1.1",
+    "@meso.ai/ui": "^3.2.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.26.0"

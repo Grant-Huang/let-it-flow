@@ -59,6 +59,8 @@ export interface ToolResult<T = unknown> {
   output: T;
   /** 可选的额外摘要（用于事件 payload / 调试）。 */
   summary?: string;
+  /** 工具的自然语言叙述（编排层填充，UI 层优先显示）。 */
+  narration?: string;
 }
 
 /**
