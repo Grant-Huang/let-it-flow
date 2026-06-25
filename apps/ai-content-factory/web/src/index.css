@@ -5,6 +5,9 @@
 @tailwind components;
 @tailwind utilities;
 
+/* 导入平台级流式展示样式 */
+@import "@let-it-flow/common-ui/styles";
+
 /* 业务专属覆盖：podcast 生成页的微调 */
 .podcast-live-trace {
   margin: 8px 0;

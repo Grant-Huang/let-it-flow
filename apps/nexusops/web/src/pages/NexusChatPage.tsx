@@ -22,6 +22,7 @@ export default function NexusChatPage() {
   const [input, setInput] = useState("");
   const [history, setHistory] = useState<Message[]>([]);
   const [artifactVisible, setArtifactVisible] = useState(false);
+  const [verboseMode, setVerboseMode] = useState(false);
 
   const { state, taskId, conversationId, isStreaming, start, followUp, replay, confirm, clarify, abort, reset } = useNexusStream();
 
@@ -71,6 +72,7 @@ export default function NexusChatPage() {
 
   const renderLiveTrace = createRenderLiveTrace({
     streaming: isStreaming,
+    verbose: verboseMode,
     onToolConfirm: () => handleConfirm("approve"),
     onToolCancel: () => handleConfirm("reject"),
   });
@@ -126,6 +128,17 @@ export default function NexusChatPage() {
               {state.errorMessage}
             </div>
           )}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, paddingBottom: 8, paddingLeft: 4, paddingRight: 4 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: "var(--color-text-secondary)", cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={verboseMode}
+                onChange={(e) => setVerboseMode(e.target.checked)}
+                style={{ cursor: "pointer" }}
+              />
+              <span>详细模式 (Verbose)</span>
+            </label>
+          </div>
           <ChatComposer
             value={input}
             onChange={setInput}

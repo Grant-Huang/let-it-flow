@@ -52,35 +52,91 @@ const stream = await flow.execute("分析宁德时代的新能源电池行业地
 for await (const chunk of stream) { /* 处理流式事件 */ }
 ```
 
+## 平台定位
+
+**let-it-flow 是什么**:
+- ✅ **编排框架**: Intent → LLM 规划 → DAG 校验 → 确定性执行 → 流式反馈
+- ✅ **工具生态**: web_search / web_fetch / knowledge_base / llm / autonomous_research
+- ✅ **执行引擎**: 拓扑并发执行、HITL 门禁、流式推送（SDK + HTTP）
+- ✅ **参考实现**: ai-content-factory（播客）+ nexusops（discovery）完整示例
+
+**let-it-flow 不是**:
+- ❌ UI 框架（UI 由 @meso.ai/ui 提供）
+- ❌ 业务应用（业务逻辑由消费应用实现）
+- ❌ 数据存储层（应用自管数据库）
+
+详见 [docs/00-platform-positioning.md](docs/00-platform-positioning.md) 完整定位文档。
+
 ## 项目结构
 
 ```
 let-it-flow/
-├── src/              # TS 内核（planner/executor/tools/tasks/sdk/core/llm/api）
-├── web/              # 配置页面前端（Vite + React，三个配置页面）
-├── docs/             # 设计文档（13 篇）
-├── reference/        # LitPilot 参考代码（设计参照，不复用）
-├── examples/         # 示例消费应用（SDK + HTTP 形态）
-├── eval/             # 自动化评测基准线
-└── scripts/          # 门禁脚本（full-test 全量测试报告器等）
+├── src/                          # 平台核心（编排 + 执行 + 工具生态）
+│   ├── planner/                  # LLM 规划器（意图→DAG）
+│   ├── executor/                 # DAG 执行器（确定性执行 + HITL）
+│   ├── tools/                    # 标准工具库（web_search/web_fetch/kb/llm）
+│   ├── api/                      # HTTP API（Hono）
+│   ├── sdk/                      # SDK 接口（async generator）
+│   └── core/                     # 核心类型与工具库
+│
+├── packages/common-ui/           # 平台级通用 UI 组件（迁移中 → @meso.ai/ui）
+│
+├── apps/                         # 消费级参考实现（独立应用）
+│   ├── ai-content-factory/       # 播客生成完整 demo
+│   └── nexusops/                 # Discovery ops 完整 demo
+│
+├── examples/                     # 教学示例（静态 DAG / 工具集成等）
+│   └── podcast-generator/        # 快速上手示例
+│
+├── docs/                         # 设计文档 + 平台定位
+│   ├── 00-platform-positioning.md    # ⭐ 平台功能定位（推荐首读）
+│   ├── 01-overview.md               # 项目总览
+│   ├── 02-architecture.md           # 架构详解
+│   ├── 21-streaming-ui-guidelines.md # 平台级 UI 规范
+│   ├── 22-upstream-migration-plan.md # 上游集成计划
+│   └── ...
+│
+├── reference/                   # LitPilot 参考代码（设计参照，不复用）
+├── eval/                        # 自动化评测基准线
+└── scripts/                     # 门禁脚本（全量测试等）
 ```
 
 ## 设计文档
 
+**必读** (平台定位与架构):
+
 | 文档 | 内容 |
 |------|------|
-| [docs/01-overview.md](docs/01-overview.md) | 项目定位与核心范式（SDK 为主） |
-| [docs/02-architecture.md](docs/02-architecture.md) | 整体架构与 SDK/HTTP 双形态模块边界 |
-| [docs/03-dag-schema.md](docs/03-dag-schema.md) | WorkflowDAG 完整规范（含 HITL 字段） |
-| [docs/04-tool-protocol.md](docs/04-tool-protocol.md) | FlowConnector 工具协议契约 |
-| [docs/05-kb-mcp-protocol.md](docs/05-kb-mcp-protocol.md) | IKnowledgeProvider 与 ObsidianProvider |
-| [docs/06-planner-and-templates.md](docs/06-planner-and-templates.md) | 规划器与模板库 |
-| [docs/07-executor.md](docs/07-executor.md) | DAG 执行器（含 HITL 暂停点） |
-| [docs/08-task-streaming.md](docs/08-task-streaming.md) | 任务与流式机制 |
-| [docs/09-milestones-and-todolist.md](docs/09-milestones-and-todolist.md) | 里程碑与 TodoList |
-| [docs/10-litpilot-migration-guide.md](docs/10-litpilot-migration-guide.md) | LitPilot 关系（设计参考） |
+| [📍 docs/00-platform-positioning.md](docs/00-platform-positioning.md) | **平台功能定位 + 包管理 + 职责矩阵** |
+| [docs/01-overview.md](docs/01-overview.md) | 项目总览与核心范式 |
+| [docs/02-architecture.md](docs/02-architecture.md) | 整体架构（SDK/HTTP 双形态）|
+
+**功能细节**:
+
+| 文档 | 内容 |
+|------|------|
+| [docs/03-dag-schema.md](docs/03-dag-schema.md) | WorkflowDAG 规范 + HITL |
+| [docs/04-tool-protocol.md](docs/04-tool-protocol.md) | 工具接入协议 |
+| [docs/05-kb-mcp-protocol.md](docs/05-kb-mcp-protocol.md) | 知识库接入 |
+| [docs/06-planner-and-templates.md](docs/06-planner-and-templates.md) | 规划器 + 模板库 |
+| [docs/07-executor.md](docs/07-executor.md) | 执行器细节 |
+| [docs/08-task-streaming.md](docs/08-task-streaming.md) | 任务与流式 |
+
+**平台级规范**:
+
+| 文档 | 内容 |
+|------|------|
+| [docs/21-streaming-ui-guidelines.md](docs/21-streaming-ui-guidelines.md) | 流式 UI 设计规范 |
+| [docs/22-upstream-migration-plan.md](docs/22-upstream-migration-plan.md) | @meso.ai/ui 上游集成计划 |
+
+**参考 & 其他**:
+
+| 文档 | 内容 |
+|------|------|
+| [docs/10-litpilot-migration-guide.md](docs/10-litpilot-migration-guide.md) | LitPilot 迁移指南 |
 | [docs/11-benchmark-and-eval.md](docs/11-benchmark-and-eval.md) | 自动化评测体系 |
-| [docs/12-hitl-and-control.md](docs/12-hitl-and-control.md) | Human-in-the-loop 流程控制 |
+| [docs/12-hitl-and-control.md](docs/12-hitl-and-control.md) | HITL 流程控制 |
+| [docs/09-milestones-and-todolist.md](docs/09-milestones-and-todolist.md) | 里程碑与 TodoList |
 | [docs/REFERENCE-MANIFEST.md](docs/REFERENCE-MANIFEST.md) | 参考代码清单 |
 
 ## reference/ 目录
