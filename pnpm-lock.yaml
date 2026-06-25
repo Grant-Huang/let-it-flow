@@ -13,7 +13,7 @@ importers:
     dependencies:
       '@ai-sdk/anthropic':
         specifier: ^3.0.84
-        version: 3.0.86(zod@3.25.76)
+        version: 3.0.85(zod@3.25.76)
       '@ai-sdk/azure':
         specifier: ^3.0.74
         version: 3.0.77(zod@3.25.76)
@@ -27,17 +27,17 @@ importers:
         specifier: ^0.1.0
         version: 0.1.0
       '@meso.ai/types':
-        specifier: ^2.0.0
-        version: 2.0.0
+        specifier: ~2.1.0
+        version: 2.1.0
       '@meso.ai/ui':
-        specifier: ^3.0.0
-        version: 3.0.0(@meso.ai/types@2.0.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+        specifier: ~3.1.0
+        version: 3.1.0(@meso.ai/types@2.1.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(zod@3.25.76)
       ai:
         specifier: ^6.0.0
-        version: 6.0.209(zod@3.25.76)
+        version: 6.0.208(zod@3.25.76)
       dotenv:
         specifier: ^17.4.2
         version: 17.4.2
@@ -91,11 +91,11 @@ importers:
         specifier: ^0.1.0
         version: 0.1.0
       '@meso.ai/types':
-        specifier: ^2.0.0
-        version: 2.0.0
+        specifier: ~2.1.0
+        version: 2.1.0
       '@meso.ai/ui':
-        specifier: ^3.0.0
-        version: 3.0.0(@meso.ai/types@2.0.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+        specifier: ~3.1.0
+        version: 3.1.0(@meso.ai/types@2.1.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       react:
         specifier: ^18.3.1
         version: 18.3.1
@@ -117,7 +117,7 @@ importers:
         version: 4.7.0(vite@5.4.21(@types/node@22.20.0))
       autoprefixer:
         specifier: ^10.4.20
-        version: 10.5.1(postcss@8.5.15)
+        version: 10.5.0(postcss@8.5.15)
       postcss:
         specifier: ^8.4.41
         version: 8.5.15
@@ -146,11 +146,11 @@ importers:
         specifier: ^0.1.0
         version: 0.1.0
       '@meso.ai/types':
-        specifier: ^2.0.0
-        version: 2.0.0
+        specifier: ~2.1.0
+        version: 2.1.0
       '@meso.ai/ui':
-        specifier: ^3.0.0
-        version: 3.0.0(@meso.ai/types@2.0.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+        specifier: ~3.1.0
+        version: 3.1.0(@meso.ai/types@2.1.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       react:
         specifier: ^18.3.1
         version: 18.3.1
@@ -172,7 +172,7 @@ importers:
         version: 4.7.0(vite@5.4.21(@types/node@22.20.0))
       autoprefixer:
         specifier: ^10.4.20
-        version: 10.5.1(postcss@8.5.15)
+        version: 10.5.0(postcss@8.5.15)
       postcss:
         specifier: ^8.4.41
         version: 8.5.15
@@ -189,8 +189,8 @@ importers:
   packages/common-ui:
     dependencies:
       '@meso.ai/types':
-        specifier: ^2.0.0
-        version: 2.0.0
+        specifier: ~2.1.0
+        version: 2.1.0
       react:
         specifier: ^18.3.0
         version: 18.3.1
@@ -225,7 +225,7 @@ importers:
         version: 4.7.0(vite@5.4.21(@types/node@22.20.0))
       autoprefixer:
         specifier: ^10.4.20
-        version: 10.5.1(postcss@8.5.15)
+        version: 10.5.0(postcss@8.5.15)
       postcss:
         specifier: ^8.4.41
         version: 8.5.15
@@ -241,8 +241,8 @@ importers:
 
 packages:
 
-  '@ai-sdk/anthropic@3.0.86':
-    resolution: {integrity: sha512-IVUaTOz46dNniRaALEvphV5WOqPfKTJRZlJhJabz3kaXk1QiwdnzWQhKMKLiprD+872E9YHqmmyFNFFH1MfnBQ==}
+  '@ai-sdk/anthropic@3.0.85':
+    resolution: {integrity: sha512-fNeDB644l5wbRNQU0FnI+F7UTtOenMnPtACfMPUJaS2zJfuBlseEa1TMg+otHkETZgaJB+6Na51NQEv0+m7czw==}
     engines: {node: '>=18'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -259,8 +259,8 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
-  '@ai-sdk/gateway@3.0.134':
-    resolution: {integrity: sha512-PfUkQp01EihEyNM6e+nexXmVANiY5KcHMui/MmaHsC4KVVQYh/MwPeOsD3bTPu63e581BKO+AwaPPNmD4x943A==}
+  '@ai-sdk/gateway@3.0.133':
+    resolution: {integrity: sha512-Ebs+7iS9zUgJu5B0RlxM2JmDWzq79Cpd6YdiqcCzB5qFdpfQJPUDiXutqlQP89F2XGjOdDeidulBTXUdXWzOxw==}
     engines: {node: '>=18'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -776,10 +776,13 @@ packages:
   '@meso.ai/types@2.0.0':
     resolution: {integrity: sha512-+KBDET3gP+Fir61pKTkVfOpkTMjLTCPfTk8MhazpRlyGlEI9u2Yh0bJ01xMtRarnLSrhgOYV7hiLOdM97fFXFA==}
 
-  '@meso.ai/ui@3.0.0':
-    resolution: {integrity: sha512-0Expsrwj8M3JlhKhi1/Wa8uwi9AcNQCUT/a2wqEynfEXnNnaIdWZ7/7kwQ9GI4s+JLeRpklpm6GMIVGbTK738Q==}
+  '@meso.ai/types@2.1.0':
+    resolution: {integrity: sha512-SBcBSJWMZ2zvLm1ahimq56g948oGHe+EIDlDooUfbXlo0kj/kVBaDwsM1T2tniwSpVW+DPGiOjg8K7Bj4LsT1g==}
+
+  '@meso.ai/ui@3.1.0':
+    resolution: {integrity: sha512-DRms1Fw+p1YDvEC0GleB4WVvhDZcsH35NikxhLtsvUmYv10B6mbEyN7w9hgKTAx4P6WR06+HSBAVDavQqIYnJQ==}
     peerDependencies:
-      '@meso.ai/types': ^2.0.0
+      '@meso.ai/types': ^2.1.0
       react: '>=18.0.0'
       react-dom: '>=18.0.0'
 
@@ -1101,8 +1104,8 @@ packages:
     engines: {node: '>=0.4.0'}
     hasBin: true
 
-  ai@6.0.209:
-    resolution: {integrity: sha512-NE7uErmxOe+i77BPT1+AhW4wr7xzilbQLsKVmvGEyil5AjaF6C/m92hlPI4Xwtnv5n77D/29bizwcR27/S/gSQ==}
+  ai@6.0.208:
+    resolution: {integrity: sha512-STz+AaZqJ4ZjH7UkpXkbHx+bjgIDOsE8fIUoZjkZ2whoZcfVmG9K/TqEKouJZ03SuZuD7lagntlU3zBhAEkRpQ==}
     engines: {node: '>=18'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -1142,8 +1145,8 @@ packages:
     resolution: {integrity: sha512-Izi8RQcffqCeNVgFigKli1ssklIbpHnCYc6AknXGYoB6grJqyeby7jv12JUQgmTAnIDnbck1uxksT4dzN3PWBA==}
     engines: {node: '>=12'}
 
-  autoprefixer@10.5.1:
-    resolution: {integrity: sha512-jwM2pcTuCWUoN70FEvf5XrXyDbUgRURK4FnU8v0jWZZYU/KkVvN9T33mu1sVLFY9JW3kTWzKheEpn6xYLRc/VA==}
+  autoprefixer@10.5.0:
+    resolution: {integrity: sha512-FMhOoZV4+qR6aTUALKX2rEqGG+oyATvwBt9IIzVR5rMa2HRWPkxf+P+PAJLD1I/H5/II+HuZcBJYEFBpq39ong==}
     engines: {node: ^10 || ^12 || >=14}
     hasBin: true
     peerDependencies:
@@ -1318,8 +1321,8 @@ packages:
   ee-first@1.1.1:
     resolution: {integrity: sha512-WMwm9LhRUo+WUaRN+vRuETqG89IgZphVSNkdFgeb6sS/E4OrDIN7t48CAewSHXc6C8lefD8KKfr5vY61brQlow==}
 
-  electron-to-chromium@1.5.378:
-    resolution: {integrity: sha512-VinvOAuuPmdD1guEgGv5f2Qp7/vlfqOrUOMYNnOD4wj3pit8kRsQHzfIf6teyUGWo15Tg5+bOJaRunvyltpVWQ==}
+  electron-to-chromium@1.5.377:
+    resolution: {integrity: sha512-cH1jZgJHoezfTnKfKwnScpHywTFVnJUNITDPREFdhNjiuD502+QFpG0Qk7G8jhsV/f+CEAFlIrzP1fT+IMb92g==}
 
   encodeurl@2.0.0:
     resolution: {integrity: sha512-Q0n9HRi4m6JuGIV1eFlmvJB7ZEVxu93IrMyiMsGC0lrMJMWzRgx6WGquyfQgZVb31vhGgXnfmPNNXmxnOkRBrg==}
@@ -1749,8 +1752,8 @@ packages:
     resolution: {integrity: sha512-8Ofs/AUQh8MaEcrlq5xOX0CQ9ypTF5dl78mjlMNfOK08fzpgTHQRQPBxcPlEtIw0yRpws+Zo/3r+5WRby7u3Gg==}
     engines: {node: '>= 0.6'}
 
-  node-releases@2.0.49:
-    resolution: {integrity: sha512-f06bl1D+8ZDkn2oOQQKAh5/otFWqVnM1Q5oerA8Pex7UfT66Tx4IPHIqVVFKqFT3FUtaDstdgkM7yT7JWhqxfw==}
+  node-releases@2.0.48:
+    resolution: {integrity: sha512-1uz8041X6LoI6ZSdZacM9lVY28vuzDlSKitnpbSNK0RfKoIJkX29NBPVEFXhnuSuEOA9Ww0xnPJ+ILWbGAv8DA==}
     engines: {node: '>=18'}
 
   normalize-path@3.0.0:
@@ -2254,7 +2257,7 @@ packages:
 
 snapshots:
 
-  '@ai-sdk/anthropic@3.0.86(zod@3.25.76)':
+  '@ai-sdk/anthropic@3.0.85(zod@3.25.76)':
     dependencies:
       '@ai-sdk/provider': 3.0.10
       '@ai-sdk/provider-utils': 4.0.30(zod@3.25.76)
@@ -2274,7 +2277,7 @@ snapshots:
       '@ai-sdk/provider-utils': 4.0.30(zod@3.25.76)
       zod: 3.25.76
 
-  '@ai-sdk/gateway@3.0.134(zod@3.25.76)':
+  '@ai-sdk/gateway@3.0.133(zod@3.25.76)':
     dependencies:
       '@ai-sdk/provider': 3.0.10
       '@ai-sdk/provider-utils': 4.0.30(zod@3.25.76)
@@ -2675,9 +2678,11 @@ snapshots:
 
   '@meso.ai/types@2.0.0': {}
 
-  '@meso.ai/ui@3.0.0(@meso.ai/types@2.0.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)':
+  '@meso.ai/types@2.1.0': {}
+
+  '@meso.ai/ui@3.1.0(@meso.ai/types@2.1.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)':
     dependencies:
-      '@meso.ai/types': 2.0.0
+      '@meso.ai/types': 2.1.0
       react: 18.3.1
       react-dom: 18.3.1(react@18.3.1)
 
@@ -2994,9 +2999,9 @@ snapshots:
 
   acorn@8.17.0: {}
 
-  ai@6.0.209(zod@3.25.76):
+  ai@6.0.208(zod@3.25.76):
     dependencies:
-      '@ai-sdk/gateway': 3.0.134(zod@3.25.76)
+      '@ai-sdk/gateway': 3.0.133(zod@3.25.76)
       '@ai-sdk/provider': 3.0.10
       '@ai-sdk/provider-utils': 4.0.30(zod@3.25.76)
       '@opentelemetry/api': 1.9.1
@@ -3037,7 +3042,7 @@ snapshots:
 
   assertion-error@2.0.1: {}
 
-  autoprefixer@10.5.1(postcss@8.5.15):
+  autoprefixer@10.5.0(postcss@8.5.15):
     dependencies:
       browserslist: 4.28.4
       caniuse-lite: 1.0.30001799
@@ -3085,8 +3090,8 @@ snapshots:
     dependencies:
       baseline-browser-mapping: 2.10.38
       caniuse-lite: 1.0.30001799
-      electron-to-chromium: 1.5.378
-      node-releases: 2.0.49
+      electron-to-chromium: 1.5.377
+      node-releases: 2.0.48
       update-browserslist-db: 1.2.3(browserslist@4.28.4)
 
   bytes@3.1.2: {}
@@ -3197,7 +3202,7 @@ snapshots:
 
   ee-first@1.1.1: {}
 
-  electron-to-chromium@1.5.378: {}
+  electron-to-chromium@1.5.377: {}
 
   encodeurl@2.0.0: {}
 
@@ -3659,7 +3664,7 @@ snapshots:
 
   negotiator@1.0.0: {}
 
-  node-releases@2.0.49: {}
+  node-releases@2.0.48: {}
 
   normalize-path@3.0.0: {}
 
