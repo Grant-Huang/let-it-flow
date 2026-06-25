@@ -192,7 +192,11 @@ export function createWebSearchTool(opts: WebSearchToolOptions = {}): FlowConnec
         }),
       };
       if (errMsg) throw new Error(`web_search failed: ${errMsg}`);
-      return { output: results, summary: `${results.length} results for "${args.query}"` };
+      return {
+        output: results,
+        summary: `${results.length} results for "${args.query}"`,
+        narration: `检索完成：找到 ${results.length} 条关于"${args.query}"的结果`,
+      };
     },
   };
 }

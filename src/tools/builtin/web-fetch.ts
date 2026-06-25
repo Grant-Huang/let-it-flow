@@ -122,9 +122,12 @@ export function createWebFetchTool(): FlowConnector<FetchedDoc[]> {
           duration_ms: Date.now() - t0,
         }),
       };
+      const successCount = docs.filter((d) => !d.error).length;
+      const totalChars = docs.reduce((sum, d) => sum + d.content.length, 0);
       return {
         output: docs,
-        summary: `${docs.filter((d) => !d.error).length}/${docs.length} fetched`,
+        summary: `${successCount}/${docs.length} fetched`,
+        narration: `网页抓取完成：${successCount} 个文档，共 ${totalChars} 字符`,
       };
     },
   };
