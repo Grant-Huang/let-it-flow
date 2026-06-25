@@ -1,4 +1,5 @@
 import type { ExtensionEvent } from "@meso.ai/types";
+import { STREAMING_SYMBOLS } from "@let-it-flow/common-ui";
 import { ConfirmGateCard, type ConfirmGateData } from "./ConfirmGateCard.js";
 import { ClarifyCard, type ClarifyData } from "./ClarifyCard.js";
 import { RecommendationCard, type RecommendationData } from "./RecommendationCard.js";
@@ -52,7 +53,7 @@ export function createRenderExtension(handlers: RenderExtensionHandlers) {
           }}
         >
           <div style={{ color: "var(--color-error)", fontWeight: 600, marginBottom: 4 }}>
-            ✕ 请求被拒绝
+            ✗ 请求被拒绝
           </div>
           <div style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>{reason}</div>
           {suggestRetry && (
@@ -94,8 +95,8 @@ export function createRenderExtension(handlers: RenderExtensionHandlers) {
       const finishReason = typeof d.finishReason === "string" ? d.finishReason : "";
       const stepCount = typeof d.stepCount === "number" ? d.stepCount : 0;
       return (
-        <div style={{ margin: "8px 0", fontSize: 12, color: "var(--color-text-muted)" }}>
-          ReAct 完成 · {stepCount} 步 · 终止：{finishReason}
+        <div style={{ margin: "8px 0", fontSize: 12, color: "var(--color-text-secondary)" }}>
+          {STREAMING_SYMBOLS.done}ReAct 推理完成：{stepCount} 步，终止原因：{finishReason}
         </div>
       );
     }
