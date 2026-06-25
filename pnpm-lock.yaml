@@ -27,11 +27,11 @@ importers:
         specifier: ^0.1.0
         version: 0.1.0
       '@meso.ai/types':
-        specifier: ~2.1.0
-        version: 2.1.0
+        specifier: ^2.1.1
+        version: 2.1.1
       '@meso.ai/ui':
-        specifier: ~3.1.0
-        version: 3.1.0(@meso.ai/types@2.1.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+        specifier: ^3.2.0
+        version: 3.2.0(@meso.ai/types@2.1.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(zod@3.25.76)
@@ -776,8 +776,18 @@ packages:
   '@meso.ai/types@2.1.0':
     resolution: {integrity: sha512-SBcBSJWMZ2zvLm1ahimq56g948oGHe+EIDlDooUfbXlo0kj/kVBaDwsM1T2tniwSpVW+DPGiOjg8K7Bj4LsT1g==}
 
+  '@meso.ai/types@2.1.1':
+    resolution: {integrity: sha512-VwZwQ0t52lqouwb59/zVmSeiQGk72xtsWviQ7h8eqeBUI9wjgRZO0o2KdUxd//JmNGQQ4SwSMXXFEwxXNcJiYw==}
+
   '@meso.ai/ui@3.1.0':
     resolution: {integrity: sha512-DRms1Fw+p1YDvEC0GleB4WVvhDZcsH35NikxhLtsvUmYv10B6mbEyN7w9hgKTAx4P6WR06+HSBAVDavQqIYnJQ==}
+    peerDependencies:
+      '@meso.ai/types': ^2.1.0
+      react: '>=18.0.0'
+      react-dom: '>=18.0.0'
+
+  '@meso.ai/ui@3.2.0':
+    resolution: {integrity: sha512-cEe3BmjbnedtrjUsUcfA2Q+em4iRen7rCjCJq8FHc1Sp5vyi5EoUoJKHvTmns4M5v+Ct9dRUtYDJg/h5fqtM/w==}
     peerDependencies:
       '@meso.ai/types': ^2.1.0
       react: '>=18.0.0'
@@ -2675,9 +2685,17 @@ snapshots:
 
   '@meso.ai/types@2.1.0': {}
 
+  '@meso.ai/types@2.1.1': {}
+
   '@meso.ai/ui@3.1.0(@meso.ai/types@2.1.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)':
     dependencies:
       '@meso.ai/types': 2.1.0
+      react: 18.3.1
+      react-dom: 18.3.1(react@18.3.1)
+
+  '@meso.ai/ui@3.2.0(@meso.ai/types@2.1.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)':
+    dependencies:
+      '@meso.ai/types': 2.1.1
       react: 18.3.1
       react-dom: 18.3.1(react@18.3.1)
 
