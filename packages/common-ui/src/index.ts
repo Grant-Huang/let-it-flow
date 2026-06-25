@@ -16,5 +16,6 @@
  */
 
 export { CollapsibleStepTrace } from "./CollapsibleStepTrace";
+export { STREAMING_SYMBOLS, symbolForStatus } from "./symbols";
 
 export type { StreamState, ToolCallState } from "@meso.ai/types";
