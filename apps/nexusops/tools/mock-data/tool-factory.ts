@@ -95,10 +95,11 @@ export function createQueryTool<TData>(spec: DomainToolSpec<TData>): FlowConnect
 
     async *execute(
       args: Record<string, unknown>,
+      execCtx?: { callId?: string },
     ): AsyncGenerator<ToolEvent, ToolResult> {
-      const callId = `c_${randomUUID().slice(0, 8)}`;
+      const callId = execCtx?.callId ?? `c_${randomUUID().slice(0, 8)}`;
       const startedAt = Date.now();
-      const ctx = ctxFromArgs(args);
+      const scenarioCtx = ctxFromArgs(args);
 
       yield {
         type: "tool_call",
@@ -112,7 +113,7 @@ export function createQueryTool<TData>(spec: DomainToolSpec<TData>): FlowConnect
         }),
       };
 
-      const data = spec.getData(ctx, args);
+      const data = spec.getData(scenarioCtx, args);
       const envelope = mockEvidence(data, {
         system: spec.system,
         provenance: spec.provenance(args),
@@ -133,7 +134,7 @@ export function createQueryTool<TData>(spec: DomainToolSpec<TData>): FlowConnect
 
       return {
         output: envelope,
-        summary: `${spec.name} ${ctx.line ?? "L01"}(${ctx.scenarioId})`,
+        summary: `${spec.name} ${scenarioCtx.line ?? "L01"}(${scenarioCtx.scenarioId})`,
       };
     },
   };
@@ -231,10 +232,11 @@ export function createActionTool(spec: ActionToolSpec): FlowConnector {
 
     async *execute(
       args: Record<string, unknown>,
+      execCtx?: { callId?: string },
     ): AsyncGenerator<ToolEvent, ToolResult> {
-      const callId = `c_${randomUUID().slice(0, 8)}`;
+      const callId = execCtx?.callId ?? `c_${randomUUID().slice(0, 8)}`;
       const startedAt = Date.now();
-      const ctx = ctxFromArgs(args);
+      const scenarioCtx = ctxFromArgs(args);
 
       yield {
         type: "tool_call",
@@ -249,13 +251,13 @@ export function createActionTool(spec: ActionToolSpec): FlowConnector {
       };
 
       // 注入单据号（让 run 逻辑可用），执行动作
-      const receipt = spec.run(args, ctx);
+      const receipt = spec.run(args, scenarioCtx);
       if (!receipt.ticketId) receipt.ticketId = actionStore.nextTicket(spec.ticketPrefix);
 
-      // 记录到 store（副作用覆盖在此应用；用 ctx 解析后的 scenarioId/line 保持键一致）
+      // 记录到 store（副作用覆盖在此应用；用 scenarioCtx 解析后的 scenarioId/line 保持键一致）
       actionStore.record({
         tool: spec.name,
-        args: { ...args, scenarioId: ctx.scenarioId, line: ctx.line ?? "L01" },
+        args: { ...args, scenarioId: scenarioCtx.scenarioId, line: scenarioCtx.line ?? "L01" },
         executedAt: new Date().toISOString(),
         receipt,
         confirmed: true, // 能走到这里说明 HITL 已放行（或 safe 直接执行）
