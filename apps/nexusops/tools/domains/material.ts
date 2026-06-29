@@ -5,7 +5,44 @@
  * 数据源：ERP（库存）+ MES（在制品）。
  */
 import { createQueryTool } from "../mock-data/tool-factory.js";
-import { getMaterial, type ScenarioId } from "../mock-data/scenarios.js";
+import {
+  getMaterial,
+  lookupActionOverride,
+  type ScenarioContext,
+  type ScenarioId,
+} from "../mock-data/scenarios.js";
+
+/**
+ * 应用动作副作用覆盖到物料数据。
+ *
+ * 闭环逻辑：执行 mcp.erp.material_issue / purchase_request 后，
+ * actionStore 写入 sideEffects；读取侧消费之，使"执行→复检"反映变化。
+ *
+ * - issued：已领料出库到线边 → 库存小时数回升，缺料风险下降
+ * - purchasePending：采购申请已提交（尚未到货）→ 缺料风险下降（在途），库存暂不变
+ */
+function applyMaterialOverrides(ctx: ScenarioContext, base: ReturnType<typeof getMaterial>) {
+  const issued = lookupActionOverride(ctx, "material.issued") === true;
+  const purchasePending = lookupActionOverride(ctx, "material.purchasePending") === true;
+
+  if (!issued && !purchasePending) return base;
+
+  // 领料出库：线边库存显著回升（按 +20h 模拟一次补料）
+  const inventoryBoost = issued ? 20 : 0;
+  // 采购在途：缺料风险下降（预计 24h 内到货）
+  const riskReduction = purchasePending ? base.shortageRisk * 0.4 : 0;
+
+  const newInventoryHours = base.inventoryHours + inventoryBoost;
+  const newShortageRisk = Math.max(0, base.shortageRisk - riskReduction);
+
+  return {
+    ...base,
+    inventoryHours: newInventoryHours,
+    shortageRisk: Number(newShortageRisk.toFixed(4)),
+    ...(issued ? { actionApplied: "material_issued" } : {}),
+    ...(purchasePending ? { actionApplied: "purchase_pending" } : {}),
+  };
+}
 
 export function registerMaterialTools(): import("../../../../src/tools/base.js").FlowConnector[] {
   return [
@@ -37,7 +74,7 @@ export function registerMaterialTools(): import("../../../../src/tools/base.js")
       notFor: ["WIP（走 material.wip_level）"],
       inputSchema: { type: "object", properties: {} },
       getData: (ctx) => {
-        const m = getMaterial(ctx);
+        const m = applyMaterialOverrides(ctx, getMaterial(ctx));
         return {
           inventoryHours: m.inventoryHours,
           threshold: 24,
@@ -56,7 +93,7 @@ export function registerMaterialTools(): import("../../../../src/tools/base.js")
       notFor: ["当前库存（走 material.inventory）"],
       inputSchema: { type: "object", properties: {} },
       getData: (ctx) => {
-        const m = getMaterial(ctx);
+        const m = applyMaterialOverrides(ctx, getMaterial(ctx));
         return {
           shortageRisk: m.shortageRisk,
           riskItems: m.shortageRisk > 0.2
@@ -155,7 +192,7 @@ export function registerMaterialTools(): import("../../../../src/tools/base.js")
       notFor: ["直接下采购单（需 ERP MCP + HITL）"],
       inputSchema: { type: "object", properties: {} },
       getData: (ctx) => {
-        const m = getMaterial(ctx);
+        const m = applyMaterialOverrides(ctx, getMaterial(ctx));
         return {
           suggestions:
             m.inventoryHours < 8

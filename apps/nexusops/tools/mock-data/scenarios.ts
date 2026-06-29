@@ -141,8 +141,24 @@ const PROCESS: Record<ScenarioId, Record<LineId, {
       deviationScore: 0.05,
       capability: 1.45,
     },
-    L02: { parameters: { 温度: { actual: 182, standard: 180, unit: "℃", inSpec: true } }, deviationScore: 0.08, capability: 1.35 },
-    L03: { parameters: { 温度: { actual: 186, standard: 185, unit: "℃", inSpec: true } }, deviationScore: 0.04, capability: 1.5 },
+    L02: {
+      parameters: {
+        温度: { actual: 180, standard: 180, unit: "℃", inSpec: true },
+        压力: { actual: 3.8, standard: 3.8, unit: "MPa", inSpec: true },
+        速度: { actual: 950, standard: 950, unit: "rpm", inSpec: true },
+      },
+      deviationScore: 0.08,
+      capability: 1.35,
+    },
+    L03: {
+      parameters: {
+        温度: { actual: 186, standard: 185, unit: "℃", inSpec: true },
+        压力: { actual: 4.0, standard: 4.0, unit: "MPa", inSpec: true },
+        速度: { actual: 1100, standard: 1100, unit: "rpm", inSpec: true },
+      },
+      deviationScore: 0.04,
+      capability: 1.5,
+    },
   },
   anomaly: {
     L01: {
@@ -154,8 +170,24 @@ const PROCESS: Record<ScenarioId, Record<LineId, {
       deviationScore: 0.42,
       capability: 0.88,
     },
-    L02: { parameters: { 温度: { actual: 183, standard: 180, unit: "℃", inSpec: true } }, deviationScore: 0.12, capability: 1.25 },
-    L03: { parameters: { 温度: { actual: 186, standard: 185, unit: "℃", inSpec: true } }, deviationScore: 0.05, capability: 1.5 },
+    L02: {
+      parameters: {
+        温度: { actual: 189, standard: 180, unit: "℃", inSpec: false },
+        压力: { actual: 4.1, standard: 3.8, unit: "MPa", inSpec: false },
+        速度: { actual: 940, standard: 950, unit: "rpm", inSpec: true },
+      },
+      deviationScore: 0.18,
+      capability: 1.15,
+    },
+    L03: {
+      parameters: {
+        温度: { actual: 187, standard: 185, unit: "℃", inSpec: true },
+        压力: { actual: 4.0, standard: 4.0, unit: "MPa", inSpec: true },
+        速度: { actual: 1095, standard: 1100, unit: "rpm", inSpec: true },
+      },
+      deviationScore: 0.05,
+      capability: 1.5,
+    },
   },
   crisis: {
     L01: {
@@ -167,8 +199,24 @@ const PROCESS: Record<ScenarioId, Record<LineId, {
       deviationScore: 0.78,
       capability: 0.42,
     },
-    L02: { parameters: { 温度: { actual: 188, standard: 180, unit: "℃", inSpec: true } }, deviationScore: 0.18, capability: 1.1 },
-    L03: { parameters: { 温度: { actual: 186, standard: 185, unit: "℃", inSpec: true } }, deviationScore: 0.05, capability: 1.5 },
+    L02: {
+      parameters: {
+        温度: { actual: 198, standard: 180, unit: "℃", inSpec: false },
+        压力: { actual: 4.4, standard: 3.8, unit: "MPa", inSpec: false },
+        速度: { actual: 900, standard: 950, unit: "rpm", inSpec: false },
+      },
+      deviationScore: 0.35,
+      capability: 0.85,
+    },
+    L03: {
+      parameters: {
+        温度: { actual: 188, standard: 185, unit: "℃", inSpec: true },
+        压力: { actual: 4.1, standard: 4.0, unit: "MPa", inSpec: true },
+        速度: { actual: 1090, standard: 1100, unit: "rpm", inSpec: true },
+      },
+      deviationScore: 0.06,
+      capability: 1.48,
+    },
   },
 };
 
@@ -237,6 +285,105 @@ const MATERIAL: Record<ScenarioId, Record<LineId, {
   },
 };
 
+/**
+ * 班次维度数据。
+ *
+ * 班次差异是质量/OEE 波动的常见根因（见 vault 案例索引"缺陷率周期性波动（按班次）"）。
+ * 设计：A 班（早班，人员资深）略优，B 班持平，C 班（夜班，含新员工）略差。
+ * 各产线的班次差异幅度不同（L01 差异最大，因 SMED 推广中陈师傅班组抵触）。
+ */
+export type ShiftId = (typeof SHIFTS)[number];
+
+export const SHIFT_DEVIATION: Record<LineId, Record<ShiftId, {
+  oeeDelta: number; defectRateDelta: number; changeoverDeltaMin: number;
+}>> = {
+  L01: {
+    A: { oeeDelta: 0.03, defectRateDelta: -0.005, changeoverDeltaMin: -15 },
+    B: { oeeDelta: 0.0, defectRateDelta: 0.0, changeoverDeltaMin: 0 },
+    C: { oeeDelta: -0.05, defectRateDelta: 0.012, changeoverDeltaMin: 25 },
+  },
+  L02: {
+    A: { oeeDelta: 0.02, defectRateDelta: -0.003, changeoverDeltaMin: -10 },
+    B: { oeeDelta: 0.0, defectRateDelta: 0.0, changeoverDeltaMin: 0 },
+    C: { oeeDelta: -0.03, defectRateDelta: 0.008, changeoverDeltaMin: 15 },
+  },
+  L03: {
+    A: { oeeDelta: 0.01, defectRateDelta: -0.002, changeoverDeltaMin: -5 },
+    B: { oeeDelta: 0.0, defectRateDelta: 0.0, changeoverDeltaMin: 0 },
+    C: { oeeDelta: -0.02, defectRateDelta: 0.005, changeoverDeltaMin: 10 },
+  },
+};
+
+/**
+ * 人员技能矩阵数据（与 vault 04-人与组织/培训与技能矩阵.md 对齐）。
+ *
+ * 用于班次差异诊断时交叉分析：某班次缺陷高 → 查该班次人员技能等级。
+ * L1=培训中不可独立，L2=基础需监督，L3=熟练可独立，L4=专家可培训他人。
+ */
+export const PERSONNEL: Record<LineId, {
+  keyPositions: Array<{ role: string; name: string; shift: ShiftId; level: Record<string, 1 | 2 | 3 | 4> }>;
+  l3PlusRatio: number;
+}> = {
+  L01: {
+    keyPositions: [
+      { role: "产线长", name: "张工", shift: "A", level: { 注塑操作: 4, 换模: 3, 质量检验: 3, 设备保养: 3 } },
+      { role: "工艺工程师", name: "李工", shift: "A", level: { 注塑操作: 3, 换模: 4, 质量检验: 4, 设备保养: 2 } },
+      { role: "设备维护", name: "王工", shift: "B", level: { 注塑操作: 2, 换模: 4, 质量检验: 2, 设备保养: 4 } },
+      { role: "班长A", name: "陈师傅", shift: "A", level: { 注塑操作: 4, 换模: 2, 质量检验: 3, 设备保养: 2 } },
+      { role: "班长B", name: "刘师傅", shift: "C", level: { 注塑操作: 3, 换模: 3, 质量检验: 3, 设备保养: 2 } },
+    ],
+    l3PlusRatio: 0.72,
+  },
+  L02: {
+    keyPositions: [
+      { role: "产线长", name: "赵工", shift: "A", level: { 装配操作: 4, AOI检测: 3, 质量检验: 3, 设备保养: 3 } },
+      { role: "装配工程师", name: "孙工", shift: "A", level: { 装配操作: 4, AOI检测: 4, 质量检验: 4, 设备保养: 2 } },
+      { role: "设备维护", name: "周工", shift: "B", level: { 装配操作: 2, AOI检测: 3, 质量检验: 2, 设备保养: 4 } },
+      { role: "班长A", name: "吴师傅", shift: "A", level: { 装配操作: 4, AOI检测: 3, 质量检验: 3, 设备保养: 2 } },
+      { role: "班长B", name: "郑师傅", shift: "C", level: { 装配操作: 3, AOI检测: 2, 质量检验: 2, 设备保养: 2 } },
+    ],
+    l3PlusRatio: 0.68,
+  },
+  L03: {
+    keyPositions: [
+      { role: "产线长", name: "钱工", shift: "A", level: { CNC操作: 4, 清洗: 3, 质量检验: 3, 设备保养: 3 } },
+      { role: "班长A", name: "冯师傅", shift: "A", level: { CNC操作: 4, 清洗: 3, 质量检验: 3, 设备保养: 3 } },
+      { role: "班长B", name: "褚师傅", shift: "C", level: { CNC操作: 3, 清洗: 3, 质量检验: 2, 设备保养: 2 } },
+    ],
+    l3PlusRatio: 0.85,
+  },
+};
+
+/**
+ * 成本汇总数据（场景级，按产线）。
+ *
+ * 整合散落在各域的成本：OEE 损失折算、能耗成本、质量损失成本。
+ * 单位：元/日。用于改善优先级的经济性评估。
+ */
+const COST: Record<ScenarioId, Record<LineId, {
+  outputLossUnits: number;
+  oeeLossCost: number;
+  energyCost: number;
+  qualityLossCost: number;
+  totalLossCost: number;
+}>> = {
+  normal: {
+    L01: { outputLossUnits: 45, oeeLossCost: 2025, energyCost: 1820, qualityLossCost: 675, totalLossCost: 4520 },
+    L02: { outputLossUnits: 70, oeeLossCost: 3150, energyCost: 1680, qualityLossCost: 900, totalLossCost: 5730 },
+    L03: { outputLossUnits: 40, oeeLossCost: 1800, energyCost: 1750, qualityLossCost: 540, totalLossCost: 4090 },
+  },
+  anomaly: {
+    L01: { outputLossUnits: 240, oeeLossCost: 10800, energyCost: 2840, qualityLossCost: 2610, totalLossCost: 16250 },
+    L02: { outputLossUnits: 110, oeeLossCost: 4950, energyCost: 1720, qualityLossCost: 1125, totalLossCost: 7795 },
+    L03: { outputLossUnits: 50, oeeLossCost: 2250, energyCost: 1760, qualityLossCost: 585, totalLossCost: 4595 },
+  },
+  crisis: {
+    L01: { outputLossUnits: 510, oeeLossCost: 22950, energyCost: 4250, qualityLossCost: 8100, totalLossCost: 35300 },
+    L02: { outputLossUnits: 280, oeeLossCost: 12600, energyCost: 2100, qualityLossCost: 2700, totalLossCost: 17400 },
+    L03: { outputLossUnits: 55, oeeLossCost: 2475, energyCost: 1780, qualityLossCost: 630, totalLossCost: 4885 },
+  },
+};
+
 // ── accessor helpers ──
 
 export function resolveLine(ctx: ScenarioContext): LineId {
@@ -268,6 +415,59 @@ export function getMaterial(ctx: ScenarioContext) {
 /** 全产线对比（OEE 域）。 */
 export function getOEEAllLines(scenarioId: ScenarioId) {
   return LINES.map((line) => ({ line, ...OEE_BASE[scenarioId][line] }));
+}
+
+/** 班次维度 OEE：基准 + 班次偏移。 */
+export function getOEEByShift(ctx: ScenarioContext) {
+  const line = resolveLine(ctx);
+  const base = OEE_BASE[ctx.scenarioId][line];
+  return SHIFTS.map((shift) => {
+    const dev = SHIFT_DEVIATION[line][shift];
+    const oee = Math.max(0, base.oee + dev.oeeDelta);
+    return {
+      shift,
+      oee: Number(oee.toFixed(4)),
+      samples: shift === "A" ? 320 : shift === "B" ? 310 : 280,
+    };
+  });
+}
+
+/** 班次维度缺陷率：基准 + 班次偏移。 */
+export function getQualityByShift(ctx: ScenarioContext) {
+  const line = resolveLine(ctx);
+  const base = QUALITY[ctx.scenarioId][line];
+  return SHIFTS.map((shift) => {
+    const dev = SHIFT_DEVIATION[line][shift];
+    const defectRate = Math.max(0, base.defectRate + dev.defectRateDelta);
+    return {
+      shift,
+      defectRate: Number(defectRate.toFixed(4)),
+      fpy: Number(Math.min(0.999, base.fpy - dev.defectRateDelta).toFixed(4)),
+    };
+  });
+}
+
+/** 班次维度换模时间：基准 + 班次偏移。 */
+export function getChangeoverByShift(ctx: ScenarioContext) {
+  const line = resolveLine(ctx);
+  const base = SCHEDULE[ctx.scenarioId][line];
+  return SHIFTS.map((shift) => {
+    const dev = SHIFT_DEVIATION[line][shift];
+    return {
+      shift,
+      changeoverMinutes: Math.max(0, base.changeoverMinutesToday + dev.changeoverDeltaMin),
+    };
+  });
+}
+
+/** 人员技能矩阵（按产线）。 */
+export function getPersonnel(ctx: ScenarioContext) {
+  return PERSONNEL[resolveLine(ctx)];
+}
+
+/** 成本汇总（按场景 + 产线）。 */
+export function getCost(ctx: ScenarioContext) {
+  return COST[ctx.scenarioId][resolveLine(ctx)];
 }
 
 /**

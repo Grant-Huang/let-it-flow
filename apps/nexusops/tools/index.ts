@@ -20,6 +20,7 @@ import { registerProcessTools } from "./domains/process.js";
 import { registerEnergyTools } from "./domains/energy.js";
 import { registerScheduleTools } from "./domains/scheduling.js";
 import { registerMaterialTools } from "./domains/material.js";
+import { registerPersonnelTools } from "./domains/personnel.js";
 
 /**
  * 注册全部 NexusOps 业务工具到 ToolRegistry。
@@ -34,6 +35,7 @@ export function buildNexusTools(): FlowConnector[] {
     ...registerEnergyTools(),
     ...registerScheduleTools(),
     ...registerMaterialTools(),
+    ...registerPersonnelTools(),
     createFinalizeTool(),
     createAdviseTool(),
   ];

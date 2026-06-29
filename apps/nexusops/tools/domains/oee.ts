@@ -10,10 +10,50 @@ import { createQueryTool } from "../mock-data/tool-factory.js";
 import {
   getOEE,
   getOEEAllLines,
+  getOEEByShift,
+  lookupActionOverride,
+  type ScenarioContext,
   type ScenarioId,
 } from "../mock-data/scenarios.js";
 
 const SYSTEM = "MES";
+
+/**
+ * 应用动作副作用覆盖到 OEE 数据。
+ *
+ * 闭环逻辑：执行 mcp.eam.stop_line / mcp.process.adjust_parameters 后，
+ * actionStore 写入 sideEffects；读取侧消费之，使"执行→复检"反映变化。
+ *
+ * - equipment.lineStopped：停线（destructive）→ 可用率崩至 0，OEE 归零
+ * - process.adjusted：工艺参数回调 → 性能率回升（参数回正后降速/小停机减少）
+ */
+function applyOeeOverrides(ctx: ScenarioContext, base: ReturnType<typeof getOEE>) {
+  const lineStopped = lookupActionOverride(ctx, "equipment.lineStopped") === true;
+  const processAdjusted = lookupActionOverride(ctx, "process.adjusted") === true;
+
+  if (!lineStopped && !processAdjusted) return base;
+
+  if (lineStopped) {
+    // 停线：可用率=0，性能率=0（不运行），质量率保持（已有产出），OEE=0
+    return {
+      ...base,
+      availability: 0,
+      performance: 0,
+      oee: 0,
+      actionApplied: "line_stopped",
+    };
+  }
+
+  // process.adjusted：参数回调后性能率回升（升回 0.95，模拟参数回正后降速损失消除）
+  const perfBoost = processAdjusted ? Math.min(0.95, base.performance + 0.08) : base.performance;
+  const newOee = base.availability * perfBoost * base.quality;
+  return {
+    ...base,
+    performance: Number(perfBoost.toFixed(4)),
+    oee: Number(newOee.toFixed(4)),
+    ...(processAdjusted ? { actionApplied: "process_adjusted" } : {}),
+  };
+}
 
 export function registerOeeTools(): import("../../../../src/tools/base.js").FlowConnector[] {
   return [
@@ -24,7 +64,7 @@ export function registerOeeTools(): import("../../../../src/tools/base.js").Flow
       triggers: ["查 OEE", "实时综合效率", "产线效率多少", "可用率性能率质量率"],
       notFor: ["历史 OEE 趋势（走 oee.history）", "全产线对比（走 oee.compare）"],
       inputSchema: { type: "object", properties: {} },
-      getData: (ctx) => getOEE(ctx),
+      getData: (ctx) => applyOeeOverrides(ctx, getOEE(ctx)),
       system: SYSTEM,
       provenance: (a) => `/mes/oee/realtime?line=${(a.line as string) ?? "L01"}`,
     }),
@@ -50,7 +90,7 @@ export function registerOeeTools(): import("../../../../src/tools/base.js").Flow
       notFor: ["只看总 OEE（走 oee.realtime）"],
       inputSchema: { type: "object", properties: {} },
       getData: (ctx) => {
-        const o = getOEE(ctx);
+        const o = applyOeeOverrides(ctx, getOEE(ctx));
         return {
           availabilityLoss: 1 - o.availability,
           performanceLoss: 1 - o.performance,
@@ -118,15 +158,15 @@ export function registerOeeTools(): import("../../../../src/tools/base.js").Flow
       notFor: ["单班次详情（走 oee.realtime 指定班次）"],
       inputSchema: { type: "object", properties: {} },
       getData: (ctx) => {
-        const o = getOEE(ctx);
+        const shiftData = getOEEByShift(ctx);
+        const ranked = [...shiftData].sort((a, b) => b.oee - a.oee);
+        const best = ranked[0]!;
+        const worst = ranked[ranked.length - 1]!;
         return {
-          shifts: {
-            A: { oee: o.oee + 0.03, samples: 320 },
-            B: { oee: o.oee, samples: 310 },
-            C: { oee: o.oee - 0.05, samples: 280 },
-          },
-          bestShift: "A",
-          worstShift: "C",
+          shifts: shiftData,
+          bestShift: best.shift,
+          worstShift: worst.shift,
+          gap: best.oee - worst.oee,
         };
       },
       system: SYSTEM,

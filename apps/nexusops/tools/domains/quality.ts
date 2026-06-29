@@ -5,9 +5,57 @@
  * 数据源：MOM（质量汇总）+ ERP（报废成本）。
  */
 import { createQueryTool } from "../mock-data/tool-factory.js";
-import { getQuality, type ScenarioId } from "../mock-data/scenarios.js";
+import {
+  getQuality,
+  lookupActionOverride,
+  type ScenarioContext,
+  type ScenarioId,
+} from "../mock-data/scenarios.js";
 
 const SYSTEM = "MOM";
+
+/**
+ * 应用动作副作用覆盖到质量数据。
+ *
+ * 闭环逻辑：执行 mcp.qms.quarantine / scrap_batch / rework_order 后，
+ * actionStore 写入 sideEffects；读取侧消费之，使"执行→复检"反映变化。
+ *
+ * - quarantined：隔离批冻结，可疑品不再计入当期产出 → 缺陷率口径调整
+ * - scrapped：报废已处置，scrapQty 折算后更新报废率/缺陷率/质量率
+ * - reworkScheduled：返工已排程，返工件从"在制不良"转为"已安排"，缺陷率下降、FPY 回升
+ */
+function applyQualityOverrides(ctx: ScenarioContext, base: ReturnType<typeof getQuality>) {
+  const quarantined = lookupActionOverride(ctx, "quality.quarantined") === true;
+  const scrapped = lookupActionOverride(ctx, "quality.scrapped") === true;
+  const scrapQty = lookupActionOverride(ctx, "quality.scrapQty") as number | undefined;
+  const reworkScheduled = lookupActionOverride(ctx, "quality.reworkScheduled") === true;
+
+  // 无任何覆盖，原样返回（最常见路径，零开销）
+  if (!quarantined && !scrapped && !reworkScheduled) return base;
+
+  // 已处置的报废量折算（假设日产出基准 1000 件）
+  const baseOutput = 1000;
+  const scrapDelta = scrapped && scrapQty ? Math.min(scrapQty / baseOutput, base.scrapRate) : 0;
+  // 隔离后可疑缺陷不再计入当期缺陷率（待复检）
+  const quarantineReduction = quarantined ? base.defectRate * 0.4 : 0;
+  // 返工排程后，返工相关不良从"在制缺陷"转为"已处理"
+  const reworkReduction = reworkScheduled ? base.defectRate * 0.3 : 0;
+
+  const newDefectRate = Math.max(0, base.defectRate - scrapDelta - quarantineReduction - reworkReduction);
+  const newScrapRate = Math.max(0, base.scrapRate - scrapDelta);
+  // FPY 回升：报废和返工处置后，一次合格率改善
+  const newFpy = Math.min(0.999, base.fpy + scrapDelta + (reworkScheduled ? 0.03 : 0));
+
+  return {
+    ...base,
+    defectRate: Number(newDefectRate.toFixed(4)),
+    scrapRate: Number(newScrapRate.toFixed(4)),
+    fpy: Number(newFpy.toFixed(4)),
+    ...(quarantined ? { actionApplied: "quarantined" } : {}),
+    ...(scrapped ? { actionApplied: "scrapped" } : {}),
+    ...(reworkScheduled ? { actionApplied: "reworkScheduled" } : {}),
+  };
+}
 
 export function registerQualityTools(): import("../../../../src/tools/base.js").FlowConnector[] {
   return [
@@ -19,8 +67,9 @@ export function registerQualityTools(): import("../../../../src/tools/base.js").
       notFor: ["缺陷类型分布（走 quality.pareto）", "过程能力（走 quality.cp_cpk）"],
       inputSchema: { type: "object", properties: {} },
       getData: (ctx) => {
-        const q = getQuality(ctx);
-        return { defectRate: q.defectRate, fpy: q.fpy, scrapRate: q.scrapRate, threshold: 0.03 };
+        const q = applyQualityOverrides(ctx, getQuality(ctx));
+        const { defectRate, fpy, scrapRate, actionApplied } = q as typeof q & { actionApplied?: string };
+        return { defectRate, fpy, scrapRate, threshold: 0.03, ...(actionApplied ? { actionApplied } : {}) };
       },
       system: SYSTEM,
       provenance: (a) => `/mom/quality/defect_rate?line=${(a.line as string) ?? "L01"}&today=true`,
@@ -34,7 +83,7 @@ export function registerQualityTools(): import("../../../../src/tools/base.js").
       notFor: ["总缺陷率（走 quality.defect_rate）"],
       inputSchema: { type: "object", properties: {} },
       getData: (ctx) => {
-        const q = getQuality(ctx);
+        const q = applyQualityOverrides(ctx, getQuality(ctx));
         return { topDefects: q.topDefects, paretoPrinciple: "前 20% 缺陷类型贡献约 80% 不良" };
       },
       system: SYSTEM,
@@ -90,7 +139,7 @@ export function registerQualityTools(): import("../../../../src/tools/base.js").
       notFor: ["缺陷率（走 quality.defect_rate）"],
       inputSchema: { type: "object", properties: {} },
       getData: (ctx) => {
-        const q = getQuality(ctx);
+        const q = applyQualityOverrides(ctx, getQuality(ctx));
         return { fpy: q.fpy, target: 0.95, gap: 0.95 - q.fpy };
       },
       system: SYSTEM,
@@ -105,7 +154,7 @@ export function registerQualityTools(): import("../../../../src/tools/base.js").
       notFor: ["缺陷率（走 quality.defect_rate）"],
       inputSchema: { type: "object", properties: {} },
       getData: (ctx) => {
-        const q = getQuality(ctx);
+        const q = applyQualityOverrides(ctx, getQuality(ctx));
         return {
           scrapRate: q.scrapRate,
           scrapUnitsToday: Math.round(q.scrapRate * 1000),
@@ -125,7 +174,7 @@ export function registerQualityTools(): import("../../../../src/tools/base.js").
       notFor: ["报废（走 quality.scrap）"],
       inputSchema: { type: "object", properties: {} },
       getData: (ctx) => {
-        const q = getQuality(ctx);
+        const q = applyQualityOverrides(ctx, getQuality(ctx));
         const reworkRate = (1 - q.fpy) - q.scrapRate;
         return {
           reworkRate,

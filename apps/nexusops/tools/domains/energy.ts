@@ -5,7 +5,7 @@
  * 数据源：智能采集系统 + ERP（成本）。
  */
 import { createQueryTool } from "../mock-data/tool-factory.js";
-import { getEnergy, type ScenarioId } from "../mock-data/scenarios.js";
+import { getCost, getEnergy, type ScenarioId } from "../mock-data/scenarios.js";
 
 export function registerEnergyTools(): import("../../../../src/tools/base.js").FlowConnector[] {
   return [
@@ -169,6 +169,20 @@ export function registerEnergyTools(): import("../../../../src/tools/base.js").F
       },
       system: "智能电表",
       provenance: (a) => `/iot/energy/anomaly?line=${(a.line as string) ?? "L01"}&window=24h`,
+    }),
+
+    // 9. 成本汇总（整合 OEE 损失 + 能耗 + 质量损失）
+    createQueryTool({
+      name: "cost.summary",
+      description:
+        "查指定产线的综合损失成本汇总（OEE 损失折算 + 能耗成本 + 质量损失）。用于改善优先级的经济性评估。",
+      triggers: ["成本", "损失成本", "多少钱", "经济损失", "成本汇总", "改善优先级"],
+      notFor: ["单类成本（能耗走 energy.cost，报废走 quality.scrap）"],
+      inputSchema: { type: "object", properties: {} },
+      getData: (ctx) => getCost(ctx),
+      system: "ERP",
+      provenance: (a) => `/erp/cost/summary?line=${(a.line as string) ?? "L01"}&today=true`,
+      freshness: "daily",
     }),
   ];
 }
