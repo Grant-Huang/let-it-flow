@@ -126,35 +126,56 @@ const QUALITY: Record<ScenarioId, Record<LineId, {
   },
 };
 
-/** 工艺参数数据。 */
+/**
+ * 工艺参数 + PFMEA 评分数据。
+ *
+ * severity/occurrence/detection 采用 AIAG-VDA 第五版 1-10 评分（10 最差），
+ * 用于 process.fmea 计算 AP（Action Priority）行动优先级，替代旧 RPN：
+ *   - AP = H：必须立即采取行动
+ *   - AP = M：应采取行动
+ *   - AP = L：可酌情行动
+ */
+export interface ProcessParameter {
+  actual: number;
+  standard: number;
+  unit: string;
+  inSpec: boolean;
+  /** FMEA S：失效后果严重度（1-10） */
+  severity: number;
+  /** FMEA O：失效发生频度（1-10） */
+  occurrence: number;
+  /** FMEA D：现行控制探测度（1-10，10=几乎探测不到） */
+  detection: number;
+}
+
 const PROCESS: Record<ScenarioId, Record<LineId, {
-  parameters: Record<string, { actual: number; standard: number; unit: string; inSpec: boolean }>;
+  parameters: Record<string, ProcessParameter>;
   deviationScore: number; capability: number;
 }>> = {
   normal: {
     L01: {
       parameters: {
-        温度: { actual: 185, standard: 185, unit: "℃", inSpec: true },
-        压力: { actual: 4.2, standard: 4.2, unit: "MPa", inSpec: true },
-        速度: { actual: 1200, standard: 1200, unit: "rpm", inSpec: true },
+        温度: { actual: 185, standard: 185, unit: "℃", inSpec: true, severity: 8, occurrence: 2, detection: 3 },
+        压力: { actual: 4.2, standard: 4.2, unit: "MPa", inSpec: true, severity: 7, occurrence: 2, detection: 4 },
+        速度: { actual: 1200, standard: 1200, unit: "rpm", inSpec: true, severity: 6, occurrence: 2, detection: 3 },
       },
       deviationScore: 0.05,
       capability: 1.45,
     },
     L02: {
       parameters: {
-        温度: { actual: 180, standard: 180, unit: "℃", inSpec: true },
-        压力: { actual: 3.8, standard: 3.8, unit: "MPa", inSpec: true },
-        速度: { actual: 950, standard: 950, unit: "rpm", inSpec: true },
+        温度: { actual: 180, standard: 180, unit: "℃", inSpec: true, severity: 7, occurrence: 2, detection: 3 },
+        压力: { actual: 3.8, standard: 3.8, unit: "MPa", inSpec: true, severity: 7, occurrence: 2, detection: 4 },
+        速度: { actual: 950, standard: 950, unit: "rpm", inSpec: true, severity: 5, occurrence: 2, detection: 3 },
       },
       deviationScore: 0.08,
       capability: 1.35,
     },
     L03: {
       parameters: {
-        温度: { actual: 186, standard: 185, unit: "℃", inSpec: true },
-        压力: { actual: 4.0, standard: 4.0, unit: "MPa", inSpec: true },
-        速度: { actual: 1100, standard: 1100, unit: "rpm", inSpec: true },
+        温度: { actual: 186, standard: 185, unit: "℃", inSpec: true, severity: 8, occurrence: 2, detection: 3 },
+        压力: { actual: 4.0, standard: 4.0, unit: "MPa", inSpec: true, severity: 6, occurrence: 2, detection: 4 },
+        速度: { actual: 1100, standard: 1100, unit: "rpm", inSpec: true, severity: 6, occurrence: 2, detection: 3 },
       },
       deviationScore: 0.04,
       capability: 1.5,
@@ -163,27 +184,27 @@ const PROCESS: Record<ScenarioId, Record<LineId, {
   anomaly: {
     L01: {
       parameters: {
-        温度: { actual: 197, standard: 185, unit: "℃", inSpec: false },
-        压力: { actual: 4.8, standard: 4.2, unit: "MPa", inSpec: false },
-        速度: { actual: 1180, standard: 1200, unit: "rpm", inSpec: true },
+        温度: { actual: 197, standard: 185, unit: "℃", inSpec: false, severity: 9, occurrence: 6, detection: 5 },
+        压力: { actual: 4.8, standard: 4.2, unit: "MPa", inSpec: false, severity: 8, occurrence: 5, detection: 4 },
+        速度: { actual: 1180, standard: 1200, unit: "rpm", inSpec: true, severity: 6, occurrence: 3, detection: 3 },
       },
       deviationScore: 0.42,
       capability: 0.88,
     },
     L02: {
       parameters: {
-        温度: { actual: 189, standard: 180, unit: "℃", inSpec: false },
-        压力: { actual: 4.1, standard: 3.8, unit: "MPa", inSpec: false },
-        速度: { actual: 940, standard: 950, unit: "rpm", inSpec: true },
+        温度: { actual: 189, standard: 180, unit: "℃", inSpec: false, severity: 8, occurrence: 5, detection: 4 },
+        压力: { actual: 4.1, standard: 3.8, unit: "MPa", inSpec: false, severity: 7, occurrence: 4, detection: 4 },
+        速度: { actual: 940, standard: 950, unit: "rpm", inSpec: true, severity: 5, occurrence: 3, detection: 3 },
       },
       deviationScore: 0.18,
       capability: 1.15,
     },
     L03: {
       parameters: {
-        温度: { actual: 187, standard: 185, unit: "℃", inSpec: true },
-        压力: { actual: 4.0, standard: 4.0, unit: "MPa", inSpec: true },
-        速度: { actual: 1095, standard: 1100, unit: "rpm", inSpec: true },
+        温度: { actual: 187, standard: 185, unit: "℃", inSpec: true, severity: 8, occurrence: 3, detection: 3 },
+        压力: { actual: 4.0, standard: 4.0, unit: "MPa", inSpec: true, severity: 6, occurrence: 2, detection: 4 },
+        速度: { actual: 1095, standard: 1100, unit: "rpm", inSpec: true, severity: 6, occurrence: 2, detection: 3 },
       },
       deviationScore: 0.05,
       capability: 1.5,
@@ -192,33 +213,52 @@ const PROCESS: Record<ScenarioId, Record<LineId, {
   crisis: {
     L01: {
       parameters: {
-        温度: { actual: 215, standard: 185, unit: "℃", inSpec: false },
-        压力: { actual: 5.6, standard: 4.2, unit: "MPa", inSpec: false },
-        速度: { actual: 950, standard: 1200, unit: "rpm", inSpec: false },
+        温度: { actual: 215, standard: 185, unit: "℃", inSpec: false, severity: 10, occurrence: 8, detection: 6 },
+        压力: { actual: 5.6, standard: 4.2, unit: "MPa", inSpec: false, severity: 9, occurrence: 7, detection: 5 },
+        速度: { actual: 950, standard: 1200, unit: "rpm", inSpec: false, severity: 8, occurrence: 6, detection: 4 },
       },
       deviationScore: 0.78,
       capability: 0.42,
     },
     L02: {
       parameters: {
-        温度: { actual: 198, standard: 180, unit: "℃", inSpec: false },
-        压力: { actual: 4.4, standard: 3.8, unit: "MPa", inSpec: false },
-        速度: { actual: 900, standard: 950, unit: "rpm", inSpec: false },
+        温度: { actual: 198, standard: 180, unit: "℃", inSpec: false, severity: 9, occurrence: 6, detection: 5 },
+        压力: { actual: 4.4, standard: 3.8, unit: "MPa", inSpec: false, severity: 7, occurrence: 5, detection: 4 },
+        速度: { actual: 900, standard: 950, unit: "rpm", inSpec: false, severity: 6, occurrence: 5, detection: 4 },
       },
       deviationScore: 0.35,
       capability: 0.85,
     },
     L03: {
       parameters: {
-        温度: { actual: 188, standard: 185, unit: "℃", inSpec: true },
-        压力: { actual: 4.1, standard: 4.0, unit: "MPa", inSpec: true },
-        速度: { actual: 1090, standard: 1100, unit: "rpm", inSpec: true },
+        温度: { actual: 188, standard: 185, unit: "℃", inSpec: true, severity: 8, occurrence: 2, detection: 3 },
+        压力: { actual: 4.1, standard: 4.0, unit: "MPa", inSpec: true, severity: 6, occurrence: 2, detection: 4 },
+        速度: { actual: 1090, standard: 1100, unit: "rpm", inSpec: true, severity: 6, occurrence: 2, detection: 3 },
       },
       deviationScore: 0.06,
       capability: 1.48,
     },
   },
 };
+
+/**
+ * AIAG-VDA 第五版 AP（行动优先级）矩阵判定。
+ *
+ * 输入 S/O/D（1-10，10 最差），输出 H/M/L：
+ *   - H（High）：高优先级，必须采取行动降低风险
+ *   - M（Medium）：中优先级，应考虑行动
+ *   - L（Low）：低优先级，可保持现状
+ *
+ * 简化判定（基于 S 主导 + O/D 加权）：
+ *   - S≥9 或 (S≥7 且 O≥6 且 D≥5) → H
+ *   - S≥7 或 (O≥5 且 D≥4)        → M
+ *   - 其余                          → L
+ */
+export function computeAP(s: number, o: number, d: number): "H" | "M" | "L" {
+  if (s >= 9 || (s >= 7 && o >= 6 && d >= 5)) return "H";
+  if (s >= 7 || (o >= 5 && d >= 4)) return "M";
+  return "L";
+}
 
 /** 能耗数据。 */
 const ENERGY: Record<ScenarioId, Record<LineId, {
@@ -384,6 +424,166 @@ const COST: Record<ScenarioId, Record<LineId, {
   },
 };
 
+/**
+ * 因果链数据（多视角根因分析的枢纽数据）。
+ *
+ * 解决"5Why 展开需要因果链 + 鱼骨图需要带证据的 5M1E 分支"问题。
+ * CAUSAL_CHAIN 硬编码而非 LLM 推理，保证可测试、可复现。
+ *
+ * 设计：
+ *   - symptom：表层症状（与 quality.defectRate / oee.decompose 等输出对齐）
+ *   - chains：5Why 逐层追问链（现象→直接原因→...→根本原因）
+ *   - fishbone：5M1E 六分支，每分支带证据引用（指向具体 mock 字段，非空泛描述）
+ *
+ * normal 场景无显著问题，chains/fishbone 为空（合理：无问题就无根因可溯）。
+ */
+export interface CausalChainData {
+  symptom: string;
+  chains: Array<{
+    method: "5why";
+    layers: string[];
+    rootCause: string;
+  }>;
+  fishbone: {
+    man: string[];
+    machine: string[];
+    material: string[];
+    method: string[];
+    environment: string[];
+    measurement: string[];
+  };
+}
+
+const CAUSAL_CHAIN: Record<ScenarioId, Record<LineId, CausalChainData>> = {
+  normal: {
+    L01: emptyChain("L01 工况正常"),
+    L02: emptyChain("L02 工况正常"),
+    L03: emptyChain("L03 工况正常"),
+  },
+  anomaly: {
+    L01: {
+      symptom: "L01 尺寸超差率 5.8%，Cpk 0.85 < 1.0（能力不足）",
+      chains: [
+        {
+          method: "5why",
+          layers: [
+            "现象：尺寸超差率 5.8%，主缺陷类型为'尺寸超差'（占 42%）",
+            "为何尺寸超差？主轴径向跳动 0.03mm 超规（标准 ≤0.02mm）",
+            "为何主轴跳动超规？主轴前轴承磨损（间隙增大）",
+            "为何轴承磨损加速？自动润滑系统供油不足",
+            "根本原因：自动润滑泵滤网堵塞，导致供油不足 → 轴承异常磨损 → 主轴跳动 → 尺寸超差",
+          ],
+          rootCause: "自动润滑泵滤网堵塞（设备保养类）",
+        },
+      ],
+      fishbone: {
+        man: ["C 班夜班缺陷率比 A 班高 0.012（见 SHIFT_DEVIATION.L01.C）", "C 班含新员工未独立（见 PERSONNEL 班长B 郑师傅 level）"],
+        machine: ["主轴健康分 0.62 < 0.7 阈值（见 EQUIPMENT.L01.healthScore）", "MTBF 降至 180h（正常 480h，见 EQUIPMENT.L01.mtbfHours）", "停机事件 3 起：模具卡死/传感器漂移/换模超时（见 EQUIPMENT.L01.downtimeEvents）"],
+        material: ["近期来料批次切换，但单独不致超差（辅助因素）"],
+        method: ["温度 197℃ 超标准 185℃（见 PROCESS.L01.parameters.温度）", "压力 4.8MPa 超标准 4.2MPa（见 PROCESS.L01.parameters.压力）"],
+        environment: [],
+        measurement: [],
+      },
+    },
+    L02: {
+      symptom: "L02 尺寸超差率 2.5%，工艺温度轻微漂移",
+      chains: [
+        {
+          method: "5why",
+          layers: [
+            "现象：尺寸超差率 2.5%（略高于阈值 2%）",
+            "为何尺寸超差？温度 189℃ 略超标准 180℃（工艺漂移）",
+            "为何温度漂移？温控 PID 参数未随模具老化调整",
+            "为何未调整？模具寿命管理缺定期校准触发点",
+            "根本原因：模具寿命管理缺乏基于实际磨损的动态校准机制",
+          ],
+          rootCause: "模具寿命校准机制缺失（方法类）",
+        },
+      ],
+      fishbone: {
+        man: ["人员稳定，L3+ 占比 68%（见 PERSONNEL.L02.l3PlusRatio）"],
+        machine: ["设备健康 0.85（尚可，见 EQUIPMENT.L02.healthScore）"],
+        material: [],
+        method: ["温度 189℃ > 标准 180℃（见 PROCESS.L02.parameters.温度）", "压力 4.1MPa > 标准 3.8MPa（见 PROCESS.L02.parameters.压力）"],
+        environment: [],
+        measurement: [],
+      },
+    },
+    L03: emptyChain("L03 工况正常"),
+  },
+  crisis: {
+    L01: {
+      symptom: "L01 批量报废率 9.5%，主轴轴承断裂致停机 240min",
+      chains: [
+        {
+          method: "5why",
+          layers: [
+            "现象：批量报废率 9.5%（180 件），主轴轴承断裂停机 240min",
+            "为何轴承断裂？轴承长期超负荷运行未及时更换",
+            "为何未及时更换？预防性维护周期基于时间而非基于状态",
+            "为何基于时间？缺乏振动/温度状态监测的预测性维护体系",
+            "根本原因：未建立基于状态的预测性维护（CBM），轴承磨损未被早期发现",
+          ],
+          rootCause: "预测性维护体系缺失（设备管理体系类）",
+        },
+        {
+          method: "5why",
+          layers: [
+            "现象：能耗飙升 195kW（基线 88kW，+122%）",
+            "为何能耗飙升？设备超负荷运转补偿机械损耗",
+            "为何超负荷？主轴轴承磨损增加摩擦阻力",
+            "为何磨损未被发现？无振动监测（同上一链）",
+            "根本原因：与停机同一根因——预测性维护缺失（强关联）",
+          ],
+          rootCause: "预测性维护体系缺失（与停机同根因）",
+        },
+      ],
+      fishbone: {
+        man: ["停机响应滞后，操作员未识别早期振动征兆"],
+        machine: ["主轴轴承断裂（见 EQUIPMENT.L01.downtimeEvents[0]）", "健康分 0.25 严重恶化（见 EQUIPMENT.L01.healthScore）", "电气控制柜故障 120min（见 EQUIPMENT.L01.downtimeEvents[1]）"],
+        material: ["来料批次切换（辅助因素）"],
+        method: ["温度 215℃ 严重超标准 185℃（见 PROCESS.L01.parameters.温度）", "压力 5.6MPa 严重超标准 4.2MPa（见 PROCESS.L01.parameters.压力）", "速度 950rpm < 标准 1200rpm（见 PROCESS.L01.parameters.速度）"],
+        environment: [],
+        measurement: [],
+      },
+    },
+    L02: {
+      symptom: "L02 缺料停机 180min，inventoryHours=12h 低于安全线",
+      chains: [
+        {
+          method: "5why",
+          layers: [
+            "现象：缺料停机 180min（见 EQUIPMENT.L02.downtimeEvents）",
+            "为何缺料？库存 12h 低于 24h 安全线（见 MATERIAL.L02.inventoryHours）",
+            "为何库存低？采购订单未按实际消耗速率提前下单",
+            "为何未提前？安全库存公式未考虑供应商交期波动",
+            "根本原因：安全库存公式未纳入供应商交期波动参数（物料管理类）",
+          ],
+          rootCause: "安全库存公式缺供应商交期波动参数（物料管理类）",
+        },
+      ],
+      fishbone: {
+        man: ["物料计划员单点依赖，无替补（见 PERSONNEL.L02）"],
+        machine: ["设备健康 0.55 偏低（见 EQUIPMENT.L02.healthScore）"],
+        material: ["inventoryHours=12h < 24h 安全线（见 MATERIAL.L02.inventoryHours）", "shortageRisk=0.45（见 MATERIAL.L02.shortageRisk）"],
+        method: ["安全库存公式未含交期波动参数"],
+        environment: [],
+        measurement: [],
+      },
+    },
+    L03: emptyChain("L03 工况正常"),
+  },
+};
+
+/** 工厂：normal 场景的空因果链（无问题则无根因）。 */
+function emptyChain(reason: string): CausalChainData {
+  return {
+    symptom: reason,
+    chains: [],
+    fishbone: { man: [], machine: [], material: [], method: [], environment: [], measurement: [] },
+  };
+}
+
 // ── accessor helpers ──
 
 export function resolveLine(ctx: ScenarioContext): LineId {
@@ -468,6 +668,55 @@ export function getPersonnel(ctx: ScenarioContext) {
 /** 成本汇总（按场景 + 产线）。 */
 export function getCost(ctx: ScenarioContext) {
   return COST[ctx.scenarioId][resolveLine(ctx)];
+}
+
+/**
+ * 因果链数据（按场景 + 产线）。
+ *
+ * 5Why/鱼骨图工具的统一数据源。normal 场景 chains/fishbone 为空。
+ */
+export function getCausalChain(ctx: ScenarioContext): CausalChainData {
+  return CAUSAL_CHAIN[ctx.scenarioId][resolveLine(ctx)];
+}
+
+/**
+ * 工艺 PFMEA 失效模式清单（带 S/O/D + AP 行动优先级）。
+ *
+ * 从 PROCESS 参数派生：每参数的失效模式 = 该参数偏离致的质量/效率失效。
+ * 输出与 AIAG-VDA 第五版对齐（AP 替代旧 RPN）。
+ */
+export function getProcessFmea(ctx: ScenarioContext) {
+  const p = getProcess(ctx);
+  const failureModes = Object.entries(p.parameters).map(([param, v]) => {
+    const ap = computeAP(v.severity, v.occurrence, v.detection);
+    const failureMode =
+      param === "温度" ? "温度过高致材料降解/过低致欠固化"
+      : param === "压力" ? "压力超标致模具损伤/飞边"
+      : param === "速度" ? "速度偏离致节拍失稳/尺寸波动"
+      : `${param}偏离致质量失效`;
+    const effect = v.inSpec ? "轻微（当前在规格内）" : "显著（当前超规格，已触发缺陷）";
+    const control =
+      param === "温度" ? "温度报警 + 自动降温（SPC 监控）"
+      : param === "压力" ? "压力安全阀 + 超限停机"
+      : "速度闭环控制 + 巡检";
+    return {
+      param,
+      failureMode,
+      effect,
+      severity: v.severity,
+      occurrence: v.occurrence,
+      detection: v.detection,
+      ap,
+      control,
+      inSpec: v.inSpec,
+    };
+  });
+  return {
+    failureModes,
+    highRisk: failureModes.filter((m) => m.ap === "H"),
+    mediumRisk: failureModes.filter((m) => m.ap === "M"),
+    lowRisk: failureModes.filter((m) => m.ap === "L"),
+  };
 }
 
 /**

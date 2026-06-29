@@ -5,7 +5,7 @@
  * 数据源：PLM（工艺标准）+ MES（实测）。
  */
 import { createQueryTool } from "../mock-data/tool-factory.js";
-import { getProcess, lookupActionOverride, type ScenarioId } from "../mock-data/scenarios.js";
+import { getProcess, getProcessFmea, lookupActionOverride, type ScenarioId } from "../mock-data/scenarios.js";
 
 export function registerProcessTools(): import("../../../../src/tools/base.js").FlowConnector[] {
   return [
@@ -142,26 +142,18 @@ export function registerProcessTools(): import("../../../../src/tools/base.js").
       confidence: "inferred",
     }),
 
-    // 7. PFMEA
+    // 7. PFMEA（AIAG-VDA 第五版，S/O/D + AP 行动优先级）
     createQueryTool({
       name: "process.fmea",
-      description: "查工艺 PFMEA（过程失效模式与影响分析）。识别高风险失效模式 + 现行控制措施。",
-      triggers: ["PFMEA", "失效模式", "FMEA", "风险分析", "失效影响"],
-      notFor: ["实时偏差（走 process.deviation）"],
+      description: "查工艺 PFMEA（过程失效模式与影响分析）。按 AIAG-VDA 第五版输出 S/O/D 三维评分 + AP 行动优先级（H/M/L 替代旧 RPN）+ 现行控制措施。用于风险量化与改善优先级排序。",
+      triggers: ["PFMEA", "失效模式", "FMEA", "风险分析", "失效影响", "AP行动优先级", "SOD评分"],
+      notFor: ["实时偏差（走 process.deviation）", "5Why 根因追问（走 quality.five_why）"],
       inputSchema: { type: "object", properties: {} },
       getData: (ctx) => {
-        const p = getProcess(ctx);
-        return {
-          highRiskModes: p.deviationScore > 0.3
-            ? [
-                { mode: "温度过高致材料降解", severity: 9, occurrence: 6, detection: 5, rpn: 270, control: "温度报警 + 自动降温" },
-                { mode: "压力超标致模具损伤", severity: 8, occurrence: 5, detection: 4, rpn: 160, control: "压力安全阀" },
-              ]
-            : [{ mode: "常规波动", severity: 5, occurrence: 3, detection: 3, rpn: 45, control: "SPC 监控" }],
-        };
+        return getProcessFmea(ctx);
       },
       system: "PLM",
-      provenance: (a) => `/plm/process/fmea?line=${(a.line as string) ?? "L01"}`,
+      provenance: (a) => `/plm/process/fmea?line=${(a.line as string) ?? "L01"}&standard=AIAG-VDA-v5`,
       freshness: "historical",
     }),
 

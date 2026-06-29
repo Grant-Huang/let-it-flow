@@ -7,6 +7,7 @@
 import { createQueryTool } from "../mock-data/tool-factory.js";
 import {
   getQuality,
+  getCausalChain,
   lookupActionOverride,
   type ScenarioContext,
   type ScenarioId,
@@ -206,12 +207,12 @@ export function registerQualityTools(): import("../../../../src/tools/base.js").
       provenance: (a) => `/mom/quality/inspection?line=${(a.line as string) ?? "L01"}`,
     }),
 
-    // 9. 5M1E 根因框架
+    // 9. 5M1E 根因框架（布尔标签版，轻量快速判定）
     createQueryTool({
       name: "quality.root_cause_5m1e",
-      description: "按 5M1E（人/机/料/法/环/测）框架罗列当前可疑根因。质量问题的标准分析脚手架。",
-      triggers: ["5M1E", "根因分析", "鱼骨图", "为什么不良", "质量根因"],
-      notFor: ["具体缺陷类型（走 quality.pareto）"],
+      description: "按 5M1E（人/机/料/法/环/测）框架快速罗列可疑根因标签。轻量版：每分支返回布尔可疑判定，适合快速锁定方向。",
+      triggers: ["5M1E", "根因分析", "为什么不良", "质量根因"],
+      notFor: ["完整鱼骨图展开（走 quality.fishbone）", "5Why 逐层追问（走 quality.five_why）"],
       inputSchema: { type: "object", properties: {} },
       getData: (ctx) => {
         const q = getQuality(ctx);
@@ -228,6 +229,72 @@ export function registerQualityTools(): import("../../../../src/tools/base.js").
       },
       system: "MOM",
       provenance: (a) => `/mom/quality/5m1e?line=${(a.line as string) ?? "L01"}`,
+      confidence: "inferred",
+    }),
+
+    // 10. 5Why 根因追问
+    createQueryTool({
+      name: "quality.five_why",
+      description: "按 5Why 方法对当前质量问题逐层追问根因（现象→直接原因→…→根本原因）。每链 5 层，附停止判定标准（到达物理根因/无可追问）。normal 场景无问题则返回空链。",
+      triggers: ["5Why", "5个为什么", "逐层追问", "根本原因追问", "为何问题", "why分析"],
+      notFor: ["5M1E 并行展开（走 quality.fishbone）", "FMEA 风险评分（走 process.fmea）"],
+      inputSchema: { type: "object", properties: {} },
+      getData: (ctx) => {
+        const cc = getCausalChain(ctx);
+        const chains = cc.chains.map((c) => ({
+          method: c.method,
+          layers: c.layers,
+          rootCause: c.rootCause,
+          stopCriteria:
+            "到达物理根因（如'滤网堵塞'是可物理干预的最终环节）或无可继续追问的下一层",
+          depthReached: c.layers.length,
+        }));
+        return {
+          symptom: cc.symptom,
+          chains,
+          hasIdentifiedRoot: chains.length > 0,
+          note: chains.length === 0
+            ? "当前场景无显著问题（normal），无可追溯的因果链"
+            : "已识别根本原因，建议结合 quality.fishbone 交叉验证后再下结论",
+        };
+      },
+      system: "MOM",
+      provenance: (a) => `/mom/quality/5why?line=${(a.line as string) ?? "L01"}`,
+      confidence: "inferred",
+    }),
+
+    // 11. 鱼骨图（5M1E 带证据完整版）
+    createQueryTool({
+      name: "quality.fishbone",
+      description: "输出完整鱼骨图（石川图）：5M1E 六分支，每分支带具体证据引用（指向 mock 字段，非空泛描述）。适合多因素并行排查与 5Why 交叉印证。",
+      triggers: ["鱼骨图", "石川图", "fishbone", "因果图", "多因素根因", "5M1E展开"],
+      notFor: ["快速 5M1E 标签（走 quality.root_cause_5m1e）", "逐层追问（走 quality.five_why）"],
+      inputSchema: { type: "object", properties: {} },
+      getData: (ctx) => {
+        const cc = getCausalChain(ctx);
+        const branches = [
+          { dimension: "人 (Man)", factors: cc.fishbone.man },
+          { dimension: "机 (Machine)", factors: cc.fishbone.machine },
+          { dimension: "料 (Material)", factors: cc.fishbone.material },
+          { dimension: "法 (Method)", factors: cc.fishbone.method },
+          { dimension: "环 (Environment)", factors: cc.fishbone.environment },
+          { dimension: "测 (Measurement)", factors: cc.fishbone.measurement },
+        ];
+        const nonEmpty = branches.filter((b) => b.factors.length > 0);
+        const topSuspect =
+          nonEmpty.length === 0
+            ? "无显著异常（normal 场景）"
+            : nonEmpty.sort((a, b) => b.factors.length - a.factors.length)[0]?.dimension ?? "无";
+        return {
+          symptom: cc.symptom,
+          branches,
+          topSuspect,
+          excludedDimensions: branches.filter((b) => b.factors.length === 0).map((b) => b.dimension),
+          note: "每分支证据指向具体 mock 字段，可用 nexus_advise 进一步交叉验证",
+        };
+      },
+      system: "MOM",
+      provenance: (a) => `/mom/quality/fishbone?line=${(a.line as string) ?? "L01"}`,
       confidence: "inferred",
     }),
   ];
