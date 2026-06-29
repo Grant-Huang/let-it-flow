@@ -8,12 +8,15 @@ packages:
 # pnpm 11：允许 esbuild 运行 postinstall（vitest/eslint 依赖 esbuild 需下载原生二进制）
 allowBuilds:
   esbuild: true
+minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
   - '@meso.ai/client@0.1.0'
   - '@meso.ai/types@2.0.0'
   - '@meso.ai/ui@3.0.0'
   - '@meso.ai/types@2.1.0'
   - '@meso.ai/ui@3.1.0'
+  - '@meso.ai/types@2.1.1'
+  - '@meso.ai/ui@3.2.0'
 # @meso.ai/client@0.1.0 发布时残留了 workspace:* 协议，用 overrides 映射到实际版本
 overrides:
   "@meso.ai/client>@meso.ai/types": "^2.0.0"
