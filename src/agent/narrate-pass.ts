@@ -77,10 +77,15 @@ export async function narrateStepResult(
 
     const cleaned = text.trim();
     // 空输出或明显失败（只有标点）→ 返回空，让 harness 跳过 emit
-    if (!cleaned || cleaned.length < 4) return "";
+    if (!cleaned || cleaned.length < 4) {
+      console.debug(`[narrate] 工具 ${toolName} 无有效解读（长度 < 4）`);
+      return "";
+    }
+    console.debug(`[narrate] ${toolName} → ${cleaned.slice(0, 60)}`);
     return cleaned;
-  } catch {
+  } catch (e) {
     // 解读是锦上添花，失败不阻断主流程（与 review-pass 一致）
+    console.warn(`[narrate] 工具 ${toolName} 解读失败：`, e instanceof Error ? e.message : String(e));
     return "";
   }
 }
