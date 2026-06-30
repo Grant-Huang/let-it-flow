@@ -160,8 +160,11 @@ export interface HarnessConfig {
   toolTiers?: ToolTier[];
   /** 循环停止策略。 */
   stopPolicy?: StopPolicyConfig;
-  /** 每步前动态裁剪工具 / 注入上下文。 */
-  prepareStep?: (ctx: PrepareStepContext) => PrepareStepResult | undefined;
+  /**
+   * 每步前动态裁剪工具 / 注入上下文。
+   * 支持异步（与 AI SDK 的 PrepareStepFunction 对齐），用于证据评估等需调 LLM 的钩子。
+   */
+  prepareStep?: (ctx: PrepareStepContext) => Promise<PrepareStepResult | undefined> | PrepareStepResult | undefined;
   /** 应用声明的前置条件（V 层）。 */
   preconditions?: Precondition[];
   /** 应用挂的阻断规则（G 层）。 */
@@ -196,6 +199,16 @@ export interface HarnessConfig {
    * 规避 SDK 把 system 映射成这些服务不支持的 `developer` 角色。
    */
   compatMode?: boolean;
+  /**
+   * 工具结果解读模型（轻量模型，如 deepseek-flash / gpt-4o-mini）。
+   *
+   * 配置后，harness 在每步 onStepFinish 时把 EvidenceEnvelope 结果喂给此模型，
+   * 生成一段人类可读解读并 emit 为 text 事件，让用户跟上分析节奏。
+   * 缺省则跳过解读（向后兼容，不改变既有行为）。
+   */
+  narrateModel?: LanguageModel;
+  /** 解读模型的兼容模式（DeepSeek 等折叠 system 进 user）。 */
+  narrateCompatMode?: boolean;
   /** AbortSignal（外部中止）。 */
   abortSignal?: AbortSignal;
 }

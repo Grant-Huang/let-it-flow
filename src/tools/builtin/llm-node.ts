@@ -81,7 +81,7 @@ export function createLlmNodeTool(opts: LlmNodeToolOptions): FlowConnector<strin
       const model = args.model ? opts.llm.modelById(args.model) : opts.llm.model(callSite);
       const foldSystem = opts.llm.compatModeFor(callSite);
       const system = composeSystem(args.systemPrompt, args.style);
-      const callId = `c_${randomUUID().slice(0, 8)}`;
+      const callId = ctx.callId ?? `c_${randomUUID().slice(0, 8)}`;
 
       yield {
         type: "tool_call",

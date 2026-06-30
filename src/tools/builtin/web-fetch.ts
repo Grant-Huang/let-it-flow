@@ -90,20 +90,25 @@ export function createWebFetchTool(): FlowConnector<FetchedDoc[]> {
       const targets: Array<{ url: string; title?: string }> =
         args.fromInputRefs && args.fromInputRefs.length > 0 ? args.fromInputRefs : (args.urls ?? []).map((url) => ({ url }));
 
-      const callId = `c_${randomUUID().slice(0, 8)}`;
+      // 复用编排层注入的 callId（ReAct 模式），保证 tool_call/tool_result 事件一致；
+      // DAG 模式未注入时自行生成（向后兼容）。
+      const callId = ctx.callId ?? `c_${randomUUID().slice(0, 8)}`;
+      // args 完整下发真实 URL（前 3 条 + 总数），供前端 tool_call 卡片展示抓取对象
+      const previewUrls = targets.slice(0, 3).map((t) => t.url);
       yield {
         type: "tool_call",
         channel: "status",
         payload: toolCallPayload({
           id: callId,
           name: "core.web_fetch",
-          args: { urlCount: targets.length },
+          args: { urls: previewUrls, urlCount: targets.length },
           risk: "safe",
           groupId: ctx.nodeId,
           groupKind: "fetch",
         }),
       };
 
+      await narrate(ctx, `开始抓取 ${targets.length} 个网页…`);
       const t0 = Date.now();
       const docs: FetchedDoc[] = [];
       let idx = 0;
@@ -113,6 +118,9 @@ export function createWebFetchTool(): FlowConnector<FetchedDoc[]> {
         const doc = await fetchOne(t.url, args.maxBytes);
         docs.push({ ...doc, title: t.title ?? doc.title });
       }
+      const successCount = docs.filter((d) => !d.error).length;
+      const totalChars = docs.reduce((sum, d) => sum + d.content.length, 0);
+      await narrate(ctx, `抓取完成：${successCount}/${docs.length} 成功，共 ${totalChars} 字符。`);
       yield {
         type: "tool_result",
         channel: "status",
@@ -122,8 +130,6 @@ export function createWebFetchTool(): FlowConnector<FetchedDoc[]> {
           duration_ms: Date.now() - t0,
         }),
       };
-      const successCount = docs.filter((d) => !d.error).length;
-      const totalChars = docs.reduce((sum, d) => sum + d.content.length, 0);
       return {
         output: docs,
         summary: `${successCount}/${docs.length} fetched`,

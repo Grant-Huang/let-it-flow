@@ -304,10 +304,10 @@ describe("P8.5 ensureSeedConfig", () => {
     expect(reg[0].apiKeyEnv).toBe("OPENAI_API_KEY");
     expect(reg[0].modelId).toBe("deepseek-chat");
 
-    // 全部调用点应绑定到 seed alias（P8 基础 6 + nexus 扩展 3 + podcast-skill 1 = 10）
+    // 全部调用点应绑定到 seed alias（P8 基础 6 + nexus 扩展 4 + podcast-skill 1 = 11）
     const bPath = join(tmpRoot, "config", "call_site_bindings.json");
     const bindings = JSON.parse(readFileSync(bPath, "utf8"));
-    expect(bindings).toHaveLength(10);
+    expect(bindings).toHaveLength(11);
     for (const b of bindings) {
       expect(b.modelAlias).toBe("default-openai-compatible");
     }

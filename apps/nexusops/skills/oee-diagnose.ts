@@ -97,15 +97,18 @@ export function createOeeDiagnoseSkill() {
               mtbfHours: eq.mtbfHours,
               healthScore: eq.healthScore,
             };
+            await narrate(ctx, `停机事件 ${eq.downtimeEvents.length} 起，MTBF ${eq.mtbfHours} 小时，健康分 ${eq.healthScore.toFixed(2)}。`);
           } else if (loss === "performance") {
             const pr = getProcess(sctx);
+            const deviations = Object.entries(pr.parameters).filter(
+              ([, v]) => !(v as { inSpec: boolean }).inSpec,
+            );
             evidence = {
               ...evidence,
-              deviations: Object.entries(pr.parameters).filter(
-                ([, v]) => !(v as { inSpec: boolean }).inSpec,
-              ),
+              deviations,
               deviationScore: pr.deviationScore,
             };
+            await narrate(ctx, `工艺偏离 ${pr.deviationScore.toFixed(2)}，超规格参数 ${deviations.length} 项。`);
           } else {
             const q = getQuality(sctx);
             evidence = {
@@ -114,6 +117,7 @@ export function createOeeDiagnoseSkill() {
               cpk: q.cpk,
               defectRate: q.defectRate,
             };
+            await narrate(ctx, `不良率 ${(q.defectRate * 100).toFixed(1)}%，Cpk ${q.cpk.toFixed(2)}，主要缺陷 ${q.topDefects.length} 类。`);
           }
           return { lossType: loss, evidence };
         },
@@ -127,13 +131,18 @@ export function createOeeDiagnoseSkill() {
         await narrate(ctx, "正在用 5M1E 视角交叉验证…");
         const eq = getEquipment(sctx);
         const pr = getProcess(sctx);
+        const crossCheck = {
+          equipmentHealth: eq.healthScore,
+          processDeviation: pr.deviationScore,
+          suspiciousDevice: eq.healthScore < 0.7,
+          suspiciousProcess: pr.deviationScore > 0.3,
+        };
+        await narrate(
+          ctx,
+          `设备健康 ${eq.healthScore.toFixed(2)}${crossCheck.suspiciousDevice ? "（可疑）" : ""}，工艺偏离 ${pr.deviationScore.toFixed(2)}${crossCheck.suspiciousProcess ? "（可疑）" : ""}。`,
+        );
         return {
-          crossCheck: {
-            equipmentHealth: eq.healthScore,
-            processDeviation: pr.deviationScore,
-            suspiciousDevice: eq.healthScore < 0.7,
-            suspiciousProcess: pr.deviationScore > 0.3,
-          },
+          crossCheck,
           primaryEvidence: step2.evidence,
         };
       });

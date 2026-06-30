@@ -171,7 +171,7 @@ export function adaptTool(
       }
 
       // 构造最小 ExecutionContext（FlowConnector.execute 需要的子集）
-      const ctx = buildAdapterContext(ctxMeta, deps) as unknown as Parameters<
+      const ctx = buildAdapterContext(ctxMeta, deps, { callId }) as unknown as Parameters<
         FlowConnector["execute"]
       >[1];
 
@@ -190,6 +190,7 @@ export function adaptTool(
         }
 
         const rawOutput = final?.output;
+        const narration = final?.narration;
 
         // G 层 postToolUse 钩子：过程侧一致性校验（warn 注入 _warnings / block 替换结果）
         let output: unknown = rawOutput;
@@ -224,6 +225,16 @@ export function adaptTool(
             duration_ms: Date.now() - startedAt,
           }),
         });
+
+        // 激活工具 return 的 narration 字段：作为实时 text 事件下发，
+        // 让工具未显式调 narrate() 的结束摘要也能进对话流（如 deliver/llm_node）。
+        if (narration) {
+          await safeEmit(deps.emit, {
+            type: "text",
+            channel: "content",
+            payload: { delta: narration },
+          });
+        }
 
         return typeof output === "object" && output !== null
           ? (output as Record<string, unknown>)
@@ -277,12 +288,14 @@ export function keyToToolName(key: string): string {
 function buildAdapterContext(
   ctxMeta: { taskId: string; runId: string; nodeId: string },
   deps: ToolAdapterDeps,
+  extra?: { callId?: string },
 ) {
   return {
     taskId: ctxMeta.taskId,
     runId: ctxMeta.runId,
     nodeId: ctxMeta.nodeId,
     intent: "",
+    ...(extra?.callId ? { callId: extra.callId } : {}),
     emit: async (event: ToolEvent) => {
       await safeEmit(deps.emit, event as unknown as { type: string; channel?: string; payload: Record<string, unknown> });
     },

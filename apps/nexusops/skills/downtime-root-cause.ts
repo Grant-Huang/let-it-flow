@@ -85,13 +85,18 @@ export function createDowntimeRootCauseSkill() {
       }>("查维护历史 + 备件", async (ctx) => {
         await narrate(ctx, "正在查维护历史与备件状态…");
         const eq = getEquipment(sctx);
-        return {
+        const result = {
           mtbfHours: eq.mtbfHours,
           mttrMinutes: eq.mttrMinutes,
           failureRisk30d: eq.failureRisk30d,
           healthScore: eq.healthScore,
           overdueMaintenance: eq.healthScore < 0.7,
         };
+        await narrate(
+          ctx,
+          `MTBF ${eq.mtbfHours} 小时，健康分 ${eq.healthScore.toFixed(2)}${result.overdueMaintenance ? "（已低于阈值）" : ""}。`,
+        );
+        return result;
       });
 
       // Step 3: 交叉查工艺/物料排除外部因素
@@ -103,11 +108,16 @@ export function createDowntimeRootCauseSkill() {
         await narrate(ctx, "正在交叉查工艺与物料，排除外部因素…");
         const pr = getProcess(sctx);
         const m = getMaterial(sctx);
-        return {
+        const result = {
           processDeviation: pr.deviationScore,
           materialShortageRisk: m.shortageRisk,
           externalCauseRuled: pr.deviationScore < 0.3 && m.shortageRisk < 0.3,
         };
+        await narrate(
+          ctx,
+          `工艺偏离 ${pr.deviationScore.toFixed(2)}，物料风险 ${m.shortageRisk.toFixed(2)}，外部因素${result.externalCauseRuled ? "已排除" : "不能排除"}。`,
+        );
+        return result;
       });
 
       // Step 4: 综合根因结论（包成 EvidenceEnvelope）
@@ -120,12 +130,15 @@ export function createDowntimeRootCauseSkill() {
           if (step2.healthScore < 0.5) {
             category = "equipment_degradation";
             rootCause = `设备健康分 ${step2.healthScore.toFixed(2)} 严重偏低，主因：${step1.topReason}`;
+            await narrate(ctx, `设备健康分 ${step2.healthScore.toFixed(2)} < 0.5，判定为设备劣化型根因。`);
           } else if (!step3.externalCauseRuled) {
             category = "external";
             rootCause = "停机可能由外部因素（物料/工艺）诱发，需进一步排查";
+            await narrate(ctx, "外部因素未能排除，判定为外部诱发型根因。");
           } else {
             category = "sporadic";
             rootCause = `${step1.topReason}（偶发性，设备健康尚可）`;
+            await narrate(ctx, "设备健康尚可且外部因素已排除，判定为偶发型根因。");
           }
 
           return wrapEvidence(

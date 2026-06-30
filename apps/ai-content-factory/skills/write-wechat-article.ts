@@ -107,6 +107,7 @@ ${rulesContext}
 ${podcastScript}`,
         userPrompt: `请为以下线索写公众号长文（${targetWords}字左右）：\n\n线索：${JSON.stringify(focusedThread)}\n\n结构理由：${narrativeReason}\n\nJSON 返回: { article: "完整文章", sections: [{ title: "...", content: "..." }, ...] }`,
       });
+      await narrate(ctx, `生成长文稿约 ${(draft?.article ?? "").length} 字，${draft?.sections.length ?? 0} 章节。`);
       return draft;
     });
 
@@ -133,6 +134,10 @@ ${podcastScript}`,
 
 返回: { wordCount, needsRevise: boolean, issue: "" }`,
       });
+      await narrate(
+        ctx,
+        `实际 ${result?.wordCount ?? 0} 字，目标 ${targetWords} 字${result?.needsRevise ? "（需调整）" : "（达标）"}。`,
+      );
       return result;
     });
 
@@ -165,6 +170,7 @@ ${finalArticle}
 
 返回: { citations: [{ text: "引用内容", source: "信源" }, ...] }`,
         });
+        await narrate(ctx, `提取 ${citations?.citations?.length ?? 0} 条引用。`);
         return citations;
       },
     );

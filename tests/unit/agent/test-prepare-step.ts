@@ -55,14 +55,14 @@ function ctx(steps: StepTrace[]): PrepareStepContext {
 }
 
 describe("prepare-step 动态裁工具", () => {
-  it("无 domain 调用 → 不裁（返回全部工具，undefined activeTools）", () => {
-    const r = prepareStep(ctx([step(["core.web_search"])]));
+  it("无 domain 调用 → 不裁（返回全部工具，undefined activeTools）", async () => {
+    const r = await prepareStep(ctx([step(["core.web_search"])]));
     // 无主导域 + 无提醒 → 返回 undefined
     expect(r).toBeUndefined();
   });
 
-  it("主导 OEE 域 → 只保留 oee + core 通用 + nexus 收尾 + skill", () => {
-    const r = prepareStep(ctx([step(["oee.realtime", "oee.history", "oee.decompose"])]));
+  it("主导 OEE 域 → 只保留 oee + core 通用 + nexus 收尾 + skill", async () => {
+    const r = await prepareStep(ctx([step(["oee.realtime", "oee.history", "oee.decompose"])]));
     expect(r).toBeDefined();
     expect(r!.activeTools).toBeDefined();
     const active = new Set(r!.activeTools!);
@@ -85,23 +85,23 @@ describe("prepare-step 动态裁工具", () => {
     expect(active.has("material.wip_level")).toBe(false);
   });
 
-  it("主导 equipment 域 → 裁掉 oee/quality 等", () => {
-    const r = prepareStep(ctx([step(["equipment.downtime", "equipment.health"])]));
+  it("主导 equipment 域 → 裁掉 oee/quality 等", async () => {
+    const r = await prepareStep(ctx([step(["equipment.downtime", "equipment.health"])]));
     const active = new Set(r!.activeTools!);
     expect(active.has("equipment.downtime")).toBe(true);
     expect(active.has("oee.realtime")).toBe(false);
   });
 
-  it("单次偶发 domain 调用未达主导阈值 → 不裁（避免误裁）", () => {
+  it("单次偶发 domain 调用未达主导阈值 → 不裁（避免误裁）", async () => {
     // 1 次 oee + 1 次 equipment，无主导（各占 50%，未超 0.5 阈值）
-    const r = prepareStep(ctx([step(["oee.realtime", "equipment.downtime"])]));
+    const r = await prepareStep(ctx([step(["oee.realtime", "equipment.downtime"])]));
     expect(r?.activeTools).toBeUndefined();
   });
 });
 
 describe("prepare-step every_step 提示注入", () => {
-  it("讨论 OEE 但未取证就调 advise → 注入提醒", () => {
-    const r = prepareStep(
+  it("讨论 OEE 但未取证就调 advise → 注入提醒", async () => {
+    const r = await prepareStep(
       ctx([step(["nexus_advise"], "用户问 OEE 为什么低，我直接给建议")]),
     );
     expect(r).toBeDefined();
@@ -110,16 +110,16 @@ describe("prepare-step every_step 提示注入", () => {
     expect(r!.system!).toContain("取证");
   });
 
-  it("讨论停机但未取证就调 advise → 注入提醒", () => {
-    const r = prepareStep(
+  it("讨论停机但未取证就调 advise → 注入提醒", async () => {
+    const r = await prepareStep(
       ctx([step(["nexus_advise"], "停机原因是设备老化")]),
     );
     expect(r!.system).toBeDefined();
     expect(r!.system!).toContain("停机");
   });
 
-  it("已取证 → 无提醒（system 为 undefined）", () => {
-    const r = prepareStep(
+  it("已取证 → 无提醒（system 为 undefined）", async () => {
+    const r = await prepareStep(
       ctx([step(["oee.realtime", "nexus_advise"], "已查 OEE 实测，给建议")]),
     );
     // 已取证，无提醒；但 oee 是主导域，所以 activeTools 会产出
@@ -127,8 +127,8 @@ describe("prepare-step every_step 提示注入", () => {
     expect(r?.activeTools).toBeDefined();
   });
 
-  it("不涉及 OEE/停机 → 无提醒", () => {
-    const r = prepareStep(
+  it("不涉及 OEE/停机 → 无提醒", async () => {
+    const r = await prepareStep(
       ctx([step(["energy.realtime", "nexus_advise"], "能耗偏高，建议优化")]),
     );
     expect(r?.system).toBeUndefined();

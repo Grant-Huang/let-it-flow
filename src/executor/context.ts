@@ -32,6 +32,11 @@ export class ExecutionContext {
   readonly runId: string;
   /** 当前节点 id（executor 在执行该节点前绑定）。 */
   nodeId: string;
+  /**
+   * 当前工具调用的 callId（由 ReAct tool-adapter 注入；DAG executor 缺省 undefined）。
+   * 工具内部 yield tool_call/tool_result 时复用此 id，保证事件一致。
+   */
+  callId?: string;
   /** 用户原始意图。 */
   intent = "";
   /** contentPipeline 配置（当前节点）。bindNode 前的兜底值，从系统设置读取。 */

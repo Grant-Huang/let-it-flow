@@ -1,0 +1,3 @@
+分别在两个终端中启动：
+pnpm dev:nexus       # nexus 后端
+pnpm dev:nexus:web   # nexus 前端

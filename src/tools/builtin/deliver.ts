@@ -55,7 +55,7 @@ export function createDeliverTool(): FlowConnector<{ type: string; title?: strin
     async *execute(params, ctx): AsyncGenerator<ToolEvent, ToolResult<{ type: string; title?: string; content: string }>> {
       const args = inputSchema.parse(params);
       const items = normalizeItems(args.items);
-      const callId = `c_${randomUUID().slice(0, 8)}`;
+      const callId = ctx.callId ?? `c_${randomUUID().slice(0, 8)}`;
       yield {
         type: "tool_call",
         channel: "status",

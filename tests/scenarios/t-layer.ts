@@ -112,7 +112,7 @@ export const scenarioT2PrepareStepPrune: Scenario = {
         durationMs: 0,
       }],
     } as never;
-    const result = prepareStep(ctx);
+    const result = await prepareStep(ctx);
     const active = result?.activeTools ?? [];
     const hasOee = active.includes("oee.realtime");
     const noQuality = !active.includes("quality.pareto");
@@ -162,7 +162,7 @@ export const scenarioT3PrepareStepReminder: Scenario = {
         durationMs: 0,
       }],
     } as never;
-    const result = prepareStep(ctx);
+    const result = await prepareStep(ctx);
     const hasReminder = Boolean(result?.system && result.system.includes("前置条件提醒"));
     this.assertions[0]!.actual = `system 注入=${hasReminder}，长度=${result?.system?.length ?? 0}`;
     this.assertions[0]!.passed = hasReminder;

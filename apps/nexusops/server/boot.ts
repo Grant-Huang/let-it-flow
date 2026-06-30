@@ -186,7 +186,12 @@ export async function bootNexusOps(opts: NexusBootOptions = {}): Promise<NexusRu
   // prepareStep 需要全部工具名列表（裁域时过滤）
   const toolTiers: ("core" | "domain" | "custom")[] = ["core", "domain", "custom"];
   const allToolNames = toolRegistry.listByTiers(toolTiers).map((t) => t.name);
-  const prepareStep = buildNexusPrepareStep(allToolNames);
+  // 收尾前证据评估用主力模型（与主循环同款），仅收尾意图时触发，控制延迟
+  const prepareStep = buildNexusPrepareStep(
+    allToolNames,
+    llm.model("nexus_agent"),
+    llm.compatModeFor ? llm.compatModeFor("nexus_agent") : false,
+  );
 
   // review pass 开关（默认关，生产可开；用便宜模型事后审计）
   const reviewPassEnabled = process.env.NEXUS_REVIEW_PASS === "1";
@@ -250,6 +255,9 @@ export async function bootNexusOps(opts: NexusBootOptions = {}): Promise<NexusRu
       // 兼容模式（DeepSeek 等）：折叠 system 进 user，规避 developer 角色
       compatMode: llm.compatModeFor ? llm.compatModeFor("nexus_agent") : false,
       systemPrompt: NEXUS_SYSTEM_PROMPT,
+      // 工具结果解读：每步用轻量模型把 EvidenceEnvelope 转成人类可读叙述 emit 为 text
+      narrateModel: llm.model("nexus_narrate"),
+      narrateCompatMode: llm.compatModeFor ? llm.compatModeFor("nexus_narrate") : false,
     };
 
     const result = await runReactHarness(intent, harnessConfig);
@@ -389,6 +397,7 @@ const NEXUS_SYSTEM_PROMPT = `
 ## 建议 quality
 - impact/executionScore/confidence 都在 0-1 之间，给真实估计而非全部 0.9。
 - 行动按钮：仅当确有对应 MCP 动作工具且参数明确时附 actionTool+actionArgs；否则留空（宁可不给按钮也不勉强）。
+- 证据齐备、准备给出建议时，先用一句固定过渡语收束取证阶段（如"证据已齐，我来给出建议。"），让用户感知阶段切换。
 - 可用的 MCP 动作工具（mcp.<系统>.<动作>，附 actionTool 时用全名）：
   - mcp.mes.schedule_work_order（重排工单）、mcp.mes.changeover（换模调度）、mcp.mes.reallocate_capacity（产能重分配）
   - mcp.erp.purchase_request（采购申请）、mcp.erp.material_issue（领料出库）

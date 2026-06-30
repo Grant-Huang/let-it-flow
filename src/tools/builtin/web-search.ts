@@ -155,7 +155,8 @@ export function createWebSearchTool(opts: WebSearchToolOptions = {}): FlowConnec
     async *execute(params, ctx: ExecutionContext): AsyncGenerator<ToolEvent, ToolResult<SearchResult[]>> {
       const args = inputSchema.parse(params);
       const provider = opts.provider ?? resolveProvider(args.provider);
-      const callId = `c_${randomUUID().slice(0, 8)}`;
+      // 复用编排层注入的 callId（ReAct 模式），保证事件一致；DAG 模式自行生成
+      const callId = ctx.callId ?? `c_${randomUUID().slice(0, 8)}`;
       yield {
         type: "tool_call",
         channel: "status",
@@ -180,6 +181,8 @@ export function createWebSearchTool(opts: WebSearchToolOptions = {}): FlowConnec
       }
       if (!errMsg) {
         await narrate(ctx, `找到 ${results.length} 条结果。`);
+      } else {
+        await narrate(ctx, `检索失败：${errMsg}。`);
       }
       yield {
         type: "tool_result",

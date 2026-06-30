@@ -22,6 +22,8 @@ import { streamText } from "ai";
 import { buildStopWhen } from "./stop-policy.js";
 import { adaptToolSet, toolNameToKey } from "./tool-adapter.js";
 import { TraceAccumulator, emitStepPhase } from "./step-emitter.js";
+import { narrateStepResult } from "./narrate-pass.js";
+import { isEvidenceEnvelope } from "../core/evidence-envelope.js";
 import type {
   HarnessConfig,
   HarnessResult,
@@ -51,6 +53,8 @@ export async function runReactHarness(
     systemPrompt,
     previousContext,
     abortSignal,
+    narrateModel,
+    narrateCompatMode = false,
   } = config;
   const compatMode = config.compatMode ?? false;
 
@@ -124,12 +128,33 @@ export async function runReactHarness(
         accumulator.push(trace);
         // E 层：发 phase 事件（前端可见）
         await emitStepPhase(emit, ev.stepNumber, "done");
+        // O 层增强：对每个有 EvidenceEnvelope 结果的 toolCall 生成人类可读解读，
+        // emit 为 text 事件，让用户跟上分析节奏（narrateModel 缺省则跳过）
+        if (narrateModel && trace.toolCalls.length > 0) {
+          for (const tc of trace.toolCalls) {
+            if (tc.rejected) continue;
+            if (!isEvidenceEnvelope(tc.result)) continue;
+            const narration = await narrateStepResult(
+              tc.toolName,
+              tc.args,
+              tc.result,
+              { model: narrateModel, compatMode: narrateCompatMode, abortSignal },
+            );
+            if (narration) {
+              await emit?.({
+                type: "text",
+                channel: "content",
+                payload: { delta: narration },
+              });
+            }
+          }
+        }
       },
-      prepareStep: ({ steps, stepNumber }) => {
-        // C 层钩子：应用自定义裁剪/注入
+      prepareStep: async ({ steps, stepNumber }) => {
+        // C 层钩子：应用自定义裁剪/注入（支持异步，用于证据评估）
         if (!prepareStep) return undefined;
         const stepTraces = steps.map((s) => convertStep(s, riskMap, confirmedSet, rejectedSet, keyToName));
-        const stepResult = prepareStep({ steps: stepTraces, stepNumber, intent });
+        const stepResult = await prepareStep({ steps: stepTraces, stepNumber, intent });
         if (!stepResult) return undefined;
         // 透传成 SDK 的 PrepareStepResult（activeTools 转成 SDK key 形态）
         return {
@@ -241,6 +266,12 @@ function buildSystemPrompt(
     "你是一个运营智能分析助手，使用 ReAct（Thought→Action→Observation）模式工作。",
     "每步你可以：思考（输出 text）或调用工具（function call）。工具返回的 Observation 会追加进上下文。",
     "根据证据的时效性（freshness）和置信度（confidence）谨慎判断——estimated/historical 数据需更多交叉验证。",
+    "",
+    "## 思考与叙述（重要）",
+    "你的每一步思考都会直接呈现给用户，不要静默执行。具体要求：",
+    "- 调用工具前，先用一两句话说明这一步要查什么、为什么查（如\"我先看实时 OEE，定位是哪一项拖累效率。\"）。",
+    "- 拿到结果后，结合数据简短点出关键发现（如\"可用率 0.62 偏低，需查停机原因。\"）。",
+    "- 让用户跟上你的分析节奏，不要省略这些过渡说明。",
     "",
     `## 可用工具（${toolNames.length} 个）`,
     toolNames.join("、"),

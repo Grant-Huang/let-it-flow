@@ -29,6 +29,7 @@ const CALL_SITE_ENV: Record<CallSite, string> = {
   nexus_agent: "LIF_NEXUS_AGENT_MODEL",
   nexus_advise: "LIF_NEXUS_ADVISE_MODEL",
   nexus_review: "LIF_NEXUS_REVIEW_MODEL",
+  nexus_narrate: "LIF_NEXUS_NARRATE_MODEL",
   podcast_skill_agent: "LIF_PODCAST_SKILL_AGENT_MODEL",
 };
 
@@ -43,6 +44,7 @@ const DEFAULT_BINDINGS: Record<CallSite, string> = {
   nexus_agent: "default-nexus-agent",
   nexus_advise: "default-nexus-advise",
   nexus_review: "default-nexus-review",
+  nexus_narrate: "default-nexus-narrate",
   podcast_skill_agent: "default-podcast-skill-agent",
 };
 

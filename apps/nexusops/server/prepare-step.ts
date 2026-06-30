@@ -10,8 +10,10 @@
  *
  * 触发纪律：只在"已识别出主导域"时裁工具，否则返回全部工具（避免过早收窄）。
  */
+import type { LanguageModel } from "ai";
 import type { PrepareStepContext, PrepareStepResult } from "../../../src/agent/types.js";
 import { collectEveryStepReminders } from "./preconditions.js";
+import { evaluateEvidenceGate } from "../../../src/agent/evidence-gate.js";
 
 /** NexusOps domain 工具前缀（按工具名第一个点分段）。 */
 const DOMAIN_PREFIXES = [
@@ -73,13 +75,17 @@ function detectDominantDomain(steps: PrepareStepContext["steps"]): string | unde
 /**
  * 构造 NexusOps 的 prepareStep 函数。
  *
- * @param allToolNames  harness 暴露给 LLM 的全部工具名（用于裁剪后返回 activeTools）
+ * @param allToolNames          harness 暴露给 LLM 的全部工具名（用于裁剪后返回 activeTools）
+ * @param evidenceGateModel     收尾前证据评估模型（主力模型）。缺省则不做语义评估
+ * @param evidenceGateCompatMode 评估模型兼容模式
  * @returns  prepareStep 函数，注入 harness 的 HarnessConfig.prepareStep
  */
 export function buildNexusPrepareStep(
   allToolNames: string[],
-): (ctx: PrepareStepContext) => PrepareStepResult | undefined {
-  return (ctx: PrepareStepContext): PrepareStepResult | undefined => {
+  evidenceGateModel?: LanguageModel,
+  evidenceGateCompatMode?: boolean,
+): (ctx: PrepareStepContext) => Promise<PrepareStepResult | undefined> | PrepareStepResult | undefined {
+  return async (ctx: PrepareStepContext): Promise<PrepareStepResult | undefined> => {
     const result: PrepareStepResult = {};
 
     // 1. 动态裁工具：识别主导域后只保留相关工具
@@ -103,8 +109,77 @@ export function buildNexusPrepareStep(
       result.system = `## 前置条件提醒（每步检查）\n${reminders.map((r) => `- ${r}`).join("\n")}\n\n请在下一步优先补齐上述取证，不要在证据不足时给结论。`;
     }
 
-    // 两个都没产出 → 返回 undefined（harness 用缺省全工具 + 无额外 system）
+    // 3. 收尾意图检测 + 证据充分性评估（语义级，主力模型）
+    //    仅当模型尝试收尾时触发，控制延迟（典型 1-2 次/会话）
+    if (evidenceGateModel) {
+      const gateVerdict = await tryEvaluateEvidenceGate(ctx, evidenceGateModel, evidenceGateCompatMode);
+      if (gateVerdict) {
+        applyGateVerdict(gateVerdict, result, allToolNames);
+      }
+    }
+
+    // 三个都没产出 → 返回 undefined（harness 用缺省全工具 + 无额外 system）
     if (!result.activeTools && !result.system) return undefined;
     return result;
   };
+}
+
+/** 收尾意图检测：上一步是否调了 finalize 或没调任何工具（想自然停止）。 */
+function isFinalizeAttempt(steps: PrepareStepContext["steps"]): boolean {
+  const last = steps[steps.length - 1];
+  if (!last) return false;
+  // 没调任何工具的步骤（finishReason=stop）= 想自然收尾
+  if (last.toolCalls.length === 0) return true;
+  // 调了 nexus_finalize（key 形态 nexus.finalize 也匹配）
+  return last.toolCalls.some(
+    (tc) => tc.toolName === "nexus_finalize" || tc.toolName === "nexus.finalize",
+  );
+}
+
+/** 触发证据评估（仅收尾意图时），返回评估结论或 null（未触发/无轨迹/放行）。 */
+async function tryEvaluateEvidenceGate(
+  ctx: PrepareStepContext,
+  model: LanguageModel,
+  compatMode?: boolean,
+): Promise<{ action: "soft_warn" | "block"; confidence: number; evidenceGaps: string[]; overClaims: string[] } | null> {
+  if (!isFinalizeAttempt(ctx.steps)) return null;
+  // 首步即收尾（如澄清反问）无取证轨迹，跳过评估
+  const hasEvidence = ctx.steps.some((s) => s.toolCalls.length > 0);
+  if (!hasEvidence) return null;
+
+  const verdict = await evaluateEvidenceGate(ctx.steps, ctx.intent, {
+    model,
+    compatMode,
+  });
+  if (verdict.action === "pass") return null; // 放行不干预
+  return {
+    action: verdict.action,
+    confidence: verdict.confidence,
+    evidenceGaps: verdict.evidenceGaps,
+    overClaims: verdict.overClaims,
+  };
+}
+
+/** 把评估结论应用到 prepareStep 结果（软提示或硬阻断）。 */
+function applyGateVerdict(
+  verdict: { action: "soft_warn" | "block"; confidence: number; evidenceGaps: string[]; overClaims: string[] },
+  result: PrepareStepResult,
+  allToolNames: string[],
+): void {
+  const gapsText = verdict.evidenceGaps.length > 0
+    ? `\n证据缺口：\n${verdict.evidenceGaps.map((g) => `- ${g}`).join("\n")}`
+    : "";
+  const claimsText = verdict.overClaims.length > 0
+    ? `\n可能的过度声明：\n${verdict.overClaims.map((c) => `- ${c}`).join("\n")}`
+    : "";
+
+  if (verdict.action === "block") {
+    // 硬阻断：从 activeTools 移除 nexus_finalize，模型这一步看不到收尾工具
+    result.activeTools = (result.activeTools ?? allToolNames).filter((n) => n !== "nexus_finalize");
+    result.system = `## 证据不足，禁止收尾（评估 confidence=${verdict.confidence.toFixed(2)}）${gapsText}${claimsText}\n\n请继续取证补齐上述缺口后再收尾。`;
+  } else {
+    // soft_warn：保留 finalize 但注入警告，主模型自己决定
+    const warnText = `## 证据充分性提醒（confidence=${verdict.confidence.toFixed(2)}）${gapsText}${claimsText}\n\n若证据已足够支撑结论可收尾，否则建议先补取证。`;
+    result.system = result.system ? `${result.system}\n\n${warnText}` : warnText;
+  }
 }

@@ -34,6 +34,13 @@ export interface ExecutionContext {
   taskId: string;
   runId: string;
   nodeId: string;
+  /**
+   * 当前工具调用的 callId（由编排层在调 execute 前注入）。
+   * 工具内部 yield tool_call/tool_result 时应优先复用此 id，保证编排层与工具层
+   * 产出的事件 callId 一致（避免前端出现重复卡片）。
+   * 缺省时（如 DAG executor 未注入）工具可自行生成。
+   */
+  callId?: string;
   /** 发射一个事件（append 到 store + 走 SSE）。返回带 seq 的完整事件。 */
   emit: (event: Omit<StreamEvent, "seq" | "taskId" | "ts">) => Promise<StreamEvent>;
   /** HITL 确认门：挂起等待用户决策。approved=true 继续，false 中止本节点。 */

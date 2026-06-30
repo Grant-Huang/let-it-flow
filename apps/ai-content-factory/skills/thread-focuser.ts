@@ -115,11 +115,13 @@ export const threadFocuserSkill = createSkill({
     let discarded: Thread[] = [];
 
     if (threads.length === 1) {
+      await skillNarrate("只有 1 条候选线索，直接采用。");
       selected = threads[0]!;
     } else if (focusHint) {
       // 用户提示命中
       selected = threads.find((t) => t.summary.includes(focusHint)) || threads[0]!;
       discarded = threads.filter((t) => t.id !== selected.id);
+      await skillNarrate(`用户提示命中：${selected.summary}。`);
     } else {
       // 需要用户选择：用 requireConfirmation 的 options 传线索摘要，params.choice 传回选中 id
       await skillNarrate(`发现 ${threads.length} 条独立线索，需要你选一条。`);
@@ -159,6 +161,10 @@ export const threadFocuserSkill = createSkill({
 
     const contentType: "rigorous" | "comprehensive" =
       typeStep?.contentType === "rigorous" ? "rigorous" : "comprehensive";
+
+    await skillNarrate(
+      `判定内容类型：${contentType === "rigorous" ? "严谨型" : "综合型"}。`,
+    );
 
     const rationale = `聚焦线索"${selected.summary}"（论证空间 ${selected.argumentSpace}/10），内容类型为${contentType === "rigorous" ? "严谨型" : "综合型"}。${discarded.length > 0 ? `并弃置 ${discarded.length} 条线索。` : ""}`;
 

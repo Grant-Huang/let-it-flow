@@ -18,6 +18,7 @@ export const CALL_SITES = [
   "nexus_agent", // ReAct Harness 主循环（编排 LLM，多步 tool calling）
   "nexus_advise", // 结构化建议产出（ReAct finalize 节点）
   "nexus_review", // finalize 后可信度审计（便宜模型，事后 review pass）
+  "nexus_narrate", // 工具结果实时解读（轻量模型，每步一次，把 EvidenceEnvelope 转成人类可读叙述）
   "podcast_skill_agent", // podcast-skill 应用 ReAct 主循环（内容策划 + 写稿）
 ] as const;
 export type CallSite = (typeof CALL_SITES)[number];

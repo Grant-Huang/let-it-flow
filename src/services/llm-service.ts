@@ -48,6 +48,7 @@ const CALLSITE_TO_ROLE: Record<CallSite, LlmRole> = {
   nexus_agent: "planner",
   nexus_advise: "planner",
   nexus_review: "planner",
+  nexus_narrate: "summarizer",
   podcast_skill_agent: "planner",
 };
 

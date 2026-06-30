@@ -96,7 +96,7 @@ export function createKnowledgeBaseTool(
       params: Record<string, unknown>,
       ctx: ExecutionContext,
     ): AsyncGenerator<ToolEvent, ToolResult> {
-      const callId = `c_${randomUUID().slice(0, 8)}`;
+      const callId = ctx.callId ?? `c_${randomUUID().slice(0, 8)}`;
       const startedAt = Date.now();
       const query = String(params.query ?? "");
       const topK = typeof params.topK === "number" ? params.topK : 5;

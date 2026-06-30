@@ -1,0 +1,26 @@
+---
+description: git push 失败时的代理回退策略
+alwaysApply: true
+---
+
+# Git 推送代理回退
+
+当 `git push` 到 GitHub 因网络问题失败（如 `Operation timed out`、`HTTP2 framing layer`、连接被重置等）时，本机通常可通过本地 VPN 代理访问 GitHub。
+
+## 回退步骤
+
+1. 先尝试正常推送：`git push`
+2. 若失败，使用本地代理（端口 7897）重试，**用 `-c` 临时传参，不要持久化到 git config**：
+   ```bash
+   git -c http.proxy=http://127.0.0.1:7897 -c https.proxy=http://127.0.0.1:7897 push
+   ```
+3. 如代理端口有变，可先用 `curl` 探测：
+   ```bash
+   curl -sS -o /dev/null -w "%{http_code}\n" --max-time 15 -x http://127.0.0.1:7897 https://github.com
+   ```
+   返回 `200` 即代理可用。
+
+## 注意
+
+- 优先用 `git -c http.proxy=...` 临时方式，避免 `git config --global http.proxy ...` 污染全局配置，导致其他不需要代理的仓库异常。
+- 仅在网络超时/连接重置类错误时回退；认证类错误（403、`denied`）不适用本规则。
