@@ -1,3 +1,0 @@
-分别在两个终端中启动：
-pnpm dev:aicf       # AICF 后端
-pnpm dev:aicf:web   # AICF 前端
