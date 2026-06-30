@@ -17,7 +17,8 @@ vi.mock("ai", () => ({
 
 import { generateText } from "ai";
 import { evaluateEvidenceGate, resolveAction } from "../../../src/agent/evidence-gate.js";
-import type { LanguageModel, StepTrace } from "ai";
+import type { LanguageModel } from "ai";
+import type { StepTrace } from "../../../src/agent/types.js";
 
 const dummyModel = { specificationVersion: "v1" } as unknown as LanguageModel;
 const mockGenerateText = generateText as ReturnType<typeof vi.fn>;
