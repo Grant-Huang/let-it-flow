@@ -110,12 +110,27 @@ export async function runReactHarness(
 
   // 5. 发起 streamText（多步循环）
   try {
+    // 调试日志：检查 narrateModel 是否可用
+    if (!narrateModel) {
+      console.warn("[react-harness] narrateModel 未配置，工具结果解读将跳过");
+    } else {
+      console.debug("[react-harness] narrateModel 已配置，将生成工具结果实时解读");
+    }
+
     // 构造 user 消息内容：多轮追问时前置历史摘要
     const userContent = buildUserContent(intent, previousContext);
     // 兼容模式（DeepSeek 等）：把 system 折叠进 user 消息，规避 `developer` 角色
     const streamArgs = compatMode
       ? { messages: [{ role: "user" as const, content: `${system}\n\n---\n${userContent}` }] }
       : { system, messages: [{ role: "user" as const, content: userContent }] };
+
+    // 发出意图理解确认
+    await emit?.({
+      type: "text",
+      channel: "content",
+      payload: { delta: `🎯 **意图理解**\n我理解你的问题是：${intent}\n现在开始诊断分析...\n\n` },
+    });
+
     const result = streamText({
       model,
       ...streamArgs,
@@ -144,7 +159,7 @@ export async function runReactHarness(
               await emit?.({
                 type: "text",
                 channel: "content",
-                payload: { delta: narration },
+                payload: { delta: `📊 ${narration}\n` },
               });
             }
           }
@@ -179,6 +194,21 @@ export async function runReactHarness(
       accumulator.list,
       preconditions,
     );
+
+    // 7. 完成阶段说明
+    if (finishReason === "success") {
+      await emit?.({
+        type: "text",
+        channel: "content",
+        payload: { delta: `\n✅ **分析完成**\n已完成取证和诊断分析，以下是建议：\n` },
+      });
+    } else if (finishReason === "precondition_unmet") {
+      await emit?.({
+        type: "text",
+        channel: "content",
+        payload: { delta: `\n⚠️ **前置条件未满足**\n证据不足，请补齐相关取证数据后重试。\n` },
+      });
+    }
 
     return {
       stepTrace: accumulator.list,
