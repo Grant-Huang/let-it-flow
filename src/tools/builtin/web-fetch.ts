@@ -130,6 +130,8 @@ export function createWebFetchTool(): FlowConnector<FetchedDoc[]> {
           duration_ms: Date.now() - t0,
         }),
       };
+      const successCount = docs.filter((d) => !d.error).length;
+      const totalChars = docs.reduce((sum, d) => sum + d.content.length, 0);
       return {
         output: docs,
         summary: `${successCount}/${docs.length} fetched`,
