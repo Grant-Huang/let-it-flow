@@ -13,6 +13,7 @@ type RenderNode =
 function buildRenderNodes(stream: StreamState): RenderNode[] {
   const nodes: RenderNode[] = [];
   let pendingText = "";
+  const seenToolIds = new Set<string>();
 
   for (const ev of stream.eventLog) {
     if (ev.type === "text") {
@@ -23,6 +24,8 @@ function buildRenderNodes(stream: StreamState): RenderNode[] {
       const toolName = tc?.call.name ?? "";
 
       if (HIDDEN_TOOLS.has(toolName)) continue;
+      if (seenToolIds.has(tcId)) continue;
+      seenToolIds.add(tcId);
 
       if (pendingText.trim()) {
         nodes.push({ kind: "text", content: pendingText });
