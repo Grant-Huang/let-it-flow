@@ -118,7 +118,7 @@ export default function NexusChatPage() {
       }
       artifactPanel={<ArtifactSlot stream={state} onMcpAction={handleMcpAction} />}
       artifactVisible={showArtifact}
-      onArtifactToggle={setArtifactVisible}
+      onArtifactToggle={(v) => setArtifactVisible(v && hasArtifacts)}
       defaultArtifactVisible={false}
       contentMaxWidth={860}
     >

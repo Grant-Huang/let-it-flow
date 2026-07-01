@@ -32,7 +32,7 @@ export function narrate(ctx: EmitHolder, text: string): Promise<unknown> {
   return ctx.emit({
     type: "text",
     channel: "content",
-    payload: { delta: text },
+    payload: { delta: `\n${text}` },
   });
 }
 
@@ -44,7 +44,7 @@ export function narrateDone(ctx: EmitHolder, text: string): Promise<unknown> {
   return ctx.emit({
     type: "text",
     channel: "content",
-    payload: { delta: text },
+    payload: { delta: `\n${text}` },
   });
 }
 
