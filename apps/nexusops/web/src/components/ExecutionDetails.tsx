@@ -123,15 +123,21 @@ export function ExecutionDetails({ stream }: { stream: StreamState }) {
               </div>
             )}
 
-            {/* 结果摘要 + 证据徽章 */}
-            <div className="tool-result-line">
-              {tc.result?.output ? truncateResult(tc.result.output, 100) : "执行中…"}
-              {evidence && (
-                <span className="evidence-badge-container">
-                  <EvidenceBadge data={evidence} />
-                </span>
-              )}
-            </div>
+            {/* 结果摘要 + 证据徽章（JSON 输出不在此显示，已在 Output 展开节中可查）*/}
+            {(() => {
+              const summary = tc.result ? nonJsonSummary(tc.result.output) : null;
+              if (tc.result && summary === null && !evidence) return null;
+              return (
+                <div className="tool-result-line">
+                  {!tc.result ? "执行中…" : summary}
+                  {evidence && (
+                    <span className="evidence-badge-container">
+                      <EvidenceBadge data={evidence} />
+                    </span>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         );
       })}
@@ -222,4 +228,11 @@ function getToolDescription(toolName: string): string {
 function truncateResult(result: string, maxLength: number): string {
   if (typeof result !== "string") return JSON.stringify(result).slice(0, maxLength);
   return result.length > maxLength ? `${result.slice(0, maxLength)}…` : result;
+}
+
+/** JSON 输出返回 null（已在 Output 展开节可查），非 JSON 返回截断摘要。 */
+function nonJsonSummary(result: string): string | null {
+  const s = typeof result === "string" ? result.trim() : JSON.stringify(result).trim();
+  if (s.startsWith("{") || s.startsWith("[")) return null;
+  return truncateResult(result, 100);
 }
