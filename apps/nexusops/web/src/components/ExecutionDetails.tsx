@@ -134,27 +134,47 @@ export function ExecutionDetails({ stream }: { stream: StreamState }) {
   );
 }
 
-/** 渲染简单 Markdown：**bold** → <strong>，保留换行 */
+/** 渲染简单 Markdown：**bold** → <strong>，- item → · bullet，保留换行 */
 function renderSimpleMarkdown(text: string): React.ReactNode {
   const cleaned = text.replace(/\p{Emoji_Presentation}/gu, "").replace(/  +/g, " ");
   return cleaned.split("\n").map((line, i) => {
-    const parts: React.ReactNode[] = [];
-    let last = 0;
-    const re = /\*\*(.+?)\*\*/g;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(line)) !== null) {
-      if (m.index > last) parts.push(line.slice(last, m.index));
-      parts.push(<strong key={m.index}>{m[1]}</strong>);
-      last = m.index + m[0].length;
+    // 检测 bullet 行（"- " 前缀，可有缩进）
+    const bulletMatch = line.match(/^(\s*)- (.*)/);
+    if (bulletMatch) {
+      const [, indent, content] = bulletMatch;
+      return (
+        <span key={i} className="narrative-bullet">
+          {indent}
+          <span className="narrative-bullet-mark">·</span>
+          {" "}
+          {renderInlineMarkdown(content)}
+          {"\n"}
+        </span>
+      );
     }
-    if (last < line.length) parts.push(line.slice(last));
+
     return (
       <span key={i}>
-        {parts.length > 0 ? parts : " "}
+        {renderInlineMarkdown(line) || " "}
         {"\n"}
       </span>
     );
   });
+}
+
+/** 处理行内 Markdown（**bold**） */
+function renderInlineMarkdown(line: string): React.ReactNode {
+  const parts: React.ReactNode[] = [];
+  let last = 0;
+  const re = /\*\*(.+?)\*\*/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(line)) !== null) {
+    if (m.index > last) parts.push(line.slice(last, m.index));
+    parts.push(<strong key={m.index}>{m[1]}</strong>);
+    last = m.index + m[0].length;
+  }
+  if (last < line.length) parts.push(line.slice(last));
+  return parts.length > 0 ? parts : null;
 }
 
 /** 尝试将 JSON 字符串格式化为多行缩进；失败则截断返回原文 */
