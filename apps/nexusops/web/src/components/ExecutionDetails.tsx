@@ -78,6 +78,8 @@ export function ExecutionDetails({ stream }: { stream: StreamState }) {
         const evidence = tc.result ? parseEvidenceFromOutput(tc.result.output) : null;
         const isExpanded = expandedTools.has(node.id);
         const hasError = tc.result?.error;
+        const dynamicDesc = (tc.call.metadata?.custom as Record<string, unknown> | undefined)?.description;
+        const description = typeof dynamicDesc === "string" ? dynamicDesc : getToolDescription(name);
 
         const statusText = !tc.result
           ? "执行中…"
@@ -109,6 +111,14 @@ export function ExecutionDetails({ stream }: { stream: StreamState }) {
                 {evidence && <EvidenceBadge data={evidence} />}
               </div>
             </div>
+
+            {/* 描述行：· description */}
+            {description && (
+              <div className="tool-desc-line">
+                <span className="tool-desc-mark">·</span>
+                {" "}{description}
+              </div>
+            )}
 
             {/* 展开内容：普通标签 + code block，无 <details> 容器 */}
             {isExpanded && (
@@ -190,4 +200,51 @@ function formatOutput(output: string): string {
 function truncateResult(result: string, maxLength: number): string {
   if (typeof result !== "string") return JSON.stringify(result).slice(0, maxLength);
   return result.length > maxLength ? `${result.slice(0, maxLength)}…` : result;
+}
+
+/** 工具描述映射。无匹配时返回空字符串（不显示描述行）。 */
+function getToolDescription(toolName: string): string {
+  const descriptions: Record<string, string> = {
+    "query_oee": "查询 OEE 实时数据",
+    "analyze_oee": "分析 OEE 变化趋势",
+    "oee_breakdown": "OEE 维度分解",
+    "oee.realtime": "取回实时 OEE",
+    "oee.history": "查看 OEE 历史趋势",
+    "oee.decompose": "OEE 损失分解分析",
+    "oee.availability_loss": "分析可用率损失",
+    "oee.performance_loss": "分析性能损失",
+    "oee.quality_loss": "分析质量损失",
+    "oee.report_html": "生成 OEE 诊断报告",
+    "query_equipment": "查询设备状态",
+    "equipment.downtime": "分析设备停机原因",
+    "equipment.mtbf": "计算设备 MTBF",
+    "equipment_downtime": "分析设备停机原因",
+    "maintenance_history": "查询设备维保历史",
+    "quality_defect": "分析质量缺陷率",
+    "quality_trend": "查看质量指标趋势",
+    "quality.scrap": "分析废品与报废",
+    "defect_pareto": "缺陷帕累托分析",
+    "process_parameters": "查询工艺参数",
+    "process_variance": "分析工艺波动",
+    "energy_consumption": "查询能耗数据",
+    "energy_efficiency": "分析能效指标",
+    "schedule_plan": "查询生产排程",
+    "schedule_variance": "分析排程偏差",
+    "material_usage": "查询物料用量",
+    "material_cost": "分析物料成本",
+    "extract_5why": "5Why 根因分析",
+    "build_fishbone": "鱼骨图分析",
+    "run_fmea": "FMEA 失效分析",
+    "cross_validate": "交叉验证分析结果",
+    "core.deliver": "汇总输出最终结果",
+  };
+
+  if (descriptions[toolName]) return descriptions[toolName];
+  for (const [key, desc] of Object.entries(descriptions)) {
+    if (toolName.includes(key)) return desc;
+  }
+  if (toolName.startsWith("oee.")) return `查看 OEE ${toolName.slice(4)}`;
+  if (toolName.startsWith("equipment.")) return `分析设备 ${toolName.slice(10)}`;
+  if (toolName.startsWith("quality.")) return `分析质量 ${toolName.slice(8)}`;
+  return "";
 }
