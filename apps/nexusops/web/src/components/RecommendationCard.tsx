@@ -34,7 +34,7 @@ export function RecommendationCard({ data }: { data: RecommendationData }) {
   return (
     <div style={{ margin: "8px 0", display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ fontWeight: 600, color: "var(--color-accent)", fontSize: 14 }}>
-        💡 改善建议（{recs.length} 条）
+        改善建议（{recs.length} 条）
       </div>
       {recs.map((rec, i) => (
         <RecommendationItem key={i} rec={rec} index={i} />
@@ -111,7 +111,7 @@ function RecommendationItem({ rec, index }: { rec: Recommendation; index: number
             window.alert(`即将执行：${rec.actionTool}\n参数：${JSON.stringify(rec.actionArgs ?? {})}`);
           }}
         >
-          ▶ 执行 {rec.actionTool}
+          执行 {rec.actionTool}
         </button>
       ) : (
         <div style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
