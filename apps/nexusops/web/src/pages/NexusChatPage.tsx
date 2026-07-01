@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { ThreeColumnLayout, MessageList, ChatComposer, type NavItem } from "@meso.ai/ui";
 import type { Message } from "@meso.ai/ui";
+import type { StreamState } from "@meso.ai/types";
 import { useNexusStream } from "../hooks/useNexusStream.js";
 import { createRenderLiveTrace } from "../components/renderLiveTrace.js";
 import { createRenderExtension } from "../components/renderExtension.js";
@@ -8,6 +9,15 @@ import { ArtifactSlot } from "../components/ArtifactSlot.js";
 import { SessionList } from "../components/SessionList.js";
 import { extractArtifacts } from "../lib/artifacts.js";
 import type { ConfirmDecision } from "../lib/api.js";
+
+/** 从 StreamState 的 eventLog 中拼接所有文本 delta，得到本轮 AI 回答的完整文本。 */
+function extractFinalText(s: StreamState): string {
+  return s.eventLog
+    .filter((ev) => ev.type === "text")
+    .map((ev) => ((ev.data as { delta?: string }).delta ?? ""))
+    .join("")
+    .trim();
+}
 
 /**
  * NexusOps 运营智能分析主页面。
@@ -35,14 +45,24 @@ export default function NexusChatPage() {
   const handleSend = async () => {
     const intent = input.trim();
     if (!intent || isStreaming) return;
+    // Bug Fix 1: 发新问题前，先把上一轮 AI 回答存入历史（否则 state 被重置后回答消失）
+    if (taskId) {
+      const prevText = extractFinalText(state);
+      if (prevText) {
+        setHistory((prev) => [
+          ...prev,
+          { id: `a-${taskId}`, role: "assistant", content: prevText, timestamp: new Date().toISOString() },
+        ]);
+      }
+    }
     // 把用户意图压入历史轮次（多轮展示）
     setHistory((prev) => [
       ...prev,
       { id: `u-${Date.now()}`, role: "user", content: intent, timestamp: new Date().toISOString() },
     ]);
     setInput("");
-    // 多轮追问：有 conversationId 且上一轮已完成 → followUp；否则 start（新会话）
-    const canFollowUp = !!conversationId && state.status === "idle";
+    // Bug Fix 2: 只要有 conversationId 且不在流式中即可追问（state.status 完成态是 "done" 不是 "idle"）
+    const canFollowUp = !!conversationId && !isStreaming;
     if (canFollowUp) {
       await followUp(intent);
     } else {
@@ -75,13 +95,23 @@ export default function NexusChatPage() {
       // Route the HTML report button click as a follow-up intent,
       // so the agent can present a HITL confirm_gate before executing.
       const intent = `请执行：${tool}，参数：${JSON.stringify(args)}`;
+      // 同 handleSend：先把上一轮 AI 回答存入历史再发新意图
+      if (taskId) {
+        const prevText = extractFinalText(state);
+        if (prevText) {
+          setHistory((prev) => [
+            ...prev,
+            { id: `a-${taskId}`, role: "assistant", content: prevText, timestamp: new Date().toISOString() },
+          ]);
+        }
+      }
       setHistory((prev) => [
         ...prev,
         { id: `u-mcp-${Date.now()}`, role: "user", content: `[报告按钮] ${intent}`, timestamp: new Date().toISOString() },
       ]);
       void followUp(intent);
     },
-    [followUp],
+    [followUp, state, taskId],
   );
 
   const renderLiveTrace = createRenderLiveTrace({
