@@ -21,7 +21,7 @@ export interface NexusArtifact {
  * 从流状态提取 NexusOps 产物。
  */
 export function extractArtifacts(stream: StreamState): NexusArtifact[] {
-  const out: NexusArtifact[] = [];
+  const seen = new Map<string, NexusArtifact>();
   for (const id of stream.toolCallOrder) {
     const tc = stream.toolCalls[id];
     if (!tc) continue;
@@ -29,17 +29,17 @@ export function extractArtifacts(stream: StreamState): NexusArtifact[] {
 
     if (name === "nexus_advise") {
       const parsed = parseAdviseOutput(tc);
-      if (parsed) out.push(parsed);
+      if (parsed) seen.set("nexus_advise", parsed);
       continue;
     }
 
     if (name.startsWith("skill.")) {
       const parsed = parseSkillOutput(tc);
-      if (parsed) out.push(parsed);
+      if (parsed) seen.set(name, parsed);
       continue;
     }
   }
-  return out;
+  return Array.from(seen.values());
 }
 
 interface ToolCallLike {

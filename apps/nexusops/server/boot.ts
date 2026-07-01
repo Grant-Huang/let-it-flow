@@ -209,12 +209,6 @@ export async function bootNexusOps(opts: NexusBootOptions = {}): Promise<NexusRu
     hooks.setStatus("running");
     hooks.emit("phase", { stage: "react", label: "ReAct 智能分析", state: "running" } as never);
 
-    // 发送意图理解：帮助用户确认我们理解的问题内容
-    const intentSummary = generateIntentSummary(intent);
-    if (intentSummary) {
-      await hooks.emit("text", { delta: intentSummary } as never);
-    }
-
     // 多轮追问：从 parentTask 读取上一轮压缩上下文（仅 done 状态的 task 可作 parent）
     const previousContext = resolvePreviousContext(context, conversationStore, taskStore);
 
