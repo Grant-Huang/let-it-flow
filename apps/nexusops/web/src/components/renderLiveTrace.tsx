@@ -56,16 +56,17 @@ function LiveTrace({
             stream={stream}
             streaming={streaming}
             turnStreaming={stream.status === "streaming"}
+            simplify={{ showDuration: false }}
             onToolConfirm={onToolConfirm}
             onToolCancel={onToolCancel}
           />
         </div>
       </section>
 
-      {/* 第2层：执行细节（可折叠） */}
+      {/* 执行细节（可折叠） */}
       {toolCallCount > 0 && (
         <section className="live-trace-section">
-          <h3
+          <div
             className="live-trace-toggle"
             onClick={toggleDetails}
             role="button"
@@ -76,10 +77,11 @@ function LiveTrace({
                 toggleDetails();
               }
             }}
+            style={{ cursor: 'pointer', fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 8 }}
           >
             <span className="toggle-icon">{expandedDetails ? '▾' : '▸'}</span>
-            执行细节 ({toolCallCount} 步操作)
-          </h3>
+            <span style={{ marginLeft: 4 }}>执行细节 ({toolCallCount} 步)</span>
+          </div>
           {expandedDetails && (
             <div className="live-trace-content">
               <ExecutionDetails stream={stream} />

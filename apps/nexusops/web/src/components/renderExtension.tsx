@@ -92,13 +92,9 @@ export function createRenderExtension(handlers: RenderExtensionHandlers) {
     }
 
     if (name === "react_result") {
-      const finishReason = typeof d.finishReason === "string" ? d.finishReason : "";
-      const stepCount = typeof d.stepCount === "number" ? d.stepCount : 0;
-      return (
-        <div style={{ margin: "8px 0", fontSize: 12, color: "var(--color-text-secondary)" }}>
-          {STREAMING_SYMBOLS.done}ReAct 推理完成：{stepCount} 步，终止原因：{finishReason}
-        </div>
-      );
+      // react_result 信息已在 ProcessTrace + ExecutionDetails 中完整展示，此处略去避免重复
+      // 如果需要显示额外的元信息，可在此添加
+      return null;
     }
 
     return null;

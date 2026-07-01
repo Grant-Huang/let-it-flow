@@ -209,6 +209,12 @@ export async function bootNexusOps(opts: NexusBootOptions = {}): Promise<NexusRu
     hooks.setStatus("running");
     hooks.emit("phase", { stage: "react", label: "ReAct 智能分析", state: "running" } as never);
 
+    // 发送意图理解：帮助用户确认我们理解的问题内容
+    const intentSummary = generateIntentSummary(intent);
+    if (intentSummary) {
+      await hooks.emit("text", { delta: intentSummary } as never);
+    }
+
     // 多轮追问：从 parentTask 读取上一轮压缩上下文（仅 done 状态的 task 可作 parent）
     const previousContext = resolvePreviousContext(context, conversationStore, taskStore);
 
@@ -259,6 +265,12 @@ export async function bootNexusOps(opts: NexusBootOptions = {}): Promise<NexusRu
       narrateModel: llm.model("nexus_narrate"),
       narrateCompatMode: llm.compatModeFor ? llm.compatModeFor("nexus_narrate") : false,
     };
+
+    // 发送编排说明：让用户了解我们的分析方法
+    const orchestrationExplanation = generateOrchestrationExplanation(intent);
+    if (orchestrationExplanation) {
+      await hooks.emit("text", { delta: orchestrationExplanation } as never);
+    }
 
     const result = await runReactHarness(intent, harnessConfig);
 
@@ -406,6 +418,62 @@ const NEXUS_SYSTEM_PROMPT = `
   - mcp.process.adjust_parameters（工艺参数回调，参数漂移首选）
 - destructive 动作（停线/批量报废）仅在确有安全/不可挽回风险时建议，且必须附具体 reason；正常工况绝不建议 destructive 动作。
 `.trim();
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 意图理解和编排说明生成辅助函数
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 根据用户意图生成"意图理解"的文本说明，帮助用户确认我们的理解。
+ * 如果 intent 过长或复杂，可能返回 undefined（略去不显示）。
+ */
+function generateIntentSummary(intent: string): string | undefined {
+  // 简单启发式：如果 intent 包含问号或疑问词，就认为是合法问题
+  // 实际可接入 LLM 来生成更自然的表述
+  if (intent.length > 200) {
+    // 太长的意图，略去不显示
+    return undefined;
+  }
+
+  // 检查是否包含问题关键词
+  const questionPatterns = [
+    /为什么|什么|怎样|如何|帮我|分析|诊断|查看|检查/,
+    /OEE|停机|缺陷|良率|产能|成本|能耗/,
+  ];
+
+  const isQuestion = questionPatterns.some((p) => p.test(intent));
+  if (!isQuestion) {
+    return undefined;
+  }
+
+  // 生成简短的理解确认语（可扩展为调用 LLM）
+  return `\n我理解你的需求是：${intent}\n`;
+}
+
+/**
+ * 根据用户意图生成"编排说明"的文本说明，描述我们的分析方法。
+ * 这帮助用户了解后续会执行的步骤。
+ */
+function generateOrchestrationExplanation(intent: string): string | undefined {
+  // 简单启发式：根据 intent 的关键词选择不同的分析方法
+  // 实际可接入 LLM 来生成更自然的表述
+
+  let methodology = "";
+
+  if (intent.includes("OEE") || intent.includes("效率")) {
+    methodology = "我将从 OEE 三维度（可用率、性能、质量）分解问题，查实测数据，并用多视角分析（鱼骨图、FMEA）交叉验证，最后给出改善建议。";
+  } else if (intent.includes("停机") || intent.includes("下降")) {
+    methodology = "我将先查设备停机日志和根本原因，再用 5Why 和故障树分析，查找深层触发因素，最后给出预防和改善方案。";
+  } else if (intent.includes("缺陷") || intent.includes("良率")) {
+    methodology = "我将分析缺陷分布（帕累托分析），找出主要不良模式，再用工艺参数和过程能力分析定位原因，最后给出质量改善方案。";
+  } else if (intent.includes("成本") || intent.includes("效益")) {
+    methodology = "我将从成本结构和关键驱动因素入手，分析物料成本、能耗、产能利用等，给出成本优化方向。";
+  } else {
+    methodology = "我将通过数据取证、多视角分析、证据交叉验证，为你给出数据驱动的建议。";
+  }
+
+  return `\n我的分析方法是：${methodology}\n`;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 多轮追问辅助：从 parentTask 还原上一轮压缩上下文
