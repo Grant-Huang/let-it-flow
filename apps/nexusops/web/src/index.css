@@ -136,6 +136,17 @@
   word-break: break-word;
 }
 
+.narrative-bullet {
+  display: block;
+  padding-left: 4px;
+}
+
+.narrative-bullet-mark {
+  color: var(--color-text-muted);
+  font-size: 13px;
+  user-select: none;
+}
+
 .tool-item {
   margin: 4px 0;
 }
@@ -143,13 +154,31 @@
 .tool-name-row {
   display: flex;
   align-items: center;
-  gap: 6px;
   cursor: pointer;
   user-select: none;
   padding: 2px 0;
   justify-content: space-between;
+  gap: 8px;
 }
 .tool-name-row:hover .tool-name { color: var(--color-text); }
+
+.tool-name-left {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tool-name-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.tool-status-text {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
 
 .tool-chevron {
   font-size: 12px;
@@ -170,40 +199,14 @@
   font-weight: 500;
 }
 
-.tool-desc-line {
-  font-size: 12px;
-  color: var(--color-text-muted);
-  padding-left: 0;
-  margin: 2px 0 4px;
-  line-height: 1.4;
-}
-
 .tool-expanded { padding-left: 0; margin-top: 4px; }
 
-.tool-section { margin: 4px 0; }
-.tool-section-title {
+.tool-section-label {
   font-size: 11px;
   color: var(--color-text-secondary);
-  cursor: pointer;
-  user-select: none;
-  padding: 2px 0;
   font-family: var(--font-mono, monospace);
-  list-style: none;
+  padding: 4px 0 2px;
 }
-.tool-section-title::-webkit-details-marker { display: none; }
-
-.tool-result-line {
-  font-size: 12px;
-  color: var(--color-text-muted);
-  padding-left: 0;
-  margin-top: 3px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.evidence-badge-container { display: inline-flex; align-items: center; }
 
 /* 代码块 — 低调渲染框（参考 Claude Code）*/
 .code-block {
