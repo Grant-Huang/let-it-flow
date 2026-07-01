@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { ThreeColumnLayout, MessageList, ChatComposer, type NavItem } from "@meso.ai/ui";
 import type { Message } from "@meso.ai/ui";
 import { useNexusStream } from "../hooks/useNexusStream.js";
@@ -99,6 +99,11 @@ export default function NexusChatPage() {
   const hasArtifacts = extractArtifacts(state).length > 0;
   const showArtifact = artifactVisible || hasArtifacts;
 
+  // Auto-collapse panel when artifacts disappear (e.g. new session reset)
+  useEffect(() => {
+    if (!hasArtifacts) setArtifactVisible(false);
+  }, [hasArtifacts]);
+
   return (
     <ThreeColumnLayout
       appName="NexusOps"
@@ -111,7 +116,7 @@ export default function NexusChatPage() {
           onNewSession={handleNewSession}
         />
       }
-      artifactPanel={<ArtifactSlot stream={state.status !== "idle" ? state : undefined} onMcpAction={handleMcpAction} />}
+      artifactPanel={<ArtifactSlot stream={state} onMcpAction={handleMcpAction} />}
       artifactVisible={showArtifact}
       onArtifactToggle={setArtifactVisible}
       defaultArtifactVisible={false}
