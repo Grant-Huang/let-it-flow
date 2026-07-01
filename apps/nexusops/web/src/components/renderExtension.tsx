@@ -109,7 +109,7 @@ export function createRenderExtension(handlers: RenderExtensionHandlers) {
           </div>
           {items.map((item, i) => (
             <div key={i} style={{ fontSize: 13, padding: "2px 0", color: "var(--color-text-primary)" }}>
-              📄 {item.title}
+              {item.title}
               {item.description && (
                 <span style={{ fontSize: 12, color: "var(--color-text-secondary)", marginLeft: 6 }}>
                   — {item.description}

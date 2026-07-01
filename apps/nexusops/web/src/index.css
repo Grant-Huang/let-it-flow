@@ -124,12 +124,12 @@
 .execution-details {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .narrative-text {
   font-size: 14px;
-  line-height: 1.6;
+  line-height: 1.5;
   color: var(--color-text);
   padding: 4px 0;
   white-space: pre-wrap;
@@ -147,8 +147,21 @@
   cursor: pointer;
   user-select: none;
   padding: 2px 0;
+  justify-content: space-between;
 }
 .tool-name-row:hover .tool-name { color: var(--color-text); }
+
+.tool-chevron {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.tool-chevron.expanded {
+  transform: rotate(90deg);
+}
 
 .tool-name {
   font-family: var(--font-mono, 'SF Mono', 'Cascadia Code', Menlo, monospace);

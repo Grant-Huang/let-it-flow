@@ -97,6 +97,7 @@ export function ExecutionDetails({ stream }: { stream: StreamState }) {
               }}
             >
               <code className="tool-name">{name}</code>
+              <span className={`tool-chevron${isExpanded ? " expanded" : ""}`}>›</span>
             </div>
 
             {/* 描述：小号灰色，缩进对齐 */}
@@ -146,7 +147,8 @@ export function ExecutionDetails({ stream }: { stream: StreamState }) {
 
 /** 渲染简单 Markdown：**bold** → <strong>，保留换行 */
 function renderSimpleMarkdown(text: string): React.ReactNode {
-  return text.split("\n").map((line, i) => {
+  const cleaned = text.replace(/\p{Emoji_Presentation}/gu, "").replace(/  +/g, " ");
+  return cleaned.split("\n").map((line, i) => {
     const parts: React.ReactNode[] = [];
     let last = 0;
     const re = /\*\*(.+?)\*\*/g;
