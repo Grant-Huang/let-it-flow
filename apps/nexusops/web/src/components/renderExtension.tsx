@@ -91,9 +91,37 @@ export function createRenderExtension(handlers: RenderExtensionHandlers) {
       );
     }
 
+    if (name === "nexus_artifacts") {
+      const items = (d.items ?? []) as Array<{ type: string; title: string; description?: string }>;
+      if (items.length === 0) return null;
+      return (
+        <div
+          style={{
+            margin: "8px 0",
+            padding: "10px 14px",
+            borderRadius: 8,
+            background: "var(--color-bg-elevated)",
+            border: "1px solid var(--color-border)",
+          }}
+        >
+          <div style={{ fontSize: 11, color: "var(--color-text-secondary)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+            输出物
+          </div>
+          {items.map((item, i) => (
+            <div key={i} style={{ fontSize: 13, padding: "2px 0", color: "var(--color-text-primary)" }}>
+              📄 {item.title}
+              {item.description && (
+                <span style={{ fontSize: 12, color: "var(--color-text-secondary)", marginLeft: 6 }}>
+                  — {item.description}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      );
+    }
+
     if (name === "react_result") {
-      // react_result 信息已在 ProcessTrace + ExecutionDetails 中完整展示，此处略去避免重复
-      // 如果需要显示额外的元信息，可在此添加
       return null;
     }
 
