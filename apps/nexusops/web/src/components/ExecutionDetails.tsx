@@ -96,11 +96,7 @@ export function ExecutionDetails({ stream }: { stream: StreamState }) {
                 }
               }}
             >
-              <span className="tool-toggle-icon">{isExpanded ? "▾" : "▸"}</span>
               <code className="tool-name">{name}</code>
-              <span className={`tool-status-badge tool-status-${status}`}>
-                {status === "done" ? "✓" : "⧗"}
-              </span>
             </div>
 
             {/* 描述：小号灰色，缩进对齐 */}
