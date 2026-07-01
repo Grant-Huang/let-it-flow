@@ -302,8 +302,38 @@ export async function bootNexusOps(opts: NexusBootOptions = {}): Promise<NexusRu
 
     // 成功：发最终文本 + done
     if (result.finalText) {
+      // 空行分隔执行过程与总结
+      hooks.emit("text", { delta: "\n" } as never);
       hooks.emit("text", { delta: result.finalText } as never);
     }
+
+    // 提取 core.deliver 产出的制品，以 nexus_artifacts extension 通知前端
+    const artifactItems: Array<{ type: string; title: string; description?: string }> = [];
+    for (const step of result.stepTrace) {
+      for (const tc of step.toolCalls) {
+        if (tc.toolName === "core.deliver" && tc.result) {
+          try {
+            const parsed = typeof tc.result === "string" ? JSON.parse(tc.result) : tc.result;
+            if (parsed && typeof parsed === "object" && "type" in parsed) {
+              artifactItems.push({
+                type: String(parsed.type ?? "text"),
+                title: String(parsed.title ?? tc.toolName),
+                description: parsed.content ? String(parsed.content).slice(0, 80) : undefined,
+              });
+            }
+          } catch {
+            // 忽略解析失败
+          }
+        }
+      }
+    }
+    if (artifactItems.length > 0) {
+      hooks.emit(
+        "extension",
+        { name: "nexus_artifacts", version: "1.0", data: { items: artifactItems } } as never,
+      );
+    }
+
     hooks.emit(
       "extension",
       {
