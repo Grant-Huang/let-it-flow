@@ -12,113 +12,130 @@ interface ToolItem {
   status: "running" | "done" | "error";
 }
 
-export function ExecutionDetails({ stream }: { stream: StreamState }) {
-  const toolCalls = stream.toolCallOrder
-    .map((id) => stream.toolCalls[id])
-    .filter((tc): tc is ToolCallState => Boolean(tc));
+type RenderNode =
+  | { kind: "text"; content: string }
+  | { kind: "tool"; id: string };
 
+/** 按 eventLog 顺序把叙述文本和工具调用交错排列 */
+function buildRenderNodes(stream: StreamState): RenderNode[] {
+  const nodes: RenderNode[] = [];
+  let pendingText = "";
+
+  for (const ev of stream.eventLog) {
+    if (ev.type === "text") {
+      pendingText += ((ev.data as { delta?: string }).delta ?? "");
+    } else if (ev.type === "tool_call") {
+      if (pendingText.trim()) {
+        nodes.push({ kind: "text", content: pendingText });
+        pendingText = "";
+      } else {
+        pendingText = "";
+      }
+      const tcId = (ev.data as { id?: string }).id ?? "";
+      if (tcId && stream.toolCalls[tcId]) {
+        nodes.push({ kind: "tool", id: tcId });
+      }
+    }
+  }
+  if (pendingText.trim()) {
+    nodes.push({ kind: "text", content: pendingText });
+  }
+
+  return nodes;
+}
+
+export function ExecutionDetails({ stream }: { stream: StreamState }) {
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
 
   const toggleToolExpansion = (toolId: string) => {
-    const newSet = new Set(expandedTools);
-    if (newSet.has(toolId)) {
-      newSet.delete(toolId);
-    } else {
-      newSet.add(toolId);
-    }
-    setExpandedTools(newSet);
+    setExpandedTools((prev) => {
+      const next = new Set(prev);
+      if (next.has(toolId)) next.delete(toolId);
+      else next.add(toolId);
+      return next;
+    });
   };
 
-  const toolItems: ToolItem[] = toolCalls.map((tc) => {
-    const name = tc.call.name ?? "unknown";
-    const evidence = tc.result ? parseEvidenceFromOutput(tc.result.output) : null;
-    const dynamicDesc = (tc.call.metadata?.custom as Record<string, unknown> | undefined)?.description;
+  const nodes = buildRenderNodes(stream);
 
-    return {
-      id: tc.call.id,
-      name,
-      description: typeof dynamicDesc === "string" ? dynamicDesc : undefined,
-      args: tc.call.args,
-      result: tc.result?.output,
-      evidence,
-      status: !tc.result ? "running" : "done",
-    };
-  });
+  if (nodes.length === 0 && stream.toolCallOrder.length === 0) return null;
 
   return (
     <div className="execution-details">
-      {/* 叙述文本（意图理解、编排说明、工具解读、总结） */}
-      {stream.textContent && (
-        <div className="narrative-text">
-          {renderSimpleMarkdown(stream.textContent)}
-        </div>
-      )}
-
-      {/* 工具调用列表 */}
-      {toolItems.map((tool) => (
-        <div key={tool.id} className="tool-item">
-          <div className="tool-description">
-            - {tool.description || getToolDescription(tool.name)}
-          </div>
-          <div className="tool-details">
-            <div
-              className="tool-name-expandable"
-              onClick={() => toggleToolExpansion(tool.id)}
-              role="button"
-              tabIndex={0}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  toggleToolExpansion(tool.id);
-                }
-              }}
-            >
-              <span className="toggle-icon">
-                {expandedTools.has(tool.id) ? "▾" : "▸"}
-              </span>
-              <code className="tool-name">{tool.name}</code>
-              <span className="status-badge">
-                {tool.status === "done" ? "✓" : tool.status === "running" ? "⧗" : "✗"}
-              </span>
+      {nodes.map((node, i) => {
+        if (node.kind === "text") {
+          return (
+            <div key={`text-${i}`} className="narrative-text">
+              {renderSimpleMarkdown(node.content)}
             </div>
+          );
+        }
 
-            {expandedTools.has(tool.id) && (
-              <div className="tool-content">
-                {tool.args && Object.keys(tool.args).length > 0 && (
-                  <details className="tool-section" open={false}>
-                    <summary className="tool-section-title">&gt; Input Parameters</summary>
-                    <div className="tool-section-content">
-                      <pre className="code-block">{JSON.stringify(tool.args, null, 2)}</pre>
-                    </div>
-                  </details>
-                )}
+        const tc = stream.toolCalls[node.id] as ToolCallState | undefined;
+        if (!tc) return null;
 
-                {tool.result && (
-                  <details className="tool-section" open={false}>
-                    <summary className="tool-section-title">&gt; Output</summary>
-                    <div className="tool-section-content">
-                      <pre className="code-block">
-                        {typeof tool.result === "string"
-                          ? tool.result.slice(0, 500)
-                          : JSON.stringify(tool.result, null, 2).slice(0, 500)}
-                      </pre>
-                    </div>
-                  </details>
-                )}
+        const name = tc.call.name ?? "unknown";
+        const evidence = tc.result ? parseEvidenceFromOutput(tc.result.output) : null;
+        const dynamicDesc = (tc.call.metadata?.custom as Record<string, unknown> | undefined)?.description;
+        const description = typeof dynamicDesc === "string" ? dynamicDesc : getToolDescription(name);
+        const status = !tc.result ? "running" : "done";
+
+        return (
+          <div key={node.id} className="tool-item">
+            <div className="tool-description">- {description}</div>
+            <div className="tool-details">
+              <div
+                className="tool-name-expandable"
+                onClick={() => toggleToolExpansion(node.id)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    toggleToolExpansion(node.id);
+                  }
+                }}
+              >
+                <span className="toggle-icon">{expandedTools.has(node.id) ? "▾" : "▸"}</span>
+                <code className="tool-name">{name}</code>
+                <span className="status-badge">
+                  {status === "done" ? "✓" : status === "running" ? "⧗" : "✗"}
+                </span>
               </div>
-            )}
 
-            <div className="tool-result">
-              → {tool.result ? truncateResult(tool.result, 100) : "执行中…"}
-              {tool.evidence && (
-                <div className="evidence-badge-container">
-                  <EvidenceBadge data={tool.evidence} />
+              {expandedTools.has(node.id) && (
+                <div className="tool-content">
+                  {tc.call.args && Object.keys(tc.call.args).length > 0 && (
+                    <details className="tool-section" open={false}>
+                      <summary className="tool-section-title">&gt; Input Parameters</summary>
+                      <div className="tool-section-content">
+                        <pre className="code-block">{JSON.stringify(tc.call.args, null, 2)}</pre>
+                      </div>
+                    </details>
+                  )}
+                  {tc.result?.output && (
+                    <details className="tool-section" open={false}>
+                      <summary className="tool-section-title">&gt; Output</summary>
+                      <div className="tool-section-content">
+                        <pre className="code-block">{tc.result.output.slice(0, 500)}</pre>
+                      </div>
+                    </details>
+                  )}
                 </div>
               )}
+
+              <div className="tool-result">
+                → {tc.result?.output ? truncateResult(tc.result.output, 100) : "执行中…"}
+                {evidence && (
+                  <div className="evidence-badge-container">
+                    <EvidenceBadge data={evidence} />
+                  </div>
+                )}
+              </div>
             </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -183,17 +200,14 @@ function getToolDescription(toolName: string): string {
   };
 
   if (descriptions[toolName]) return descriptions[toolName];
-
   for (const [key, desc] of Object.entries(descriptions)) {
     if (toolName.includes(key)) return desc;
   }
-
   if (toolName.startsWith("skill.")) return `执行技能：${toolName.slice(6)}`;
   if (toolName.includes("query") || toolName.includes("get") || toolName.includes("fetch"))
     return `查询 ${toolName.split("_")[1] || "数据"}`;
   if (toolName.includes("analyze") || toolName.includes("check"))
     return `分析 ${toolName.split("_")[1] || "数据"}`;
-
   return `执行 ${toolName}`;
 }
 
