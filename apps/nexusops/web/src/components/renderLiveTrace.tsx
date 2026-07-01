@@ -56,7 +56,7 @@ function LiveTrace({
             stream={stream}
             streaming={streaming}
             turnStreaming={stream.status === "streaming"}
-            simplify={{ showDuration: false }}
+            simplify={{ showDuration: false, verbosity: verbose ? "detailed" : "compact" }}
             onToolConfirm={onToolConfirm}
             onToolCancel={onToolCancel}
           />
