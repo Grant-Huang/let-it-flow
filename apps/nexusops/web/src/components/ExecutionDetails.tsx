@@ -175,22 +175,84 @@ function groupToolsByWorkflow(toolCalls: ToolCallState[]): WorkflowGroup[] {
 }
 
 function getToolDescription(toolName: string): string {
-  // 返回工具的人类可读的描述（可以从tool registry扩展）
+  // 返回工具的人类可读的描述
   const descriptions: Record<string, string> = {
+    // OEE 相关
+    "query_oee": "查询 OEE 实时数据",
+    "analyze_oee": "分析 OEE 变化趋势",
+    "oee_breakdown": "OEE 维度分解（可用率、性能、质量）",
+
+    // 设备相关
+    "query_equipment": "查询设备状态和停机日志",
+    "equipment_downtime": "分析设备停机原因",
+    "maintenance_history": "查询设备维保历史",
+
+    // 质量相关
+    "quality_defect": "分析质量缺陷率",
+    "quality_trend": "质量指标趋势分析",
+    "defect_pareto": "缺陷帕累托分析",
+
+    // 工艺相关
+    "process_parameters": "查询工艺参数",
+    "process_variance": "工艺波动分析",
+
+    // 能源相关
+    "energy_consumption": "能耗数据查询",
+    "energy_efficiency": "能效分析",
+
+    // 排程相关
+    "schedule_plan": "查询生产排程",
+    "schedule_variance": "排程偏差分析",
+
+    // 物料相关
+    "material_usage": "物料用量查询",
+    "material_cost": "物料成本分析",
+
+    // 根因分析工具
+    "extract_5why": "5Why 根因分析链",
+    "build_fishbone": "鱼骨图分析",
+    "run_fmea": "失效模式影响分析 (FMEA)",
+    "cross_validate": "交叉验证分析结果",
+
+    // 通用数据工具
     "query_db": "查询数据库信息",
+    "query_data": "查询数据",
+    "fetch_metrics": "获取业务指标",
     "format_data": "格式化输出数据",
+    "summarize": "生成分析总结",
     "validate": "验证数据有效性",
-    // 可以继续添加更多描述
+    "generate_report": "生成分析报告",
+
+    // Skill 工具
+    "skill.search": "搜索相关数据",
+    "skill.analyze": "数据分析",
+    "skill.recommend": "生成改善建议",
+    "skill.downtime": "停机根因分析",
   };
 
-  // 查找匹配的描述
+  // 精确匹配
+  if (descriptions[toolName]) {
+    return descriptions[toolName];
+  }
+
+  // 模糊匹配（按关键词）
   for (const [key, desc] of Object.entries(descriptions)) {
     if (toolName.includes(key)) {
       return desc;
     }
   }
 
-  // 默认描述：使用工具名
+  // 默认描述：根据工具名推断
+  if (toolName.startsWith("skill.")) {
+    return `执行技能：${toolName.slice(6)}`;
+  }
+  if (toolName.includes("query") || toolName.includes("get") || toolName.includes("fetch")) {
+    return `查询 ${toolName.split("_")[1] || "数据"}`;
+  }
+  if (toolName.includes("analyze") || toolName.includes("check")) {
+    return `分析 ${toolName.split("_")[1] || "数据"}`;
+  }
+
   return `执行 ${toolName}`;
 }
 
