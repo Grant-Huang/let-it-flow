@@ -39,6 +39,7 @@
     "dotenv": "^17.4.2",
     "hono": "^4.6.0",
     "jsonpath-plus": "^10.1.0",
+    "marked": "^18.0.5",
     "zod": "^3.23.0",
     "zod-to-json-schema": "^3.25.2"
   },

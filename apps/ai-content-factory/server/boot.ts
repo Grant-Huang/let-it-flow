@@ -30,7 +30,7 @@ import type { ToolEvent } from "../../../src/core/stream-events.js";
 import { toolCallPayload, toolResultPayload } from "../../../src/core/stream-events.js";
 import { randomUUID } from "node:crypto";
 import type { TaskRuntime, TaskRunnerHooks } from "../../../src/tasks/registry.js";
-import { threadFocuserSkill, writePodcastScriptSkill, writeWechatArticleSkill } from "../skills/index.js";
+import { threadFocuserSkill, writePodcastScriptSkill, writeWechatArticleSkill, publishWechatDraftSkill } from "../skills/index.js";
 import { buildAiContentFactoryPreconditions } from "./preconditions.js";
 import { buildAiContentFactoryGovernance } from "./governance.js";
 
@@ -96,7 +96,7 @@ export async function bootAiContentFactory(
   });
 
   // podcast skill.* 沉淀流程（动态 DSL 写法）
-  for (const skill of [threadFocuserSkill, writePodcastScriptSkill, writeWechatArticleSkill]) {
+  for (const skill of [threadFocuserSkill, writePodcastScriptSkill, writeWechatArticleSkill, publishWechatDraftSkill]) {
     if (!toolRegistry.has(skill.name)) toolRegistry.register(skill);
   }
 
@@ -340,7 +340,13 @@ const PODCAST_SYSTEM_PROMPT = `
    - 基于口播稿决策，扩展为 6500 字公众号文章
    - 自校验字数
 
-7. **收尾 + 交付**
+7. **可选：发布到公众号草稿箱**
+   - 仅当用户明确要求"发布到公众号""推送到草稿箱"时调用 skill.publish_wechat_draft
+   - 需要封面图：用户提供 coverImagePath（本地路径）或 thumbMediaId（已有素材 id）
+   - skill 内部会先弹出 HITL 确认门，用户批准后才真正推送（仅入草稿箱，不群发）
+   - 用户未要求发布时不要主动调用
+
+8. **收尾 + 交付**
    - 调用 nexus_finalize 汇总：口播稿 + 公众号长文 + 证据链
 
 ## 可用工具
@@ -351,6 +357,7 @@ const PODCAST_SYSTEM_PROMPT = `
 - skill.thread_focuser：聚焦线索 + 判定类型
 - skill.write_podcast_script：生成口播稿
 - skill.write_wechat_article：生成公众号文章
+- skill.publish_wechat_draft：把文章推送到微信公众号草稿箱（HITL 确认；仅入草稿箱不群发）
 - nexus_finalize：最终收尾
 
 ## 关键约束

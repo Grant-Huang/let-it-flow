@@ -61,5 +61,23 @@ export function buildAiContentFactoryPreconditions(): Precondition[] {
         return { met: true };
       },
     },
+    {
+      id: "publish_after_article",
+      description: "发布草稿前必须已调用 skill.write_wechat_article 生成公众号文章",
+      phase: "every_step",
+      check: (trace: StepTrace[]) => {
+        const tools = calledToolNames(trace);
+        const hasPublish = tools.has("skill.publish_wechat_draft");
+        const hasArticle = tools.has("skill.write_wechat_article");
+        if (hasPublish && !hasArticle) {
+          return {
+            met: false,
+            missingTool: "skill.write_wechat_article",
+            prompt: "发布草稿前必须先调用 skill.write_wechat_article 生成公众号文章",
+          };
+        }
+        return { met: true };
+      },
+    },
   ];
 }

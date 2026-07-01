@@ -235,6 +235,8 @@ skill 沉淀从"纯手写"升级为混合机制（详见 [17-skill-sedimentation
 
 `checkFinalize` 返回首个未满足条件的 `{ missingTool, prompt }`，喂给 LLM 补取证或终止。
 
+> **语义级增强**：规则化前置条件只检查"调没调过某前缀工具"，不看证据内容质量。收尾前的开放式语义评估见 [23-conversational-quality-layers.md](23-conversational-quality-layers.md) 的 evidence-gate 层。
+
 ## 15.9 G 层：治理（Governance）
 
 来自洞察："在 prompt 里告诉 agent 遵循规范，和接入规范被违反时直接阻断的 linter，本质是两件不同的事。前者概率性合规，后者强制确定性约束。"
@@ -264,6 +266,8 @@ skill 沉淀从"纯手写"升级为混合机制（详见 [17-skill-sedimentation
 - 开关 `NEXUS_REVIEW_PASS=1`（默认关）
 
 这是把"证据-结论"链路的校验从主循环里剥离，避免主循环上下文爆炸。
+
+> **能力前移**：同样的"证据是否支撑结论"判断已前移到收尾前（事前拦截 + 分级阻断），见 [23-conversational-quality-layers.md](23-conversational-quality-layers.md) 的 evidence-gate 层。review-pass 保留为 finalize 后的事后审计。
 
 ## 15.10 ETCLOVG 检查清单
 
