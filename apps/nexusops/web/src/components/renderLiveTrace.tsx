@@ -1,5 +1,4 @@
 import type { StreamState } from "@meso.ai/types";
-import { ProcessTrace } from "@meso.ai/ui";
 import { ExecutionDetails } from "./ExecutionDetails.js";
 
 export interface RenderLiveTraceOptions {
@@ -15,10 +14,6 @@ export function createRenderLiveTrace(opts: RenderLiveTraceOptions) {
 
 function LiveTrace({
   stream,
-  streaming,
-  verbose = false,
-  onToolConfirm,
-  onToolCancel,
 }: {
   stream: StreamState;
   streaming: boolean;
@@ -28,14 +23,6 @@ function LiveTrace({
 }) {
   return (
     <div className="nexus-live-trace">
-      <ProcessTrace
-        stream={stream}
-        streaming={streaming}
-        turnStreaming={stream.status === "streaming"}
-        simplify={{ showDuration: false, verbosity: verbose ? "detailed" : "compact" }}
-        onToolConfirm={onToolConfirm}
-        onToolCancel={onToolCancel}
-      />
       <ExecutionDetails stream={stream} />
     </div>
   );
