@@ -13,6 +13,7 @@ type RenderNode =
 function buildRenderNodes(stream: StreamState): RenderNode[] {
   const nodes: RenderNode[] = [];
   let pendingText = "";
+  const seenToolIds = new Set<string>();
 
   for (const ev of stream.eventLog) {
     if (ev.type === "text") {
@@ -23,6 +24,8 @@ function buildRenderNodes(stream: StreamState): RenderNode[] {
       const toolName = tc?.call.name ?? "";
 
       if (HIDDEN_TOOLS.has(toolName)) continue;
+      if (seenToolIds.has(tcId)) continue;
+      seenToolIds.add(tcId);
 
       if (pendingText.trim()) {
         nodes.push({ kind: "text", content: pendingText });
@@ -93,11 +96,7 @@ export function ExecutionDetails({ stream }: { stream: StreamState }) {
                 }
               }}
             >
-              <span className="tool-toggle-icon">{isExpanded ? "▾" : "▸"}</span>
               <code className="tool-name">{name}</code>
-              <span className={`tool-status-badge tool-status-${status}`}>
-                {status === "done" ? "✓" : "⧗"}
-              </span>
             </div>
 
             {/* 描述：小号灰色，缩进对齐 */}

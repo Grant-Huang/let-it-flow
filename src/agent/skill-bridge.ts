@@ -289,8 +289,6 @@ async function* runDynamicSteps(
   errors: string[],
 ): AsyncGenerator<ToolEvent, void> {
   const startedAt = Date.now();
-  // 待 yield 的事件队列（step/ctx.call 内部 push，外层 for-await 消费）
-  const pendingEvents: ToolEvent[] = [];
 
   const stepCtx: StepCtx = {
     call: async <T = unknown>(toolName: string, callParams: Record<string, unknown>): Promise<T> => {
@@ -302,7 +300,7 @@ async function* runDynamicSteps(
       // 别名参数标准化：语义别名（thought/generate）的入参名（directive/userPrompt）
       // 映射到底层工具（core.llm_node）的真实字段（prompt），让 skill 作者用自然语义即可。
       const normalized = normalizeAliasParams(toolName, resolved, callParams);
-      // 消费工具的 async generator，取最终 ToolResult.output
+      // 消费工具的 async generator；每个事件实时 emit（而非入队），保证域工具事件与叙述文本正确穿插
       const gen = tool.execute(normalized, ctx);
       let final: ToolResult | undefined;
       while (true) {
@@ -311,8 +309,7 @@ async function* runDynamicSteps(
           final = r.value;
           break;
         }
-        // 工具内部事件入队（稍后 yield 给 skill execute 主流）
-        pendingEvents.push(r.value);
+        await ctx.emit(r.value as never);
       }
       return (final?.output ?? {}) as T;
     },
@@ -334,7 +331,7 @@ async function* runDynamicSteps(
       try {
         const r = await fn(stepCtx);
         results.push(r);
-        pendingEvents.push({
+        await ctx.emit({
           type: "workflow_node",
           channel: "status",
           payload: {
@@ -345,7 +342,7 @@ async function* runDynamicSteps(
             started_at: startedAt,
             duration_ms: Date.now() - startedAt,
           },
-        } as unknown as ToolEvent);
+        } as never);
         return r;
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -377,10 +374,6 @@ async function* runDynamicSteps(
     });
   }
 
-  // 最后统一 yield 所有积攒的事件（step 完成 + ctx.call 透传）
-  for (const ev of pendingEvents) {
-    yield ev;
-  }
 }
 
 /**
