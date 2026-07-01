@@ -2,21 +2,14 @@ import type { StreamState, ToolCallState } from "@meso.ai/types";
 import { useState } from "react";
 import { EvidenceBadge, type EvidenceBadgeData, parseEvidenceFromOutput } from "./EvidenceBadge.js";
 
-interface ToolItem {
-  id: string;
-  name: string;
-  description?: string;
-  args?: Record<string, unknown>;
-  result?: string;
-  evidence?: EvidenceBadgeData | null;
-  status: "running" | "done" | "error";
-}
+/** 内部 meta 工具：不在 ExecutionDetails 中显示，有独立渲染路径 */
+const HIDDEN_TOOLS = new Set(["nexus_finalize", "nexus_advise", "nexus.finalize", "nexus.advise"]);
 
 type RenderNode =
   | { kind: "text"; content: string }
   | { kind: "tool"; id: string };
 
-/** 按 eventLog 顺序把叙述文本和工具调用交错排列 */
+/** 按 eventLog 顺序把叙述文本和工具调用交错排列（隐藏 meta 工具） */
 function buildRenderNodes(stream: StreamState): RenderNode[] {
   const nodes: RenderNode[] = [];
   let pendingText = "";
@@ -25,14 +18,19 @@ function buildRenderNodes(stream: StreamState): RenderNode[] {
     if (ev.type === "text") {
       pendingText += ((ev.data as { delta?: string }).delta ?? "");
     } else if (ev.type === "tool_call") {
+      const tcId = (ev.data as { id?: string }).id ?? "";
+      const tc = stream.toolCalls[tcId];
+      const toolName = tc?.call.name ?? "";
+
+      if (HIDDEN_TOOLS.has(toolName)) continue;
+
       if (pendingText.trim()) {
         nodes.push({ kind: "text", content: pendingText });
         pendingText = "";
       } else {
         pendingText = "";
       }
-      const tcId = (ev.data as { id?: string }).id ?? "";
-      if (tcId && stream.toolCalls[tcId]) {
+      if (tcId && tc) {
         nodes.push({ kind: "tool", id: tcId });
       }
     }
@@ -57,8 +55,7 @@ export function ExecutionDetails({ stream }: { stream: StreamState }) {
   };
 
   const nodes = buildRenderNodes(stream);
-
-  if (nodes.length === 0 && stream.toolCallOrder.length === 0) return null;
+  if (nodes.length === 0) return null;
 
   return (
     <div className="execution-details">
@@ -79,59 +76,61 @@ export function ExecutionDetails({ stream }: { stream: StreamState }) {
         const dynamicDesc = (tc.call.metadata?.custom as Record<string, unknown> | undefined)?.description;
         const description = typeof dynamicDesc === "string" ? dynamicDesc : getToolDescription(name);
         const status = !tc.result ? "running" : "done";
+        const isExpanded = expandedTools.has(node.id);
 
         return (
           <div key={node.id} className="tool-item">
-            <div className="tool-description">- {description}</div>
-            <div className="tool-details">
-              <div
-                className="tool-name-expandable"
-                onClick={() => toggleToolExpansion(node.id)}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    toggleToolExpansion(node.id);
-                  }
-                }}
-              >
-                <span className="toggle-icon">{expandedTools.has(node.id) ? "▾" : "▸"}</span>
-                <code className="tool-name">{name}</code>
-                <span className="status-badge">
-                  {status === "done" ? "✓" : status === "running" ? "⧗" : "✗"}
-                </span>
-              </div>
+            {/* 主行：toggle + 工具名 + 状态 */}
+            <div
+              className="tool-name-row"
+              onClick={() => toggleToolExpansion(node.id)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  toggleToolExpansion(node.id);
+                }
+              }}
+            >
+              <span className="tool-toggle-icon">{isExpanded ? "▾" : "▸"}</span>
+              <code className="tool-name">{name}</code>
+              <span className={`tool-status-badge tool-status-${status}`}>
+                {status === "done" ? "✓" : "⧗"}
+              </span>
+            </div>
 
-              {expandedTools.has(node.id) && (
-                <div className="tool-content">
-                  {tc.call.args && Object.keys(tc.call.args).length > 0 && (
-                    <details className="tool-section" open={false}>
-                      <summary className="tool-section-title">&gt; Input Parameters</summary>
-                      <div className="tool-section-content">
-                        <pre className="code-block">{JSON.stringify(tc.call.args, null, 2)}</pre>
-                      </div>
-                    </details>
-                  )}
-                  {tc.result?.output && (
-                    <details className="tool-section" open={false}>
-                      <summary className="tool-section-title">&gt; Output</summary>
-                      <div className="tool-section-content">
-                        <pre className="code-block">{tc.result.output.slice(0, 500)}</pre>
-                      </div>
-                    </details>
-                  )}
-                </div>
-              )}
+            {/* 描述：小号灰色，缩进对齐 */}
+            {description && (
+              <div className="tool-desc-line">{description}</div>
+            )}
 
-              <div className="tool-result">
-                → {tc.result?.output ? truncateResult(tc.result.output, 100) : "执行中…"}
-                {evidence && (
-                  <div className="evidence-badge-container">
-                    <EvidenceBadge data={evidence} />
-                  </div>
+            {/* 展开内容 */}
+            {isExpanded && (
+              <div className="tool-expanded">
+                {tc.call.args && Object.keys(tc.call.args).length > 0 && (
+                  <details className="tool-section" open={false}>
+                    <summary className="tool-section-title">&gt; Input Parameters</summary>
+                    <pre className="code-block">{JSON.stringify(tc.call.args, null, 2)}</pre>
+                  </details>
+                )}
+                {tc.result?.output && (
+                  <details className="tool-section" open={false}>
+                    <summary className="tool-section-title">&gt; Output</summary>
+                    <pre className="code-block">{tc.result.output.slice(0, 500)}</pre>
+                  </details>
                 )}
               </div>
+            )}
+
+            {/* 结果摘要 + 证据徽章 */}
+            <div className="tool-result-line">
+              {tc.result?.output ? truncateResult(tc.result.output, 100) : "执行中…"}
+              {evidence && (
+                <span className="evidence-badge-container">
+                  <EvidenceBadge data={evidence} />
+                </span>
+              )}
             </div>
           </div>
         );
@@ -140,7 +139,7 @@ export function ExecutionDetails({ stream }: { stream: StreamState }) {
   );
 }
 
-/** 渲染简单 Markdown：**bold** → <strong>，保留换行。 */
+/** 渲染简单 Markdown：**bold** → <strong>，保留换行 */
 function renderSimpleMarkdown(text: string): React.ReactNode {
   return text.split("\n").map((line, i) => {
     const parts: React.ReactNode[] = [];
@@ -167,7 +166,14 @@ function getToolDescription(toolName: string): string {
     "query_oee": "查询 OEE 实时数据",
     "analyze_oee": "分析 OEE 变化趋势",
     "oee_breakdown": "OEE 维度分解（可用率、性能、质量）",
+    "oee.history": "查询 OEE 历史趋势",
+    "oee.decompose": "OEE 损失分解分析",
+    "oee.availability_loss": "可用率损失分析",
+    "oee.performance_loss": "性能损失分析",
+    "oee.quality_loss": "质量损失分析",
     "query_equipment": "查询设备状态和停机日志",
+    "equipment.downtime": "分析设备停机原因",
+    "equipment.mtbf": "计算设备平均故障间隔",
     "equipment_downtime": "分析设备停机原因",
     "maintenance_history": "查询设备维保历史",
     "quality_defect": "分析质量缺陷率",
@@ -204,6 +210,8 @@ function getToolDescription(toolName: string): string {
     if (toolName.includes(key)) return desc;
   }
   if (toolName.startsWith("skill.")) return `执行技能：${toolName.slice(6)}`;
+  if (toolName.startsWith("oee.")) return `OEE 分析：${toolName.slice(4)}`;
+  if (toolName.startsWith("equipment.")) return `设备分析：${toolName.slice(10)}`;
   if (toolName.includes("query") || toolName.includes("get") || toolName.includes("fetch"))
     return `查询 ${toolName.split("_")[1] || "数据"}`;
   if (toolName.includes("analyze") || toolName.includes("check"))

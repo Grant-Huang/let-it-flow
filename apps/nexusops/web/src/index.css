@@ -119,3 +119,105 @@
   background: var(--color-accent);
   color: #fff;
 }
+
+/* ===== ExecutionDetails 组件 ===== */
+.execution-details {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.narrative-text {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--color-text);
+  padding: 4px 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.tool-item {
+  margin: 4px 0;
+  border-left: 2px solid var(--color-border-light, rgba(0,0,0,0.1));
+  padding-left: 8px;
+}
+
+.tool-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+  padding: 3px 0;
+  border-radius: 3px;
+}
+.tool-name-row:hover .tool-name { color: var(--color-text); }
+
+.tool-toggle-icon {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  width: 12px;
+  flex-shrink: 0;
+}
+
+.tool-name {
+  font-family: var(--font-mono, 'SF Mono', 'Cascadia Code', Menlo, monospace);
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  font-weight: 500;
+}
+
+.tool-status-badge { font-size: 11px; margin-left: auto; }
+.tool-status-done   { color: #22c55e; }
+.tool-status-running { color: var(--color-text-muted); }
+
+.tool-desc-line {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  padding-left: 18px;
+  margin: 2px 0 4px;
+  line-height: 1.4;
+}
+
+.tool-expanded { padding-left: 18px; margin-top: 4px; }
+
+.tool-section { margin: 4px 0; }
+.tool-section-title {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  user-select: none;
+  padding: 2px 0;
+  font-family: var(--font-mono, monospace);
+  list-style: none;
+}
+.tool-section-title::-webkit-details-marker { display: none; }
+
+.tool-result-line {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  padding-left: 18px;
+  margin-top: 3px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.evidence-badge-container { display: inline-flex; align-items: center; }
+
+/* 代码块 — 低调渲染框（参考 Claude Code）*/
+.code-block {
+  background: var(--color-bg-elevated, rgba(0,0,0,0.04));
+  border: 1px solid var(--color-border-light, rgba(0,0,0,0.08));
+  border-radius: 4px;
+  padding: 8px 10px;
+  font-family: var(--font-mono, 'SF Mono', 'Cascadia Code', Menlo, monospace);
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-x: auto;
+  color: var(--color-text-secondary);
+  margin: 4px 0;
+  white-space: pre;
+  display: block;
+}
