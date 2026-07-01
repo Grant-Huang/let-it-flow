@@ -260,12 +260,6 @@ export async function bootNexusOps(opts: NexusBootOptions = {}): Promise<NexusRu
       narrateCompatMode: llm.compatModeFor ? llm.compatModeFor("nexus_narrate") : false,
     };
 
-    // 发送编排说明：让用户了解我们的分析方法
-    const orchestrationExplanation = generateOrchestrationExplanation(intent);
-    if (orchestrationExplanation) {
-      await hooks.emit("text", { delta: orchestrationExplanation } as never);
-    }
-
     const result = await runReactHarness(intent, harnessConfig);
 
     hooks.emit("phase", { stage: "react", label: "ReAct 智能分析", state: "done" } as never);
@@ -292,13 +286,6 @@ export async function bootNexusOps(opts: NexusBootOptions = {}): Promise<NexusRu
       hooks.emit("error", { message: result.error ?? "执行出错" } as never);
       hooks.setStatus("error", result.error);
       return;
-    }
-
-    // 成功：发最终文本 + done
-    if (result.finalText) {
-      // 空行分隔执行过程与总结
-      hooks.emit("text", { delta: "\n" } as never);
-      hooks.emit("text", { delta: result.finalText } as never);
     }
 
     // 提取 core.deliver 产出的制品，以 nexus_artifacts extension 通知前端

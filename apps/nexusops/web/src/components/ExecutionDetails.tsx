@@ -2,128 +2,150 @@ import type { StreamState, ToolCallState } from "@meso.ai/types";
 import { useState } from "react";
 import { EvidenceBadge, type EvidenceBadgeData, parseEvidenceFromOutput } from "./EvidenceBadge.js";
 
-interface ToolItem {
-  id: string;
-  name: string;
-  description?: string;
-  args?: Record<string, unknown>;
-  result?: string;
-  evidence?: EvidenceBadgeData | null;
-  status: "running" | "done" | "error";
+/** 内部 meta 工具：不在 ExecutionDetails 中显示，有独立渲染路径 */
+const HIDDEN_TOOLS = new Set(["nexus_finalize", "nexus_advise", "nexus.finalize", "nexus.advise"]);
+
+type RenderNode =
+  | { kind: "text"; content: string }
+  | { kind: "tool"; id: string };
+
+/** 按 eventLog 顺序把叙述文本和工具调用交错排列（隐藏 meta 工具） */
+function buildRenderNodes(stream: StreamState): RenderNode[] {
+  const nodes: RenderNode[] = [];
+  let pendingText = "";
+
+  for (const ev of stream.eventLog) {
+    if (ev.type === "text") {
+      pendingText += ((ev.data as { delta?: string }).delta ?? "");
+    } else if (ev.type === "tool_call") {
+      const tcId = (ev.data as { id?: string }).id ?? "";
+      const tc = stream.toolCalls[tcId];
+      const toolName = tc?.call.name ?? "";
+
+      if (HIDDEN_TOOLS.has(toolName)) continue;
+
+      if (pendingText.trim()) {
+        nodes.push({ kind: "text", content: pendingText });
+        pendingText = "";
+      } else {
+        pendingText = "";
+      }
+      if (tcId && tc) {
+        nodes.push({ kind: "tool", id: tcId });
+      }
+    }
+  }
+  if (pendingText.trim()) {
+    nodes.push({ kind: "text", content: pendingText });
+  }
+
+  return nodes;
 }
 
 export function ExecutionDetails({ stream }: { stream: StreamState }) {
-  const toolCalls = stream.toolCallOrder
-    .map((id) => stream.toolCalls[id])
-    .filter((tc): tc is ToolCallState => Boolean(tc));
-
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
 
   const toggleToolExpansion = (toolId: string) => {
-    const newSet = new Set(expandedTools);
-    if (newSet.has(toolId)) {
-      newSet.delete(toolId);
-    } else {
-      newSet.add(toolId);
-    }
-    setExpandedTools(newSet);
+    setExpandedTools((prev) => {
+      const next = new Set(prev);
+      if (next.has(toolId)) next.delete(toolId);
+      else next.add(toolId);
+      return next;
+    });
   };
 
-  const toolItems: ToolItem[] = toolCalls.map((tc) => {
-    const name = tc.call.name ?? "unknown";
-    const evidence = tc.result ? parseEvidenceFromOutput(tc.result.output) : null;
-    const dynamicDesc = (tc.call.metadata?.custom as Record<string, unknown> | undefined)?.description;
-
-    return {
-      id: tc.call.id,
-      name,
-      description: typeof dynamicDesc === "string" ? dynamicDesc : undefined,
-      args: tc.call.args,
-      result: tc.result?.output,
-      evidence,
-      status: !tc.result ? "running" : "done",
-    };
-  });
+  const nodes = buildRenderNodes(stream);
+  if (nodes.length === 0) return null;
 
   return (
     <div className="execution-details">
-      {/* 叙述文本（意图理解、编排说明、工具解读、总结） */}
-      {stream.textContent && (
-        <div className="narrative-text">
-          {renderSimpleMarkdown(stream.textContent)}
-        </div>
-      )}
+      {nodes.map((node, i) => {
+        if (node.kind === "text") {
+          return (
+            <div key={`text-${i}`} className="narrative-text">
+              {renderSimpleMarkdown(node.content)}
+            </div>
+          );
+        }
 
-      {/* 工具调用列表 */}
-      {toolItems.map((tool) => (
-        <div key={tool.id} className="tool-item">
-          <div className="tool-description">
-            - {tool.description || getToolDescription(tool.name)}
-          </div>
-          <div className="tool-details">
+        const tc = stream.toolCalls[node.id] as ToolCallState | undefined;
+        if (!tc) return null;
+
+        const name = tc.call.name ?? "unknown";
+        const evidence = tc.result ? parseEvidenceFromOutput(tc.result.output) : null;
+        const dynamicDesc = (tc.call.metadata?.custom as Record<string, unknown> | undefined)?.description;
+        const description = typeof dynamicDesc === "string" ? dynamicDesc : getToolDescription(name);
+        const status = !tc.result ? "running" : "done";
+        const isExpanded = expandedTools.has(node.id);
+
+        return (
+          <div key={node.id} className="tool-item">
+            {/* 主行：toggle + 工具名 + 状态 */}
             <div
-              className="tool-name-expandable"
-              onClick={() => toggleToolExpansion(tool.id)}
+              className="tool-name-row"
+              onClick={() => toggleToolExpansion(node.id)}
               role="button"
               tabIndex={0}
               onKeyDown={(e) => {
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
-                  toggleToolExpansion(tool.id);
+                  toggleToolExpansion(node.id);
                 }
               }}
             >
-              <span className="toggle-icon">
-                {expandedTools.has(tool.id) ? "▾" : "▸"}
-              </span>
-              <code className="tool-name">{tool.name}</code>
-              <span className="status-badge">
-                {tool.status === "done" ? "✓" : tool.status === "running" ? "⧗" : "✗"}
+              <span className="tool-toggle-icon">{isExpanded ? "▾" : "▸"}</span>
+              <code className="tool-name">{name}</code>
+              <span className={`tool-status-badge tool-status-${status}`}>
+                {status === "done" ? "✓" : "⧗"}
               </span>
             </div>
 
-            {expandedTools.has(tool.id) && (
-              <div className="tool-content">
-                {tool.args && Object.keys(tool.args).length > 0 && (
+            {/* 描述：小号灰色，缩进对齐 */}
+            {description && (
+              <div className="tool-desc-line">{description}</div>
+            )}
+
+            {/* 展开内容 */}
+            {isExpanded && (
+              <div className="tool-expanded">
+                {tc.call.args && Object.keys(tc.call.args).length > 0 && (
                   <details className="tool-section" open={false}>
                     <summary className="tool-section-title">&gt; Input Parameters</summary>
-                    <div className="tool-section-content">
-                      <pre className="code-block">{JSON.stringify(tool.args, null, 2)}</pre>
-                    </div>
+                    <pre className="code-block">{JSON.stringify(tc.call.args, null, 2)}</pre>
                   </details>
                 )}
-
-                {tool.result && (
+                {tc.result?.output && (
                   <details className="tool-section" open={false}>
                     <summary className="tool-section-title">&gt; Output</summary>
-                    <div className="tool-section-content">
-                      <pre className="code-block">
-                        {typeof tool.result === "string"
-                          ? tool.result.slice(0, 500)
-                          : JSON.stringify(tool.result, null, 2).slice(0, 500)}
-                      </pre>
-                    </div>
+                    <pre className="code-block">{tc.result.output.slice(0, 500)}</pre>
                   </details>
                 )}
               </div>
             )}
 
-            <div className="tool-result">
-              → {tool.result ? truncateResult(tool.result, 100) : "执行中…"}
-              {tool.evidence && (
-                <div className="evidence-badge-container">
-                  <EvidenceBadge data={tool.evidence} />
+            {/* 结果摘要 + 证据徽章（JSON 输出不在此显示，已在 Output 展开节中可查）*/}
+            {(() => {
+              const summary = tc.result ? nonJsonSummary(tc.result.output) : null;
+              if (tc.result && summary === null && !evidence) return null;
+              return (
+                <div className="tool-result-line">
+                  {!tc.result ? "执行中…" : summary}
+                  {evidence && (
+                    <span className="evidence-badge-container">
+                      <EvidenceBadge data={evidence} />
+                    </span>
+                  )}
                 </div>
-              )}
-            </div>
+              );
+            })()}
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
 
-/** 渲染简单 Markdown：**bold** → <strong>，保留换行。 */
+/** 渲染简单 Markdown：**bold** → <strong>，保留换行 */
 function renderSimpleMarkdown(text: string): React.ReactNode {
   return text.split("\n").map((line, i) => {
     const parts: React.ReactNode[] = [];
@@ -150,7 +172,14 @@ function getToolDescription(toolName: string): string {
     "query_oee": "查询 OEE 实时数据",
     "analyze_oee": "分析 OEE 变化趋势",
     "oee_breakdown": "OEE 维度分解（可用率、性能、质量）",
+    "oee.history": "查询 OEE 历史趋势",
+    "oee.decompose": "OEE 损失分解分析",
+    "oee.availability_loss": "可用率损失分析",
+    "oee.performance_loss": "性能损失分析",
+    "oee.quality_loss": "质量损失分析",
     "query_equipment": "查询设备状态和停机日志",
+    "equipment.downtime": "分析设备停机原因",
+    "equipment.mtbf": "计算设备平均故障间隔",
     "equipment_downtime": "分析设备停机原因",
     "maintenance_history": "查询设备维保历史",
     "quality_defect": "分析质量缺陷率",
@@ -183,21 +212,27 @@ function getToolDescription(toolName: string): string {
   };
 
   if (descriptions[toolName]) return descriptions[toolName];
-
   for (const [key, desc] of Object.entries(descriptions)) {
     if (toolName.includes(key)) return desc;
   }
-
   if (toolName.startsWith("skill.")) return `执行技能：${toolName.slice(6)}`;
+  if (toolName.startsWith("oee.")) return `OEE 分析：${toolName.slice(4)}`;
+  if (toolName.startsWith("equipment.")) return `设备分析：${toolName.slice(10)}`;
   if (toolName.includes("query") || toolName.includes("get") || toolName.includes("fetch"))
     return `查询 ${toolName.split("_")[1] || "数据"}`;
   if (toolName.includes("analyze") || toolName.includes("check"))
     return `分析 ${toolName.split("_")[1] || "数据"}`;
-
   return `执行 ${toolName}`;
 }
 
 function truncateResult(result: string, maxLength: number): string {
   if (typeof result !== "string") return JSON.stringify(result).slice(0, maxLength);
   return result.length > maxLength ? `${result.slice(0, maxLength)}…` : result;
+}
+
+/** JSON 输出返回 null（已在 Output 展开节可查），非 JSON 返回截断摘要。 */
+function nonJsonSummary(result: string): string | null {
+  const s = typeof result === "string" ? result.trim() : JSON.stringify(result).trim();
+  if (s.startsWith("{") || s.startsWith("[")) return null;
+  return truncateResult(result, 100);
 }

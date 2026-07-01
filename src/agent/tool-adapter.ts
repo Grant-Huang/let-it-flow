@@ -122,19 +122,25 @@ export function adaptTool(
         }
       }
 
+      // skill connector 自己的 execute() 会 emit tool_call/tool_result，
+      // 不再从外层再 emit 一次，避免同一 skill 在 eventLog 中出现两次。
+      const isSkill = (connector as { kind?: string }).kind === "skill";
+
       // 发 tool_call 事件（SSE 可见）
-      await safeEmit(deps.emit, {
-        type: "tool_call",
-        channel: "status",
-        payload: toolCallPayload({
-          id: callId,
-          name: connector.name,
-          args,
-          risk,
-          groupId: ctxMeta.nodeId,
-          metadata: { custom: { description: connector.description } },
-        }),
-      });
+      if (!isSkill) {
+        await safeEmit(deps.emit, {
+          type: "tool_call",
+          channel: "status",
+          payload: toolCallPayload({
+            id: callId,
+            name: connector.name,
+            args,
+            risk,
+            groupId: ctxMeta.nodeId,
+            metadata: { custom: { description: connector.description } },
+          }),
+        });
+      }
 
       let confirmed: boolean | undefined;
       let rejected = false;
@@ -217,15 +223,17 @@ export function adaptTool(
           }
         }
 
-        await safeEmit(deps.emit, {
-          type: "tool_result",
-          channel: "status",
-          payload: toolResultPayload({
-            tool_call_id: callId,
-            output: typeof output === "string" ? output : JSON.stringify(output),
-            duration_ms: Date.now() - startedAt,
-          }),
-        });
+        if (!isSkill) {
+          await safeEmit(deps.emit, {
+            type: "tool_result",
+            channel: "status",
+            payload: toolResultPayload({
+              tool_call_id: callId,
+              output: typeof output === "string" ? output : JSON.stringify(output),
+              duration_ms: Date.now() - startedAt,
+            }),
+          });
+        }
 
         // 激活工具 return 的 narration 字段：作为实时 text 事件下发，
         // 让工具未显式调 narrate() 的结束摘要也能进对话流（如 deliver/llm_node）。

@@ -124,13 +124,6 @@ export async function runReactHarness(
       ? { messages: [{ role: "user" as const, content: `${system}\n\n---\n${userContent}` }] }
       : { system, messages: [{ role: "user" as const, content: userContent }] };
 
-    // 发出意图理解确认
-    await emit?.({
-      type: "text",
-      channel: "content",
-      payload: { delta: `🎯 **意图理解**\n我理解你的问题是：${intent}\n现在开始诊断分析...\n\n` },
-    });
-
     const result = streamText({
       model,
       ...streamArgs,
@@ -143,6 +136,14 @@ export async function runReactHarness(
         accumulator.push(trace);
         // E 层：发 phase 事件（前端可见）
         await emitStepPhase(emit, ev.stepNumber, "done");
+        // LLM 本步文本（意图分析、推理、总结）— 原样 emit，不加硬编码包装
+        if (ev.text) {
+          await emit?.({
+            type: "text",
+            channel: "content",
+            payload: { delta: ev.text + "\n" },
+          });
+        }
         // O 层增强：对每个有 EvidenceEnvelope 结果的 toolCall 生成人类可读解读，
         // emit 为 text 事件，让用户跟上分析节奏（narrateModel 缺省则跳过）
         if (narrateModel && trace.toolCalls.length > 0) {
@@ -194,21 +195,6 @@ export async function runReactHarness(
       accumulator.list,
       preconditions,
     );
-
-    // 7. 完成阶段说明
-    if (finishReason === "success") {
-      await emit?.({
-        type: "text",
-        channel: "content",
-        payload: { delta: `\n✅ **分析完成**\n已完成取证和诊断分析，以下是建议：\n` },
-      });
-    } else if (finishReason === "precondition_unmet") {
-      await emit?.({
-        type: "text",
-        channel: "content",
-        payload: { delta: `\n⚠️ **前置条件未满足**\n证据不足，请补齐相关取证数据后重试。\n` },
-      });
-    }
 
     return {
       stepTrace: accumulator.list,
