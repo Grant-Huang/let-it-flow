@@ -130,18 +130,28 @@ export async function runReactHarness(
       tools,
       stopWhen,
       abortSignal,
+      // 实时转发 LLM 文本 delta，确保意图/推理文本先于工具调用出现在事件流中
+      onChunk: async ({ chunk }) => {
+        if (chunk.type === "text-delta" && chunk.text) {
+          await emit?.({
+            type: "text",
+            channel: "content",
+            payload: { delta: chunk.text },
+          });
+        }
+      },
       onStepFinish: async (ev) => {
         // O 层：转 StepTrace 累积
         const trace = convertStep(ev, riskMap, confirmedSet, rejectedSet, keyToName);
         accumulator.push(trace);
         // E 层：发 phase 事件（前端可见）
         await emitStepPhase(emit, ev.stepNumber, "done");
-        // LLM 本步文本（意图分析、推理、总结）— 原样 emit，不加硬编码包装
+        // 文本已由 onChunk 实时 emit，这里只补一个换行分隔符
         if (ev.text) {
           await emit?.({
             type: "text",
             channel: "content",
-            payload: { delta: ev.text + "\n" },
+            payload: { delta: "\n" },
           });
         }
         // O 层增强：对每个有 EvidenceEnvelope 结果的 toolCall 生成人类可读解读，
