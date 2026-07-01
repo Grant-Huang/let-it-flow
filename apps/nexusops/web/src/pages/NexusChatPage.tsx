@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { ThreeColumnLayout, MessageList, ChatComposer, type NavItem } from "@meso.ai/ui";
 import type { Message } from "@meso.ai/ui";
 import { useNexusStream } from "../hooks/useNexusStream.js";
@@ -70,6 +70,20 @@ export default function NexusChatPage() {
     confirm(decision);
   };
 
+  const handleMcpAction = useCallback(
+    (tool: string, args: Record<string, unknown>) => {
+      // Route the HTML report button click as a follow-up intent,
+      // so the agent can present a HITL confirm_gate before executing.
+      const intent = `请执行：${tool}，参数：${JSON.stringify(args)}`;
+      setHistory((prev) => [
+        ...prev,
+        { id: `u-mcp-${Date.now()}`, role: "user", content: `[报告按钮] ${intent}`, timestamp: new Date().toISOString() },
+      ]);
+      void followUp(intent);
+    },
+    [followUp],
+  );
+
   const renderLiveTrace = createRenderLiveTrace({
     streaming: isStreaming,
     verbose: verboseMode,
@@ -97,7 +111,7 @@ export default function NexusChatPage() {
           onNewSession={handleNewSession}
         />
       }
-      artifactPanel={<ArtifactSlot stream={state.status !== "idle" ? state : undefined} />}
+      artifactPanel={<ArtifactSlot stream={state.status !== "idle" ? state : undefined} onMcpAction={handleMcpAction} />}
       artifactVisible={showArtifact}
       onArtifactToggle={setArtifactVisible}
       defaultArtifactVisible={false}

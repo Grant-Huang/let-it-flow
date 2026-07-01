@@ -10,7 +10,9 @@ import {
   getEquipment,
   getProcess,
   getMaterial,
+  getCausalChain,
   ctxFromArgs,
+  type CausalChainData,
 } from "../tools/mock-data/scenarios.js";
 import { wrapEvidence } from "../../../src/core/evidence-envelope.js";
 import { narrate, narrateSummary } from "../../../src/core/narrate.js";
@@ -120,24 +122,113 @@ export function createDowntimeRootCauseSkill() {
         return result;
       });
 
-      // Step 4: 综合根因结论（包成 EvidenceEnvelope）
+      // Step 3.5: 因果链取证（替代纯阈值判断）
+      const step35 = await step<{
+        causalChain: CausalChainData;
+        fishboneMachine: string[];
+        fishboneMethod: string[];
+        primaryRootCause: string | null;
+        mechanismPath: string | null;
+        causalConfidence: number;
+        evidenceMapping: Array<{ fishboneItem: string; dataSource: string; value: string }>;
+      }>("因果链取证（5M1E 数据驱动）", async (ctx) => {
+        await narrate(ctx, "正在提取因果链数据，与停机事件证据交叉验证…");
+        const cc = getCausalChain(sctx);
+        const eq = getEquipment(sctx);
+        const pr = getProcess(sctx);
+
+        const fishboneMachine = cc.fishbone.machine.slice(0, 3);
+        const fishboneMethod = cc.fishbone.method.slice(0, 2);
+
+        // 构建证据映射：fishbone 条目 ↔ 实测数据
+        const evidenceMapping: Array<{ fishboneItem: string; dataSource: string; value: string }> = [];
+        if (fishboneMachine.length > 0 && eq.healthScore < 0.8) {
+          evidenceMapping.push({
+            fishboneItem: fishboneMachine[0] ?? "",
+            dataSource: "equipment.health",
+            value: `healthScore=${eq.healthScore.toFixed(2)}，failureRisk30d=${(eq.failureRisk30d * 100).toFixed(0)}%`,
+          });
+        }
+        if (fishboneMethod.length > 0 && pr.deviationScore > 0.2) {
+          evidenceMapping.push({
+            fishboneItem: fishboneMethod[0] ?? "",
+            dataSource: "process.deviation",
+            value: `deviationScore=${pr.deviationScore.toFixed(2)}`,
+          });
+        }
+        if (cc.fishbone.man.length > 0) {
+          evidenceMapping.push({
+            fishboneItem: cc.fishbone.man[0] ?? "",
+            dataSource: "operator_log",
+            value: "（人员因素，需现场确认）",
+          });
+        }
+
+        let primaryRootCause: string | null = null;
+        let mechanismPath: string | null = null;
+        // 置信度依据因果链 overlap 数量（而非单一 health 阈值）
+        const overlapCount = evidenceMapping.length;
+        const causalConfidence = cc.chains.length > 0
+          ? Math.min(0.5 + overlapCount * 0.13, 0.92)
+          : 0;
+
+        if (cc.chains.length > 0) {
+          const chain = cc.chains[0]!;
+          primaryRootCause = chain.rootCause;
+          mechanismPath = chain.layers.join(" → ");
+          await narrate(
+            ctx,
+            `因果链命中：${cc.chains.length} 条 5Why 链，鱼骨 ${Object.values(cc.fishbone).filter((b) => b.length > 0).length}/6 维度有证据。` +
+            `主根因：${primaryRootCause}（overlap ${overlapCount} 项，置信度 ${(causalConfidence * 100).toFixed(0)}%）。`,
+          );
+        } else {
+          await narrate(
+            ctx,
+            `当前场景无已识别因果链。设备健康 ${eq.healthScore.toFixed(2)}，鱼骨各维度无历史记录。`,
+          );
+        }
+
+        return { causalChain: cc, fishboneMachine, fishboneMethod, primaryRootCause, mechanismPath, causalConfidence, evidenceMapping };
+      });
+
+      // Step 4: 综合根因结论（优先用因果链，降级才用阈值判断）
       const step4 = await step<ReturnType<typeof wrapEvidence>>(
         "综合根因结论",
         async (ctx) => {
           await narrate(ctx, "正在汇总根因结论…");
-          let rootCause = step1.topReason;
+          let rootCause: string;
           let category: string;
-          if (step2.healthScore < 0.5) {
+          let confidence: number;
+          let recommendedNext: string;
+
+          if (step35.primaryRootCause) {
+            // 有因果链：直接用 chains[0].rootCause 作为根因
             category = "equipment_degradation";
-            rootCause = `设备健康分 ${step2.healthScore.toFixed(2)} 严重偏低，主因：${step1.topReason}`;
-            await narrate(ctx, `设备健康分 ${step2.healthScore.toFixed(2)} < 0.5，判定为设备劣化型根因。`);
+            rootCause = step35.primaryRootCause;
+            confidence = step35.causalConfidence;
+            recommendedNext = "按因果链根因安排针对性维护（已有数据支撑，优先级高）";
+            await narrate(
+              ctx,
+              `根因来自因果链：${rootCause}。机制路径：${step35.causalChain.chains[0]?.layers.at(-1) ?? ""}。置信度 ${(confidence * 100).toFixed(0)}%。`,
+            );
+          } else if (step2.healthScore < 0.5) {
+            // 无因果链 + 健康分极低：设备劣化型（阈值降级）
+            category = "equipment_degradation";
+            rootCause = `设备健康分 ${step2.healthScore.toFixed(2)} 严重偏低，主因：${step1.topReason}（需现场 5Why 确认）`;
+            confidence = 0.65;
+            recommendedNext = "立即安排预防性维护，同时现场 5Why 确认根因";
+            await narrate(ctx, `设备健康分 ${step2.healthScore.toFixed(2)} < 0.5，降级为阈值判断，建议现场 5Why 确认。`);
           } else if (!step3.externalCauseRuled) {
             category = "external";
             rootCause = "停机可能由外部因素（物料/工艺）诱发，需进一步排查";
-            await narrate(ctx, "外部因素未能排除，判定为外部诱发型根因。");
+            confidence = 0.45;
+            recommendedNext = "排查物料批次 + 工艺参数";
+            await narrate(ctx, "外部因素未能排除，判定为外部诱发型根因（无因果链支撑，置信度低）。");
           } else {
             category = "sporadic";
             rootCause = `${step1.topReason}（偶发性，设备健康尚可）`;
+            confidence = 0.5;
+            recommendedNext = "加强点检频次，监控复发";
             await narrate(ctx, "设备健康尚可且外部因素已排除，判定为偶发型根因。");
           }
 
@@ -148,31 +239,38 @@ export function createDowntimeRootCauseSkill() {
               rootCause,
               category,
               totalDowntimeMinutes: step1.totalDowntimeMinutes,
-              confidence:
-                category === "equipment_degradation"
-                  ? 0.85
-                  : category === "sporadic"
-                    ? 0.6
-                    : 0.5,
-              recommendedNext:
-                category === "equipment_degradation"
-                  ? "立即安排预防性维护（设备健康已恶化）"
-                  : category === "external"
-                    ? "排查物料批次 + 工艺参数"
-                    : "加强点检频次，监控复发",
+              confidence,
+              mechanismExplained: step35.mechanismPath ?? "无因果链，需现场 5Why 验证",
+              evidenceMapping: step35.evidenceMapping,
+              auxiliaryFactors: [
+                ...step35.fishboneMachine.slice(1),
+                ...step35.causalChain.fishbone.man.slice(0, 1),
+              ].filter(Boolean),
+              causalChainsFound: step35.causalChain.chains.length,
+              recommendedNext,
+              dataSource: "getCausalChain + getEquipment + getProcess + getMaterial",
             },
             {
               freshness: "realtime",
-              confidence: category === "equipment_degradation" ? "measured" : "estimated",
+              confidence: confidence > 0.7 ? "measured" : "estimated",
               system: "MES",
               provenance: "skill.downtime_root_cause",
+              caveat: step35.primaryRootCause
+                ? "根因来自因果链数据，需现场工程师复核"
+                : "无因果链数据，为阈值推断，建议现场 5Why 确认",
             },
           );
         },
       );
 
-      const rootCauseData = step4.data as { rootCause?: string; category?: string };
-      await skillSummary(`根因分析完成：${rootCauseData.rootCause ?? "已定位"}。`);
+      const rootCauseData = step4.data as { rootCause?: string; category?: string; mechanismExplained?: string; confidence?: number };
+      await skillSummary(
+        `停机根因分析完成：${rootCauseData.rootCause ?? "已定位"}。` +
+        (rootCauseData.mechanismExplained && rootCauseData.mechanismExplained !== "无因果链，需现场 5Why 验证"
+          ? `机制路径：${rootCauseData.mechanismExplained}。`
+          : "") +
+        `置信度 ${((rootCauseData.confidence ?? 0) * 100).toFixed(0)}%。`,
+      );
 
       return step4;
     },

@@ -428,6 +428,13 @@ const NEXUS_SYSTEM_PROMPT = `
   - mcp.eam.maintenance_order（维护工单）、mcp.eam.spare_part_order（备件订购）、mcp.eam.stop_line（停线，destructive 慎用）
   - mcp.process.adjust_parameters（工艺参数回调，参数漂移首选）
 - destructive 动作（停线/批量报废）仅在确有安全/不可挽回风险时建议，且必须附具体 reason；正常工况绝不建议 destructive 动作。
+
+## 因果链纪律（必须遵守）
+- 得出根因结论前，必须先调 quality.five_why 或 quality.fishbone 取证，或调用 skill.oee_diagnose / skill.downtime_root_cause。禁止仅凭 healthScore 低或 deviationScore 高直接跳根因结论。
+- 当设备/工艺/人员多维度异常同时存在时：以 quality.five_why 的 chains[0].rootCause 为主根因；其他维度降级标注为"辅助因素"或"关联症状"，不得并列为多个并列根因。
+- 每条建议的 evidenceRefs 必须列出提供该数据的具体工具名（如 quality.five_why、process.quality_impact、equipment.health）。
+- 若 quality.five_why 返回空 chains（normal 场景），说明无已识别根因，需诚实说明"当前证据不足以确定根因，建议现场 5Why 补充排查"，不得凭 LLM 先验编造根因。
+- 工艺参数偏差导致质量缺陷时，必须调 process.quality_impact 获取「偏差量→物理机制→缺陷类型」完整映射；不得仅凭"温度偏高"直接写"导致尺寸超差"而不说明物理机制。
 `.trim();
 
 // ─────────────────────────────────────────────────────────────────────────────
