@@ -410,6 +410,7 @@ const NEXUS_SYSTEM_PROMPT = `
 3. 用 core.knowledge_base 查企业专有知识（SOP/A3/术语表/方法论）。
 4. 用 core.web_search 查外部专家通用知识。
 5. 证据充分后调 nexus_advise 产出结构化建议（每条含 impact 影响度 / executionScore 执行度 / confidence 置信度；有可执行 MCP 工具才附 actionTool，否则不勉强）。
+5b. 建议产出后，调 oee.report_html 生成可视化 HTML 诊断报告（传入 primaryRootCause/mechanismExplained/auxiliaryFactors/confidence 及 recommendations 列表），供右栏展示。
 6. 最后调 nexus_finalize 收尾。
 
 ## 证据纪律
