@@ -218,11 +218,15 @@ function getToolDescription(toolName: string): string {
     "query_equipment": "查询设备状态",
     "equipment.downtime": "分析设备停机原因",
     "equipment.mtbf": "计算设备 MTBF",
+    "equipment.mttr": "计算设备平均修复时间",
+    "equipment.status": "查询设备当前状态",
     "equipment_downtime": "分析设备停机原因",
     "maintenance_history": "查询设备维保历史",
     "quality_defect": "分析质量缺陷率",
     "quality_trend": "查看质量指标趋势",
     "quality.scrap": "分析废品与报废",
+    "quality.cp_cpk": "计算过程能力指数",
+    "quality.defect": "分析质量缺陷",
     "defect_pareto": "缺陷帕累托分析",
     "process_parameters": "查询工艺参数",
     "process_variance": "分析工艺波动",
@@ -230,8 +234,16 @@ function getToolDescription(toolName: string): string {
     "energy_efficiency": "分析能效指标",
     "schedule_plan": "查询生产排程",
     "schedule_variance": "分析排程偏差",
+    "schedule.attainment": "查询排程达成率",
+    "schedule.plan": "查询生产计划",
     "material_usage": "查询物料用量",
     "material_cost": "分析物料成本",
+    "cost.summary": "汇总成本数据",
+    "cost.analysis": "分析成本构成",
+    "cost.trend": "查看成本趋势",
+    "personnel.by_shift": "按班次查询人员数据",
+    "personnel.efficiency": "分析人员效率",
+    "personnel.attendance": "查询出勤数据",
     "extract_5why": "5Why 根因分析",
     "build_fishbone": "鱼骨图分析",
     "run_fmea": "FMEA 失效分析",
@@ -241,10 +253,15 @@ function getToolDescription(toolName: string): string {
 
   if (descriptions[toolName]) return descriptions[toolName];
   for (const [key, desc] of Object.entries(descriptions)) {
-    if (toolName.includes(key)) return desc;
+    if (toolName === key) return desc;
   }
   if (toolName.startsWith("oee.")) return `查看 OEE ${toolName.slice(4)}`;
   if (toolName.startsWith("equipment.")) return `分析设备 ${toolName.slice(10)}`;
   if (toolName.startsWith("quality.")) return `分析质量 ${toolName.slice(8)}`;
+  if (toolName.startsWith("cost.")) return `查看成本 ${toolName.slice(5)}`;
+  if (toolName.startsWith("personnel.")) return `查询人员 ${toolName.slice(10)}`;
+  if (toolName.startsWith("schedule.")) return `查询排程 ${toolName.slice(9)}`;
+  if (toolName.startsWith("material.")) return `查询物料 ${toolName.slice(9)}`;
+  if (toolName.startsWith("energy.")) return `分析能耗 ${toolName.slice(7)}`;
   return "";
 }
