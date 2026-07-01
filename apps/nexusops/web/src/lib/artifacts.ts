@@ -11,7 +11,7 @@ import type { StreamState } from "@meso.ai/types";
  */
 export interface NexusArtifact {
   id: string;
-  type: "recommendations" | "diagnosis" | "analysis_summary";
+  type: "recommendations" | "diagnosis" | "analysis_summary" | "html_report";
   title: string;
   content: string;
   ready: boolean;
@@ -30,6 +30,12 @@ export function extractArtifacts(stream: StreamState): NexusArtifact[] {
     if (name === "nexus_advise") {
       const parsed = parseAdviseOutput(tc);
       if (parsed) seen.set("nexus_advise", parsed);
+      continue;
+    }
+
+    if (name === "oee.report_html") {
+      const parsed = parseHtmlReportOutput(tc);
+      if (parsed) seen.set("oee.report_html", parsed);
       continue;
     }
 
@@ -106,11 +112,39 @@ function parseSkillOutput(tc: ToolCallLike): NexusArtifact | null {
   }
 }
 
+function parseHtmlReportOutput(tc: ToolCallLike): NexusArtifact | null {
+  if (!tc.result) {
+    return { id: tc.call.id, type: "html_report", title: "诊断报告", content: "", ready: false };
+  }
+  try {
+    const obj = JSON.parse(tc.result.output ?? "{}") as {
+      data?: { html?: string; _isHtmlReport?: boolean };
+    };
+    const html = obj.data?.html ?? tc.result.output ?? "";
+    return {
+      id: tc.call.id,
+      type: "html_report",
+      title: "OEE 诊断报告",
+      content: html,
+      ready: true,
+    };
+  } catch {
+    return {
+      id: tc.call.id,
+      type: "html_report",
+      title: "诊断报告",
+      content: tc.result.output ?? "",
+      ready: true,
+    };
+  }
+}
+
 /** 推断展示标签 */
 export function inferLabel(type: string): string {
   if (type === "recommendations") return "建议";
   if (type === "diagnosis") return "诊断";
   if (type === "analysis_summary") return "分析";
+  if (type === "html_report") return "诊断报告";
   if (type === "pending") return "分析中…";
   return "产物";
 }
@@ -118,4 +152,9 @@ export function inferLabel(type: string): string {
 /** 推断 ArtifactPanel type */
 export function inferArtifactType(_type: string): "markdown" | "code" {
   return "code";
+}
+
+/** Whether an artifact should render as an iframe (HTML report). */
+export function isHtmlArtifact(type: string): boolean {
+  return type === "html_report";
 }

@@ -179,6 +179,98 @@ export function registerProcessTools(): import("../../../../src/tools/base.js").
       provenance: (a) => `/plm/process/control_plan?line=${(a.line as string) ?? "L01"}`,
       freshness: "historical",
     }),
+
+    // 9. 工艺偏差→质量影响映射（物理机制链，补缺 197°C→尺寸超差 的推理闭环）
+    createQueryTool({
+      name: "process.quality_impact",
+      description:
+        "对每个超规格工艺参数，返回完整的「偏差量→物理机制→缺陷类型」映射。用于闭合工艺偏差与质量缺陷之间的推理链（如温度+12℃→材料过热→缩水→尺寸偏小）。机制映射基于注塑工艺硬编码规则，不依赖 LLM 推断。",
+      triggers: [
+        "工艺参数影响质量",
+        "温度偏高导致什么",
+        "参数偏差怎么影响产品",
+        "偏差机制",
+        "工艺质量关系",
+      ],
+      notFor: ["只看参数值（走 process.parameters）", "质量缺陷统计（走 quality.defects）"],
+      inputSchema: { type: "object", properties: {} },
+      getData: (ctx) => {
+        const p = getProcess(ctx);
+        const outOfSpec = Object.entries(p.parameters).filter(([, v]) => !v.inSpec);
+
+        // 注塑工艺参数→机制→缺陷 硬编码规则库
+        const mechanismRules: Record<
+          string,
+          { direction: "high" | "low" | "any"; mechanism: string; qualityEffects: string[] }[]
+        > = {
+          温度: [
+            {
+              direction: "high",
+              mechanism: "熔体过热 → 材料流动性过高 → 过度充填/收缩率异常",
+              qualityEffects: ["表面气泡", "缩水", "尺寸偏小"],
+            },
+            {
+              direction: "low",
+              mechanism: "熔体温度不足 → 流动性差 → 充填不完整",
+              qualityEffects: ["短射", "表面粗糙", "熔接线"],
+            },
+          ],
+          压力: [
+            {
+              direction: "high",
+              mechanism: "充填压力过大 → 过保压 → 材料压缩回弹",
+              qualityEffects: ["飞边", "尺寸偏大", "锁模力不足风险"],
+            },
+            {
+              direction: "low",
+              mechanism: "保压不足 → 型腔补缩失败",
+              qualityEffects: ["缩水", "尺寸偏小", "内部气孔"],
+            },
+          ],
+          速度: [
+            {
+              direction: "low",
+              mechanism: "注射速度过低 → 充填时间长 → 前锋料提前冷却",
+              qualityEffects: ["短射", "流痕", "表面粗糙"],
+            },
+            {
+              direction: "high",
+              mechanism: "注射速度过高 → 剪切热过大 → 材料降解",
+              qualityEffects: ["变色", "脆性增加", "表面烧焦"],
+            },
+          ],
+        };
+
+        const impacts = outOfSpec.map(([paramName, v]) => {
+          const delta = v.actual - v.standard;
+          const deltaPct = ((delta / v.standard) * 100).toFixed(1);
+          const direction = delta > 0 ? "high" : "low";
+          const rules = mechanismRules[paramName] ?? [];
+          const matched = rules.find((r) => r.direction === direction || r.direction === "any");
+          return {
+            param: paramName,
+            actual: v.actual,
+            standard: v.standard,
+            unit: paramName === "温度" ? "℃" : paramName === "压力" ? "MPa" : paramName === "速度" ? "mm/s" : "",
+            deviation: `${delta > 0 ? "+" : ""}${delta.toFixed(1)} (${delta > 0 ? "+" : ""}${deltaPct}%)`,
+            mechanism: matched?.mechanism ?? "偏差机制待确认（需查工艺 PFMEA）",
+            qualityEffects: matched?.qualityEffects ?? [],
+            evidenceRef: `PROCESS.${ctx.line ?? "L01"}.parameters.${paramName}`,
+          };
+        });
+
+        return {
+          outOfSpecCount: outOfSpec.length,
+          impacts,
+          summary:
+            impacts.length > 0
+              ? impacts.map((i) => `${i.param}${i.deviation} → ${i.mechanism.split("→").at(-1)?.trim() ?? ""} → ${i.qualityEffects.join("/")} `).join("；")
+              : "当前所有工艺参数均在规格内，无质量影响风险",
+        };
+      },
+      system: "MES",
+      provenance: (a) => `/mes/process/quality_impact?line=${(a.line as string) ?? "L01"}&mode=mechanism`,
+    }),
   ];
 }
 
