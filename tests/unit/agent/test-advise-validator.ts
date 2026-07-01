@@ -131,3 +131,116 @@ describe("validateAdvise 多条建议", () => {
     expect(r.reasons.some((x) => x.includes("#1"))).toBe(false);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// evidenceRefs 白名单校验（knownToolPattern）
+// ─────────────────────────────────────────────────────────────────────────────
+
+const NEXUS_PATTERN = /^(oee|equipment|quality|process|energy|schedule|material|personnel|core|skill|mcp)\./;
+
+describe("validateAdvise evidenceRefs 白名单校验", () => {
+  it("evidenceRefs 全合法（匹配前缀）→ valid", () => {
+    const r = validateAdvise(
+      [
+        {
+          title: "t",
+          rationale: "r",
+          impact: 0.5,
+          executionScore: 0.5,
+          confidence: 0.5,
+          evidenceRefs: ["oee.realtime", "equipment.downtime", "process.deviation"],
+        },
+      ],
+      { knownToolPattern: NEXUS_PATTERN },
+    );
+    expect(r.valid).toBe(true);
+    expect(r.reasons).toEqual([]);
+  });
+
+  it("evidenceRefs 含无效工具名（如 mes.get_oee）→ invalid", () => {
+    const r = validateAdvise(
+      [
+        {
+          title: "t",
+          rationale: "r",
+          impact: 0.5,
+          executionScore: 0.5,
+          confidence: 0.5,
+          evidenceRefs: ["oee.realtime", "mes.get_oee"],
+        },
+      ],
+      { knownToolPattern: NEXUS_PATTERN },
+    );
+    expect(r.valid).toBe(false);
+    expect(r.reasons.some((x) => x.includes("mes.get_oee"))).toBe(true);
+    expect(r.reasons.some((x) => x.includes("无效工具名"))).toBe(true);
+  });
+
+  it("evidenceRefs 无前缀（裸工具名如 get_oee）→ invalid", () => {
+    const r = validateAdvise(
+      [
+        {
+          title: "t",
+          rationale: "r",
+          impact: 0.5,
+          executionScore: 0.5,
+          confidence: 0.5,
+          evidenceRefs: ["get_oee"],
+        },
+      ],
+      { knownToolPattern: NEXUS_PATTERN },
+    );
+    expect(r.valid).toBe(false);
+    expect(r.reasons.some((x) => x.includes("get_oee"))).toBe(true);
+  });
+
+  it("evidenceRefs 含非字符串元素 → invalid", () => {
+    const r = validateAdvise(
+      [
+        {
+          title: "t",
+          rationale: "r",
+          impact: 0.5,
+          executionScore: 0.5,
+          confidence: 0.5,
+          evidenceRefs: ["oee.realtime", 123],
+        },
+      ],
+      { knownToolPattern: NEXUS_PATTERN },
+    );
+    expect(r.valid).toBe(false);
+    expect(r.reasons.some((x) => x.includes("无效工具名"))).toBe(true);
+  });
+
+  it("不传 knownToolPattern → 不做白名单校验（向后兼容）", () => {
+    const r = validateAdvise([
+      {
+        title: "t",
+        rationale: "r",
+        impact: 0.5,
+        executionScore: 0.5,
+        confidence: 0.5,
+        evidenceRefs: ["totally_fake_tool"],
+      },
+    ]);
+    expect(r.valid).toBe(true);
+    expect(r.evidenceRefWarnings).toEqual([]);
+  });
+
+  it("core/skill/mcp 前缀也合法", () => {
+    const r = validateAdvise(
+      [
+        {
+          title: "t",
+          rationale: "r",
+          impact: 0.5,
+          executionScore: 0.5,
+          confidence: 0.5,
+          evidenceRefs: ["core.knowledge_base", "skill.oee_diagnose", "mcp.mes.schedule_work_order"],
+        },
+      ],
+      { knownToolPattern: NEXUS_PATTERN },
+    );
+    expect(r.valid).toBe(true);
+  });
+});

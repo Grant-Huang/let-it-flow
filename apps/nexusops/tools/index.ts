@@ -23,6 +23,14 @@ import { registerMaterialTools } from "./domains/material.js";
 import { registerPersonnelTools } from "./domains/personnel.js";
 
 /**
+ * evidenceRefs 白名单 pattern：匹配 NexusOps 已注册工具的命名前缀。
+ * 用于校验 LLM 产出的 evidenceRefs 是否引用了真实存在的工具（拦截胡编工具名）。
+ * 涵盖 8 个 domain 域 + core/skill/mcp 三个通用前缀。
+ */
+const NEXUS_TOOL_PATTERN =
+  /^(oee|equipment|quality|process|energy|schedule|material|personnel|core|skill|mcp)\./;
+
+/**
  * 注册全部 NexusOps 业务工具到 ToolRegistry。
  * @returns 工具总数（含 finalize + advise）
  */
@@ -102,7 +110,7 @@ function createAdviseTool(): FlowConnector {
               confidence: { type: "number", description: "置信度 0-1（基于证据强度）" },
               actionTool: { type: "string", description: "可选：可执行的 MCP/工具名（如 mcp.mes.update_schedule），无则留空" },
               actionArgs: { type: "object", description: "可选：actionTool 的预设参数" },
-              evidenceRefs: { type: "array", items: { type: "string" }, description: "支撑证据的工具名/来源引用" },
+              evidenceRefs: { type: "array", items: { type: "string" }, description: "支撑证据的工具名全名（优先 measured 类实测取证工具，如 oee.realtime、equipment.downtime、process.deviation、quality.defect_rate；避免只引用 inferred 类）。跨域结论需引用多域证据。填入的工具必须在已注册工具范围内（oee.*/equipment.*/quality.*/process.*/energy.*/schedule.*/material.*/personnel.*/core.*/skill.*/mcp.*），否则会被校验拒绝。" },
             },
             required: ["title", "rationale", "impact", "executionScore", "confidence"],
           },
@@ -141,12 +149,12 @@ function createAdviseTool(): FlowConnector {
       const recs = (params.recommendations as unknown[]) ?? [];
 
       // B3：输出结构自检（确定性约束）。不达标则返回 invalid，LLM 被迫修正
-      const validation = validateAdvise(recs);
+      const validation = validateAdvise(recs, { knownToolPattern: NEXUS_TOOL_PATTERN });
       if (!validation.valid) {
         const invalidOutput = {
           invalid: true,
           reasons: validation.reasons,
-          hint: "请按 schema 修正上述问题后重新调用 nexus_advise（impact/executionScore/confidence 必须在 [0,1]，title/rationale 必填非空）",
+          hint: "请按 schema 修正上述问题后重新调用 nexus_advise（impact/executionScore/confidence 必须在 [0,1]，title/rationale 必填非空，evidenceRefs 必须是已注册工具全名如 oee.realtime）",
         };
         yield {
           type: "tool_result",

@@ -176,10 +176,10 @@ function applyGateVerdict(
   if (verdict.action === "block") {
     // 硬阻断：从 activeTools 移除 nexus_finalize，模型这一步看不到收尾工具
     result.activeTools = (result.activeTools ?? allToolNames).filter((n) => n !== "nexus_finalize");
-    result.system = `## 证据不足，禁止收尾（评估 confidence=${verdict.confidence.toFixed(2)}）${gapsText}${claimsText}\n\n请继续取证补齐上述缺口后再收尾。`;
+    result.system = `## 证据不足，禁止收尾（评估 confidence=${verdict.confidence.toFixed(2)}）${gapsText}${claimsText}\n\n请继续取证补齐上述缺口后再收尾。可参考系统提示中的"证据源地图"选择合适的取证工具。`;
   } else {
     // soft_warn：保留 finalize 但注入警告，主模型自己决定
-    const warnText = `## 证据充分性提醒（confidence=${verdict.confidence.toFixed(2)}）${gapsText}${claimsText}\n\n若证据已足够支撑结论可收尾，否则建议先补取证。`;
+    const warnText = `## 证据充分性提醒（confidence=${verdict.confidence.toFixed(2)}）${gapsText}${claimsText}\n\n若证据已足够支撑结论可收尾，否则建议先补取证（可参考系统提示中的"证据源地图"）。`;
     result.system = result.system ? `${result.system}\n\n${warnText}` : warnText;
   }
 }

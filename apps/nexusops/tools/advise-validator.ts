@@ -40,9 +40,13 @@ function inUnitRange(v: unknown): boolean {
 /**
  * 校验建议列表的结构合规性。
  * @param recs  建议数组（来自 nexus_advise 的 params.recommendations）
+ * @param opts  可选校验选项（白名单 pattern 等）
  * @returns valid=false 时 reasons 非空，工具应返回 { invalid: true, reasons }
  */
-export function validateAdvise(recs: unknown[]): AdviseValidation {
+export function validateAdvise(
+  recs: unknown[],
+  opts?: { knownToolPattern?: RegExp },
+): AdviseValidation {
   const reasons: string[] = [];
   const evidenceRefWarnings: string[] = [];
 
@@ -98,6 +102,16 @@ export function validateAdvise(recs: unknown[]): AdviseValidation {
       evidenceRefWarnings.push(
         `${label} 未提供 evidenceRefs，建议补充支撑证据的工具名/来源（如 oee.realtime）`,
       );
+    } else if (opts?.knownToolPattern) {
+      // 4. evidenceRefs 白名单校验（阻断）：引用的工具名必须匹配已注册前缀模式
+      const invalid = refs.filter(
+        (r) => typeof r !== "string" || !opts.knownToolPattern!.test(r),
+      );
+      if (invalid.length > 0) {
+        reasons.push(
+          `${label} 的 evidenceRefs 含无效工具名：${invalid.join(", ")}（应为 oee.*/equipment.*/core.*/skill.*/mcp.* 等已注册工具全名）`,
+        );
+      }
     }
   });
 

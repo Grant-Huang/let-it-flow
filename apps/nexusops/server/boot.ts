@@ -38,6 +38,7 @@ import { promotableCandidates } from "../../../src/agent/skill-miner.js";
 import { buildNexusTools } from "../tools/index.js";
 import { registerMcpActionTools } from "../tools/domains/mcp-actions.js";
 import { actionStore } from "../tools/mock-data/action-store.js";
+import { buildEvidenceMap } from "../tools/evidence-map.js";
 import { buildNexusSkills } from "../skills/index.js";
 import { buildNexusPreconditions, nexusPreconditionList } from "./preconditions.js";
 import { buildNexusGovernance } from "./governance.js";
@@ -235,6 +236,11 @@ export async function bootNexusOps(opts: NexusBootOptions = {}): Promise<NexusRu
     const model = llm.model("nexus_agent");
     // post 链每 run 新建（含 inferred 引用计数等会话级状态）
     const governanceHooks = governanceToHooks(governanceChain, buildNexusPostToolUseChain());
+    // 证据源地图：从当前已注册工具动态生成，拼到 system prompt（让 LLM 知道域→工具→证据性质）
+    const evidenceMap = buildEvidenceMap(toolRegistry);
+    const systemPrompt = evidenceMap
+      ? `${NEXUS_SYSTEM_PROMPT}\n\n${evidenceMap}`
+      : NEXUS_SYSTEM_PROMPT;
     const harnessConfig: HarnessConfig = {
       callSite: "nexus_agent",
       model,
@@ -254,7 +260,7 @@ export async function bootNexusOps(opts: NexusBootOptions = {}): Promise<NexusRu
       previousContext,
       // 兼容模式（DeepSeek 等）：折叠 system 进 user，规避 developer 角色
       compatMode: llm.compatModeFor ? llm.compatModeFor("nexus_agent") : false,
-      systemPrompt: NEXUS_SYSTEM_PROMPT,
+      systemPrompt,
       // 工具结果解读：每步用轻量模型把 EvidenceEnvelope 转成人类可读叙述 emit 为 text
       narrateModel: llm.model("nexus_narrate"),
       narrateCompatMode: llm.compatModeFor ? llm.compatModeFor("nexus_narrate") : false,

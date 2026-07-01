@@ -1,4 +1,5 @@
 import type { StreamEvent, ToolEvent } from "../core/stream-events.js";
+import type { Confidence, Freshness } from "../core/evidence-envelope.js";
 
 // 重新导出 ToolEvent（定义在 stream-events.js 作为单一来源）
 export type { ToolEvent } from "../core/stream-events.js";
@@ -133,4 +134,14 @@ export interface FlowConnector<TOutput = unknown> {
    * 向后兼容：老工具不带此字段时按 "safe" 处理。
    */
   readonly risk?: "safe" | "write" | "destructive";
+
+  /**
+   * 证据元数据（可选）。供 evidence-map 等动态生成器读取，
+   * 让 LLM 在选工具前就知道这个工具返回的证据性质（实测/估算/推断 + 时效）。
+   * 查询类工具（domain.*）建议填充；收尾/动作类工具可不填。
+   */
+  readonly evidenceMeta?: {
+    confidence?: Confidence;
+    freshness?: Freshness;
+  };
 }

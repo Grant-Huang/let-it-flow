@@ -92,6 +92,10 @@ export function createQueryTool<TData>(spec: DomainToolSpec<TData>): FlowConnect
       source: { system: spec.system, provenance: spec.name },
     },
     ...(spec.risk ? { risk: spec.risk } : {}),
+    evidenceMeta: {
+      confidence: spec.confidence ?? "measured",
+      freshness: spec.freshness ?? "realtime",
+    },
 
     async *execute(
       args: Record<string, unknown>,
@@ -229,6 +233,10 @@ export function createActionTool(spec: ActionToolSpec): FlowConnector {
       source: { system: spec.system, provenance: spec.name },
     },
     risk: spec.risk,
+    evidenceMeta: {
+      confidence: "inferred",
+      freshness: spec.freshness ?? "realtime",
+    },
 
     async *execute(
       args: Record<string, unknown>,

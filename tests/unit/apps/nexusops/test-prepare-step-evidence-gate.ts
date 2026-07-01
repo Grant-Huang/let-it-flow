@@ -90,6 +90,8 @@ describe("prepare-step + 证据评估 block 分级", () => {
     // system 含阻断说明 + 证据缺口
     expect(r!.system).toContain("禁止收尾");
     expect(r!.system).toContain("未取 availability");
+    // C1：引导文案指向证据源地图
+    expect(r!.system).toContain("证据源地图");
   });
 });
 
@@ -108,6 +110,8 @@ describe("prepare-step + 证据评估 soft_warn 分级", () => {
     expect(r!.activeTools).toContain("nexus_finalize");
     expect(r!.system).toContain("证据充分性提醒");
     expect(r!.system).toContain("availability 数据偏旧");
+    // C1：引导文案指向证据源地图
+    expect(r!.system).toContain("证据源地图");
   });
 });
 
