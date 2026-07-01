@@ -1,5 +1,6 @@
 import type { StreamState } from "@meso.ai/types";
 import { ProcessTrace } from "@meso.ai/ui";
+import { ExecutionDetails } from "./ExecutionDetails.js";
 
 export interface RenderLiveTraceOptions {
   streaming: boolean;
@@ -35,6 +36,7 @@ function LiveTrace({
         onToolConfirm={onToolConfirm}
         onToolCancel={onToolCancel}
       />
+      <ExecutionDetails stream={stream} />
     </div>
   );
 }
