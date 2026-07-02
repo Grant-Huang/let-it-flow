@@ -5,7 +5,13 @@
  * 数据源：PLM（工艺标准）+ MES（实测）。
  */
 import { createQueryTool } from "../mock-data/tool-factory.js";
-import { getProcess, getProcessFmea, lookupActionOverride, type ScenarioId } from "../mock-data/scenarios.js";
+import {
+  getProcessParameters,
+  getProcessAggregate,
+  getProcessFmea,
+  lookupActionOverride,
+  type ScenarioId,
+} from "../mock-data/scenarios.js";
 
 export function registerProcessTools(): import("../../../../src/tools/base.js").FlowConnector[] {
   return [
@@ -17,13 +23,13 @@ export function registerProcessTools(): import("../../../../src/tools/base.js").
       notFor: ["参数标准（走 process.recipe）", "偏差分析（走 process.deviation）"],
       inputSchema: { type: "object", properties: {} },
       getData: (ctx) => {
-        const p = getProcess(ctx);
+        const params = getProcessParameters(ctx);
         const actuals: Record<string, number> = {};
-        for (const [k, v] of Object.entries(p.parameters)) {
+        for (const [k, v] of Object.entries(params.parameters)) {
           const override = lookupActionOverride(ctx, k) as number | undefined;
           actuals[k] = override ?? v.actual;
         }
-        return { parameters: actuals, inSpecCount: Object.values(p.parameters).filter((v) => v.inSpec).length };
+        return { parameters: actuals, inSpecCount: Object.values(params.parameters).filter((v) => v.inSpec).length };
       },
       system: "MES",
       provenance: (a) => `/mes/process/parameters?line=${(a.line as string) ?? "L01"}&realtime=true`,
@@ -37,8 +43,9 @@ export function registerProcessTools(): import("../../../../src/tools/base.js").
       notFor: ["绝对实测值（走 process.parameters）"],
       inputSchema: { type: "object", properties: {} },
       getData: (ctx) => {
-        const p = getProcess(ctx);
-        const deviations = Object.entries(p.parameters).map(([k, v]) => ({
+        const params = getProcessParameters(ctx);
+        const agg = getProcessAggregate(ctx);
+        const deviations = Object.entries(params.parameters).map(([k, v]) => ({
           param: k,
           actual: v.actual,
           standard: v.standard,
@@ -49,7 +56,7 @@ export function registerProcessTools(): import("../../../../src/tools/base.js").
         return {
           deviations,
           outOfSpecCount: deviations.filter((d) => !d.inSpec).length,
-          deviationScore: p.deviationScore,
+          deviationScore: agg.deviationScore,
         };
       },
       system: "MES",
@@ -64,9 +71,9 @@ export function registerProcessTools(): import("../../../../src/tools/base.js").
       notFor: ["实测值（走 process.parameters）"],
       inputSchema: { type: "object", properties: {} },
       getData: (ctx) => {
-        const p = getProcess(ctx);
+        const params = getProcessParameters(ctx);
         const recipe: Record<string, { standard: number; tolerance: number; unit: string }> = {};
-        for (const [k, v] of Object.entries(p.parameters)) {
+        for (const [k, v] of Object.entries(params.parameters)) {
           recipe[k] = { standard: v.standard, tolerance: v.standard * 0.05, unit: v.unit };
         }
         return { recipe, productCode: "P-2026-A" };
@@ -84,9 +91,9 @@ export function registerProcessTools(): import("../../../../src/tools/base.js").
       notFor: ["仅偏差（走 process.deviation）"],
       inputSchema: { type: "object", properties: {} },
       getData: (ctx) => {
-        const p = getProcess(ctx);
+        const params = getProcessParameters(ctx);
         return {
-          table: Object.entries(p.parameters).map(([k, v]) => ({
+          table: Object.entries(params.parameters).map(([k, v]) => ({
             param: k, standard: v.standard, actual: v.actual, unit: v.unit, inSpec: v.inSpec,
           })),
         };
@@ -103,10 +110,10 @@ export function registerProcessTools(): import("../../../../src/tools/base.js").
       notFor: ["质量维度 Cp/Cpk（走 quality.cp_cpk）"],
       inputSchema: { type: "object", properties: {} },
       getData: (ctx) => {
-        const p = getProcess(ctx);
+        const agg = getProcessAggregate(ctx);
         return {
-          capability: p.capability,
-          assessment: p.capability >= 1.33 ? "adequate" : p.capability >= 1.0 ? "marginal" : "inadequate",
+          capability: agg.capability,
+          assessment: agg.capability >= 1.33 ? "adequate" : agg.capability >= 1.0 ? "marginal" : "inadequate",
         };
       },
       system: "MES",
@@ -122,8 +129,8 @@ export function registerProcessTools(): import("../../../../src/tools/base.js").
       notFor: ["直接执行调整（无对应工具，需 HITL）"],
       inputSchema: { type: "object", properties: {} },
       getData: (ctx) => {
-        const p = getProcess(ctx);
-        const suggestions = Object.entries(p.parameters)
+        const params = getProcessParameters(ctx);
+        const suggestions = Object.entries(params.parameters)
           .filter(([, v]) => !v.inSpec)
           .map(([k, v]) => ({
             param: k,
@@ -165,9 +172,9 @@ export function registerProcessTools(): import("../../../../src/tools/base.js").
       notFor: ["PFMEA（走 process.fmea）"],
       inputSchema: { type: "object", properties: {} },
       getData: (ctx) => {
-        const p = getProcess(ctx);
+        const params = getProcessParameters(ctx);
         return {
-          controlItems: Object.keys(p.parameters).map((k) => ({
+          controlItems: Object.keys(params.parameters).map((k) => ({
             characteristic: k,
             method: "自动化采集 + SPC",
             frequency: "连续",
@@ -195,8 +202,8 @@ export function registerProcessTools(): import("../../../../src/tools/base.js").
       notFor: ["只看参数值（走 process.parameters）", "质量缺陷统计（走 quality.defects）"],
       inputSchema: { type: "object", properties: {} },
       getData: (ctx) => {
-        const p = getProcess(ctx);
-        const outOfSpec = Object.entries(p.parameters).filter(([, v]) => !v.inSpec);
+        const params = getProcessParameters(ctx);
+        const outOfSpec = Object.entries(params.parameters).filter(([, v]) => !v.inSpec);
 
         // 注塑工艺参数→机制→缺陷 硬编码规则库
         const mechanismRules: Record<

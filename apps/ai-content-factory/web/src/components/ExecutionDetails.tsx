@@ -2,35 +2,26 @@ import type { StreamState, ToolCallState } from "@meso.ai/types";
 import { useState } from "react";
 import { EvidenceBadge, type EvidenceBadgeData, parseEvidenceFromOutput } from "./EvidenceBadge.js";
 
-/** 内部 meta 工具：不在 ExecutionDetails 中显示，有独立渲染路径 */
-const HIDDEN_TOOLS = new Set(["nexus_finalize", "nexus_advise", "nexus.finalize", "nexus.advise"]);
-
 /**
- * 产生"最终产物"的工具：这些工具的输出已在右栏展示（建议/诊断/HTML 报告），
- * 会话框内不再重复展开 tool_result，避免信息冗余。中间 JSON（域工具/无 diagnosis 的 skill）
- * 仍可在会话框折叠查看。
+ * 执行详情组件：把「助手叙述文本」与「工具调用行」按 eventLog 顺序交错排列。
+ *
+ * 风格规范见 docs/24-conversational-streaming-style.md §3.2 / §3.3。
+ * 从 apps/nexusops/web/src/components/ExecutionDetails.tsx 移植，适配 podcast 工具。
  */
-function isFinalArtifactOutput(name: string, output: string | undefined): boolean {
-  if (!output) return false;
-  if (name === "oee.report_html" || name === "skill.report_html") return true;
-  if (name.startsWith("skill.")) {
-    // 含 diagnosis 字段的 skill 产物已进右栏，会话框不重复展示
-    try {
-      const obj = JSON.parse(output) as { data?: { diagnosis?: unknown; _isHtmlReport?: boolean } };
-      const d = obj.data?.diagnosis;
-      return (typeof d === "string" && d.trim() !== "") || obj.data?._isHtmlReport === true;
-    } catch {
-      return false;
-    }
-  }
-  return false;
-}
+
+/** 内部 meta 工具：不在 ExecutionDetails 中显示，有独立渲染路径（产物面板/收尾）。 */
+const HIDDEN_TOOLS = new Set([
+  "nexus_finalize",
+  "nexus_advise",
+  "nexus.finalize",
+  "nexus.advise",
+]);
 
 type RenderNode =
   | { kind: "text"; content: string }
   | { kind: "tool"; id: string };
 
-/** 按 eventLog 顺序把叙述文本和工具调用交错排列（隐藏 meta 工具） */
+/** 按 eventLog 顺序把叙述文本和工具调用交错排列（隐藏 meta 工具）。 */
 function buildRenderNodes(stream: StreamState): RenderNode[] {
   const nodes: RenderNode[] = [];
   let pendingText = "";
@@ -38,7 +29,7 @@ function buildRenderNodes(stream: StreamState): RenderNode[] {
 
   for (const ev of stream.eventLog) {
     if (ev.type === "text") {
-      pendingText += ((ev.data as { delta?: string }).delta ?? "");
+      pendingText += (ev.data as { delta?: string }).delta ?? "";
     } else if (ev.type === "tool_call") {
       const tcId = (ev.data as { id?: string }).id ?? "";
       const tc = stream.toolCalls[tcId];
@@ -101,15 +92,12 @@ export function ExecutionDetails({ stream }: { stream: StreamState }) {
         const hasError = tc.result?.error;
         const dynamicDesc = (tc.call.metadata?.custom as Record<string, unknown> | undefined)?.description;
         const description = typeof dynamicDesc === "string" ? dynamicDesc : getToolDescription(name);
-        const isFinalArtifact = !!tc.result && isFinalArtifactOutput(name, tc.result.output);
 
         const statusText = !tc.result
           ? "执行中…"
           : hasError
-          ? "调用失败"
-          : isFinalArtifact
-          ? "已生成产物（详见右栏）"
-          : `返回 ${tc.result.output.length} 字`;
+            ? "调用失败"
+            : `返回 ${tc.result.output.length} 字`;
 
         return (
           <div key={node.id} className="tool-item">
@@ -153,16 +141,11 @@ export function ExecutionDetails({ stream }: { stream: StreamState }) {
                     <pre className="code-block">{JSON.stringify(tc.call.args, null, 2)}</pre>
                   </>
                 )}
-                {tc.result?.output && !isFinalArtifact && (
+                {tc.result?.output && (
                   <>
                     <div className="tool-section-label">&gt; Output</div>
                     <pre className="code-block">{formatOutput(tc.result.output)}</pre>
                   </>
-                )}
-                {isFinalArtifact && (
-                  <div className="tool-section-label" style={{ color: "var(--color-text-muted)" }}>
-                    &gt; 产物已在右侧面板展示
-                  </div>
                 )}
               </div>
             )}
@@ -226,71 +209,30 @@ function formatOutput(output: string): string {
   }
 }
 
-function truncateResult(result: string, maxLength: number): string {
-  if (typeof result !== "string") return JSON.stringify(result).slice(0, maxLength);
-  return result.length > maxLength ? `${result.slice(0, maxLength)}…` : result;
-}
-
-/** 工具描述映射。无匹配时返回空字符串（不显示描述行）。 */
+/**
+ * 工具描述映射（podcast 链路）。无匹配时返回空字符串（不显示描述行）。
+ *
+ * 覆盖 ai-content-factory 的 core.* / skill.* / nexus_finalize 工具。
+ */
 function getToolDescription(toolName: string): string {
   const descriptions: Record<string, string> = {
-    "query_oee": "查询 OEE 实时数据",
-    "analyze_oee": "分析 OEE 变化趋势",
-    "oee_breakdown": "OEE 维度分解",
-    "oee.realtime": "取回实时 OEE",
-    "oee.history": "查看 OEE 历史趋势",
-    "oee.decompose": "OEE 损失分解分析",
-    "oee.availability_loss": "分析可用率损失",
-    "oee.performance_loss": "分析性能损失",
-    "oee.quality_loss": "分析质量损失",
-    "oee.report_html": "生成 OEE 诊断报告",
-    "query_equipment": "查询设备状态",
-    "equipment.downtime": "分析设备停机原因",
-    "equipment.mtbf": "计算设备 MTBF",
-    "equipment.mttr": "计算设备平均修复时间",
-    "equipment.status": "查询设备当前状态",
-    "equipment_downtime": "分析设备停机原因",
-    "maintenance_history": "查询设备维保历史",
-    "quality_defect": "分析质量缺陷率",
-    "quality_trend": "查看质量指标趋势",
-    "quality.scrap": "分析废品与报废",
-    "quality.cp_cpk": "计算过程能力指数",
-    "quality.defect": "分析质量缺陷",
-    "defect_pareto": "缺陷帕累托分析",
-    "process_parameters": "查询工艺参数",
-    "process_variance": "分析工艺波动",
-    "energy_consumption": "查询能耗数据",
-    "energy_efficiency": "分析能效指标",
-    "schedule_plan": "查询生产排程",
-    "schedule_variance": "分析排程偏差",
-    "schedule.attainment": "查询排程达成率",
-    "schedule.plan": "查询生产计划",
-    "material_usage": "查询物料用量",
-    "material_cost": "分析物料成本",
-    "cost.summary": "汇总成本数据",
-    "cost.analysis": "分析成本构成",
-    "cost.trend": "查看成本趋势",
-    "personnel.by_shift": "按班次查询人员数据",
-    "personnel.efficiency": "分析人员效率",
-    "personnel.attendance": "查询出勤数据",
-    "extract_5why": "5Why 根因分析",
-    "build_fishbone": "鱼骨图分析",
-    "run_fmea": "FMEA 失效分析",
-    "cross_validate": "交叉验证分析结果",
+    "core.web_search": "搜索内容",
+    "core.web_fetch": "抓取网页正文",
+    "core.knowledge_base": "查询本地知识库",
+    "core.llm_node": "LLM 生成节点",
     "core.deliver": "汇总输出最终结果",
+    "skill.thread_focuser": "聚焦单一主线索",
+    "skill.write_podcast_script": "撰写口播稿",
+    "skill.write_wechat_article": "撰写公众号长文",
+    "skill.publish_wechat_draft": "推送到微信草稿箱",
+    "nexus_finalize": "流程收尾",
   };
 
   if (descriptions[toolName]) return descriptions[toolName];
   for (const [key, desc] of Object.entries(descriptions)) {
-    if (toolName === key) return desc;
+    if (toolName.includes(key)) return desc;
   }
-  if (toolName.startsWith("oee.")) return `查看 OEE ${toolName.slice(4)}`;
-  if (toolName.startsWith("equipment.")) return `分析设备 ${toolName.slice(10)}`;
-  if (toolName.startsWith("quality.")) return `分析质量 ${toolName.slice(8)}`;
-  if (toolName.startsWith("cost.")) return `查看成本 ${toolName.slice(5)}`;
-  if (toolName.startsWith("personnel.")) return `查询人员 ${toolName.slice(10)}`;
-  if (toolName.startsWith("schedule.")) return `查询排程 ${toolName.slice(9)}`;
-  if (toolName.startsWith("material.")) return `查询物料 ${toolName.slice(9)}`;
-  if (toolName.startsWith("energy.")) return `分析能耗 ${toolName.slice(7)}`;
+  if (toolName.startsWith("skill.")) return `执行 ${toolName.slice(6)} 流程`;
+  if (toolName.startsWith("core.")) return `调用 ${toolName.slice(5)}`;
   return "";
 }

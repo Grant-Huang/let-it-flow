@@ -3,25 +3,39 @@
  *
  * 沉淀自设备停机场景的标准 4 步根因分析。
  *
+ * 所有取数走 ctx.call（经 EvidenceEnvelope 协议 + actionStore 副作用），
+ * 不再直取 accessor 函数。
+ *
  * 动态 DSL 写法：步骤间用具名变量传递，类型自动推导。
  */
 import { createSkill } from "../../../src/agent/skill-bridge.js";
-import {
-  getEquipment,
-  getProcess,
-  getMaterial,
-  getCausalChain,
-  ctxFromArgs,
-  type CausalChainData,
-} from "../tools/mock-data/scenarios.js";
-import { wrapEvidence } from "../../../src/core/evidence-envelope.js";
+import { wrapEvidence, type EvidenceEnvelope } from "../../../src/core/evidence-envelope.js";
 import { narrate, narrateSummary } from "../../../src/core/narrate.js";
+
+/** 从工具返回结果（ToolResult.output）中解包 EvidenceEnvelope.data。 */
+function unpack<T>(env: unknown): T {
+  const e = env as EvidenceEnvelope<T>;
+  return e.data;
+}
+
+interface CausalChainShape {
+  symptom: string;
+  chains: Array<{ method: string; layers: string[]; rootCause: string }>;
+  fishbone: {
+    man: string[];
+    machine: string[];
+    material: string[];
+    method: string[];
+    environment: string[];
+    measurement: string[];
+  };
+}
 
 export function createDowntimeRootCauseSkill() {
   return createSkill({
     name: "skill.downtime_root_cause",
     description:
-      "标准停机根因分析流：当设备停机或可用率低时，4 步定位根因（停机事件→维护历史→排除外部→根因结论）。封装已验证的根因分析轨迹。",
+      "标准停机根因分析流：当设备停机或可用率低时，4 步定位根因（停机事件→维护历史→排除外部→根因结论）。封装已验证的根因分析轨迹。所有取数走 ctx.call。",
     whenToUse: {
       triggers: [
         "设备停机原因",
@@ -52,28 +66,34 @@ export function createDowntimeRootCauseSkill() {
     },
 
     async steps(input) {
-      const { step, narrate: skillNarrate, narrateSummary: skillSummary } = input;
-      const scenarioId = typeof input.scenarioId === "string" ? input.scenarioId : "normal";
-      const line = typeof input.line === "string" ? input.line : undefined;
-      const sctx = ctxFromArgs({ scenarioId, line });
+      const { step, narrate: skillNarrate, narrateSummary: skillSummary, selfCallId } = input;
+      const scenarioId = typeof input.scenarioId === "string" ? input.scenarioId : "anomaly";
+      const line = typeof input.line === "string" ? input.line : "L01";
+      const baseParams = { scenarioId, line };
 
-      await skillNarrate(`我开始停机根因分析（场景：${scenarioId}${line ? `，产线 ${line}` : ""}）。`);
+      await skillNarrate(`我开始停机根因分析（场景：${scenarioId}，产线 ${line}）。`);
 
       // Step 1: 取停机事件清单 + 设备状态
       const step1 = await step<{
-        status: ReturnType<typeof getEquipment>["status"];
+        status: string;
         totalDowntimeMinutes: number;
-        events: ReturnType<typeof getEquipment>["downtimeEvents"];
+        events: Array<{ reason: string; minutes: number; at: string }>;
         topReason: string;
       }>("取停机事件清单 + 设备状态", async (ctx) => {
         await narrate(ctx, "正在取停机事件清单与设备状态…");
-        const eq = getEquipment(sctx);
-        await narrate(ctx, `设备状态：${eq.status}，累计停机 ${eq.downtimeEvents.reduce((s, e) => s + e.minutes, 0)} 分钟。`);
+        const stEnv = await ctx.call<{ data: { status: string } }>("equipment.status", baseParams);
+        const status = unpack<{ status: string }>(stEnv).status;
+        const dtEnv = await ctx.call<{ data: { events: Array<{ reason: string; minutes: number; at: string }>; totalDowntimeMinutes: number } }>(
+          "equipment.downtime",
+          baseParams,
+        );
+        const dt = unpack<{ events: Array<{ reason: string; minutes: number; at: string }>; totalDowntimeMinutes: number }>(dtEnv);
+        await narrate(ctx, `设备状态：${status}，累计停机 ${dt.totalDowntimeMinutes} 分钟。`);
         return {
-          status: eq.status,
-          totalDowntimeMinutes: eq.downtimeEvents.reduce((s, e) => s + e.minutes, 0),
-          events: eq.downtimeEvents,
-          topReason: eq.downtimeEvents[0]?.reason ?? "无停机",
+          status,
+          totalDowntimeMinutes: dt.totalDowntimeMinutes,
+          events: dt.events,
+          topReason: dt.events[0]?.reason ?? "无停机",
         };
       });
 
@@ -86,19 +106,20 @@ export function createDowntimeRootCauseSkill() {
         overdueMaintenance: boolean;
       }>("查维护历史 + 备件", async (ctx) => {
         await narrate(ctx, "正在查维护历史与备件状态…");
-        const eq = getEquipment(sctx);
-        const result = {
-          mtbfHours: eq.mtbfHours,
-          mttrMinutes: eq.mttrMinutes,
-          failureRisk30d: eq.failureRisk30d,
-          healthScore: eq.healthScore,
-          overdueMaintenance: eq.healthScore < 0.7,
-        };
+        const mtEnv = await ctx.call<{ data: { mtbfHours: number } }>("equipment.mtbf", baseParams);
+        const mtbfHours = unpack<{ mtbfHours: number }>(mtEnv).mtbfHours;
+        const mtrEnv = await ctx.call<{ data: { mttrMinutes: number } }>("equipment.mttr", baseParams);
+        const mttrMinutes = unpack<{ mttrMinutes: number }>(mtrEnv).mttrMinutes;
+        const hEnv = await ctx.call<{ data: { healthScore: number } }>("equipment.health", baseParams);
+        const healthScore = unpack<{ healthScore: number }>(hEnv).healthScore;
+        const fEnv = await ctx.call<{ data: { failureRisk30d: number } }>("equipment.failure_predict", baseParams);
+        const failureRisk30d = unpack<{ failureRisk30d: number }>(fEnv).failureRisk30d;
+        const overdueMaintenance = healthScore < 0.7;
         await narrate(
           ctx,
-          `MTBF ${eq.mtbfHours} 小时，健康分 ${eq.healthScore.toFixed(2)}${result.overdueMaintenance ? "（已低于阈值）" : ""}。`,
+          `MTBF ${mtbfHours} 小时，健康分 ${healthScore.toFixed(2)}${overdueMaintenance ? "（已低于阈值）" : ""}。`,
         );
-        return result;
+        return { mtbfHours, mttrMinutes, failureRisk30d, healthScore, overdueMaintenance };
       });
 
       // Step 3: 交叉查工艺/物料排除外部因素
@@ -108,23 +129,21 @@ export function createDowntimeRootCauseSkill() {
         externalCauseRuled: boolean;
       }>("交叉查工艺/物料排除外部因素", async (ctx) => {
         await narrate(ctx, "正在交叉查工艺与物料，排除外部因素…");
-        const pr = getProcess(sctx);
-        const m = getMaterial(sctx);
-        const result = {
-          processDeviation: pr.deviationScore,
-          materialShortageRisk: m.shortageRisk,
-          externalCauseRuled: pr.deviationScore < 0.3 && m.shortageRisk < 0.3,
-        };
+        const prEnv = await ctx.call<{ data: { deviationScore: number } }>("process.deviation", baseParams);
+        const deviationScore = unpack<{ deviationScore: number }>(prEnv).deviationScore;
+        const mEnv = await ctx.call<{ data: { shortageRisk: number } }>("material.shortage", baseParams);
+        const shortageRisk = unpack<{ shortageRisk: number }>(mEnv).shortageRisk;
+        const externalCauseRuled = deviationScore < 0.3 && shortageRisk < 0.3;
         await narrate(
           ctx,
-          `工艺偏离 ${pr.deviationScore.toFixed(2)}，物料风险 ${m.shortageRisk.toFixed(2)}，外部因素${result.externalCauseRuled ? "已排除" : "不能排除"}。`,
+          `工艺偏离 ${deviationScore.toFixed(2)}，物料风险 ${shortageRisk.toFixed(2)}，外部因素${externalCauseRuled ? "已排除" : "不能排除"}。`,
         );
-        return result;
+        return { processDeviation: deviationScore, materialShortageRisk: shortageRisk, externalCauseRuled };
       });
 
       // Step 3.5: 因果链取证（替代纯阈值判断）
       const step35 = await step<{
-        causalChain: CausalChainData;
+        causalChain: CausalChainShape;
         fishboneMachine: string[];
         fishboneMethod: string[];
         primaryRootCause: string | null;
@@ -132,28 +151,40 @@ export function createDowntimeRootCauseSkill() {
         causalConfidence: number;
         evidenceMapping: Array<{ fishboneItem: string; dataSource: string; value: string }>;
       }>("因果链取证（5M1E 数据驱动）", async (ctx) => {
-        await narrate(ctx, "正在提取因果链数据，与停机事件证据交叉验证…");
-        const cc = getCausalChain(sctx);
-        const eq = getEquipment(sctx);
-        const pr = getProcess(sctx);
+        await narrate(ctx, "正在调 quality.five_why / quality.fishbone，与停机事件证据交叉验证…");
+        const fwEnv = await ctx.call<{ data: { symptom: string; chains: Array<{ method: string; layers: string[]; rootCause: string }> } }>(
+          "quality.five_why",
+          baseParams,
+        );
+        const fw = unpack<{ symptom: string; chains: Array<{ method: string; layers: string[]; rootCause: string }> }>(fwEnv);
+        const fbEnv = await ctx.call<{ data: { branches: Array<{ dimension: string; factors: string[] }> } }>("quality.fishbone", baseParams);
+        const fb = unpack<{ branches: Array<{ dimension: string; factors: string[] }> }>(fbEnv);
+        const fishbone = {
+          man: fb.branches.find((b) => b.dimension.includes("Man"))?.factors ?? [],
+          machine: fb.branches.find((b) => b.dimension.includes("Machine"))?.factors ?? [],
+          material: fb.branches.find((b) => b.dimension.includes("Material"))?.factors ?? [],
+          method: fb.branches.find((b) => b.dimension.includes("Method"))?.factors ?? [],
+          environment: fb.branches.find((b) => b.dimension.includes("Environment"))?.factors ?? [],
+          measurement: fb.branches.find((b) => b.dimension.includes("Measurement"))?.factors ?? [],
+        };
+        const cc: CausalChainShape = { symptom: fw.symptom, chains: fw.chains, fishbone };
 
         const fishboneMachine = cc.fishbone.machine.slice(0, 3);
         const fishboneMethod = cc.fishbone.method.slice(0, 2);
 
-        // 构建证据映射：fishbone 条目 ↔ 实测数据
         const evidenceMapping: Array<{ fishboneItem: string; dataSource: string; value: string }> = [];
-        if (fishboneMachine.length > 0 && eq.healthScore < 0.8) {
+        if (fishboneMachine.length > 0 && step2.healthScore < 0.8) {
           evidenceMapping.push({
             fishboneItem: fishboneMachine[0] ?? "",
             dataSource: "equipment.health",
-            value: `healthScore=${eq.healthScore.toFixed(2)}，failureRisk30d=${(eq.failureRisk30d * 100).toFixed(0)}%`,
+            value: `healthScore=${step2.healthScore.toFixed(2)}，failureRisk30d=${(step2.failureRisk30d * 100).toFixed(0)}%`,
           });
         }
-        if (fishboneMethod.length > 0 && pr.deviationScore > 0.2) {
+        if (fishboneMethod.length > 0 && step3.processDeviation > 0.2) {
           evidenceMapping.push({
             fishboneItem: fishboneMethod[0] ?? "",
             dataSource: "process.deviation",
-            value: `deviationScore=${pr.deviationScore.toFixed(2)}`,
+            value: `deviationScore=${step3.processDeviation.toFixed(2)}`,
           });
         }
         if (cc.fishbone.man.length > 0) {
@@ -166,11 +197,8 @@ export function createDowntimeRootCauseSkill() {
 
         let primaryRootCause: string | null = null;
         let mechanismPath: string | null = null;
-        // 置信度依据因果链 overlap 数量（而非单一 health 阈值）
         const overlapCount = evidenceMapping.length;
-        const causalConfidence = cc.chains.length > 0
-          ? Math.min(0.5 + overlapCount * 0.13, 0.92)
-          : 0;
+        const causalConfidence = cc.chains.length > 0 ? Math.min(0.5 + overlapCount * 0.13, 0.92) : 0;
 
         if (cc.chains.length > 0) {
           const chain = cc.chains[0]!;
@@ -184,7 +212,7 @@ export function createDowntimeRootCauseSkill() {
         } else {
           await narrate(
             ctx,
-            `当前场景无已识别因果链。设备健康 ${eq.healthScore.toFixed(2)}，鱼骨各维度无历史记录。`,
+            `当前场景无已识别因果链。设备健康 ${step2.healthScore.toFixed(2)}，鱼骨各维度无历史记录。`,
           );
         }
 
@@ -192,7 +220,48 @@ export function createDowntimeRootCauseSkill() {
       });
 
       // Step 4: 综合根因结论（优先用因果链，降级才用阈值判断）
-      const step4 = await step<ReturnType<typeof wrapEvidence>>(
+      const reasoningChain = [
+        {
+          step: 1,
+          action: "取停机事件清单 + 设备状态",
+          tool: "equipment.status + equipment.downtime",
+          finding: `状态=${step1.status}，累计停机 ${step1.totalDowntimeMinutes}min，首要原因「${step1.topReason}」`,
+          inference: "停机事件已取证，下一步查维护历史与设备健康",
+        },
+        {
+          step: 2,
+          action: "查维护历史 + 备件",
+          tool: "equipment.mtbf + equipment.mttr + equipment.health + equipment.failure_predict",
+          finding: `MTBF=${step2.mtbfHours}h，健康分=${step2.healthScore.toFixed(2)}，30天故障风险=${(step2.failureRisk30d * 100).toFixed(0)}%`,
+          inference: step2.overdueMaintenance ? "设备健康低于阈值，疑设备退化，需进一步交叉验证" : "设备健康尚可",
+        },
+        {
+          step: 3,
+          action: "交叉查工艺/物料排除外部因素",
+          tool: "process.deviation + material.shortage",
+          finding: `工艺偏离=${step3.processDeviation.toFixed(2)}，物料风险=${step3.materialShortageRisk.toFixed(2)}`,
+          inference: step3.externalCauseRuled ? "外部因素已排除，停机源于设备自身" : "外部因素未能排除，需进一步排查",
+        },
+        {
+          step: 4,
+          action: "因果链取证（5M1E 数据驱动）",
+          tool: "quality.five_why + quality.fishbone",
+          finding: step35.primaryRootCause
+            ? `因果链命中：${step35.causalChain.chains.length} 条，主根因「${step35.primaryRootCause}」`
+            : "无已识别因果链",
+          inference: step35.primaryRootCause
+            ? `根因=${step35.primaryRootCause}，与设备健康证据互证一致`
+            : "降级为阈值推断",
+        },
+      ];
+      const ruledOut: string[] = [];
+      if (step3.externalCauseRuled) {
+        ruledOut.push("外部物料短缺（shortageRisk<0.3）");
+        ruledOut.push("工艺参数诱发（deviationScore<0.3）");
+      }
+      if (!step2.overdueMaintenance) ruledOut.push("设备健康严重退化（健康分≥0.7）");
+
+      const step4 = await step<EvidenceEnvelope>(
         "综合根因结论",
         async (ctx) => {
           await narrate(ctx, "正在汇总根因结论…");
@@ -202,7 +271,6 @@ export function createDowntimeRootCauseSkill() {
           let recommendedNext: string;
 
           if (step35.primaryRootCause) {
-            // 有因果链：直接用 chains[0].rootCause 作为根因
             category = "equipment_degradation";
             rootCause = step35.primaryRootCause;
             confidence = step35.causalConfidence;
@@ -212,7 +280,6 @@ export function createDowntimeRootCauseSkill() {
               `根因来自因果链：${rootCause}。机制路径：${step35.causalChain.chains[0]?.layers.at(-1) ?? ""}。置信度 ${(confidence * 100).toFixed(0)}%。`,
             );
           } else if (step2.healthScore < 0.5) {
-            // 无因果链 + 健康分极低：设备劣化型（阈值降级）
             category = "equipment_degradation";
             rootCause = `设备健康分 ${step2.healthScore.toFixed(2)} 严重偏低，主因：${step1.topReason}（需现场 5Why 确认）`;
             confidence = 0.65;
@@ -232,14 +299,19 @@ export function createDowntimeRootCauseSkill() {
             await narrate(ctx, "设备健康尚可且外部因素已排除，判定为偶发型根因。");
           }
 
+          const diagnosis = `${line} 停机根因：${rootCause}（${category}）`;
+
           return wrapEvidence(
             {
-              scenarioId: sctx.scenarioId,
-              line: sctx.line ?? "L01",
+              scenarioId,
+              line,
+              diagnosis,
               rootCause,
               category,
               totalDowntimeMinutes: step1.totalDowntimeMinutes,
               confidence,
+              reasoningChain,
+              ruledOut,
               mechanismExplained: step35.mechanismPath ?? "无因果链，需现场 5Why 验证",
               evidenceMapping: step35.evidenceMapping,
               auxiliaryFactors: [
@@ -248,7 +320,7 @@ export function createDowntimeRootCauseSkill() {
               ].filter(Boolean),
               causalChainsFound: step35.causalChain.chains.length,
               recommendedNext,
-              dataSource: "getCausalChain + getEquipment + getProcess + getMaterial",
+              dataSource: "ctx.call: equipment.* + process.deviation + material.shortage + quality.*",
             },
             {
               freshness: "realtime",
@@ -263,13 +335,11 @@ export function createDowntimeRootCauseSkill() {
         },
       );
 
-      const rootCauseData = step4.data as { rootCause?: string; category?: string; mechanismExplained?: string; confidence?: number };
+      const rootCauseData = step4.data as { diagnosis?: string; rootCause?: string; category?: string; mechanismExplained?: string; confidence?: number };
       await skillSummary(
-        `停机根因分析完成：${rootCauseData.rootCause ?? "已定位"}。` +
-        (rootCauseData.mechanismExplained && rootCauseData.mechanismExplained !== "无因果链，需现场 5Why 验证"
-          ? `机制路径：${rootCauseData.mechanismExplained}。`
-          : "") +
-        `置信度 ${((rootCauseData.confidence ?? 0) * 100).toFixed(0)}%。`,
+        `推理完成（${reasoningChain.length} 步）：${reasoningChain.map((s) => s.inference).join(" → ")}。\n` +
+        `结论：${rootCauseData.diagnosis ?? rootCauseData.rootCause ?? "已定位"}（置信度 ${((rootCauseData.confidence ?? 0) * 100).toFixed(0)}%）。\n` +
+        `详见 [完整诊断](#artifact:${selfCallId})。`,
       );
 
       return step4;

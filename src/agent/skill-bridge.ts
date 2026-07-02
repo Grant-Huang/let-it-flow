@@ -42,6 +42,8 @@ export interface StepCtx {
   requireConfirmation: ExecutionContext["requireConfirmation"];
   /** 发射事件（透传 ExecutionContext.emit）。 */
   emit: ExecutionContext["emit"];
+  /** 当前 skill 调用的 toolCall id（用于 skill 末步注入指向自身产物的链接）。测试 mock 可缺省。 */
+  selfCallId?: string;
 }
 
 /**
@@ -88,6 +90,17 @@ export interface StepsInput {
    * skill 结束总结叙述（前置换行，便于前端分隔气泡）。
    */
   narrateSummary: (text: string) => Promise<void>;
+  /**
+   * 当前 skill 调用的 toolCall id（skill 末步 narrateSummary 可用它注入指向自身产物的链接）。
+   *
+   * @example
+   * async steps(input) {
+   *   const { step, narrateSummary, selfCallId } = input;
+   *   ...
+   *   await narrateSummary(`分析完成，详见 [诊断结论](#artifact:${selfCallId})。`);
+   * }
+   */
+  selfCallId?: string;
 }
 
 /** 动态 steps 函数签名。入参是 StepsInput（含 skill params + step 工厂），返回 skill 业务输出。 */
@@ -188,7 +201,7 @@ export function createSkill(opts: CreateSkillOptions): SkillConnector {
       let dynamicOutput: unknown;
 
       // 动态 DSL 路径：for-await yield 步骤事件
-      for await (const ev of runDynamicSteps(dynamicSteps, params, ctx, results, errors)) {
+      for await (const ev of runDynamicSteps(dynamicSteps, params, ctx, results, errors, callId)) {
         yield ev;
       }
       dynamicOutput = (results as unknown[] & { _dynamicOutput?: unknown })._dynamicOutput;
@@ -287,6 +300,7 @@ async function* runDynamicSteps(
   ctx: ExecutionContext,
   results: unknown[],
   errors: string[],
+  selfCallId: string,
 ): AsyncGenerator<ToolEvent, void> {
   const startedAt = Date.now();
 
@@ -315,6 +329,7 @@ async function* runDynamicSteps(
     },
     requireConfirmation: ctx.requireConfirmation,
     emit: ctx.emit,
+    selfCallId,
   };
 
   let stepCallCount = 0;
@@ -322,6 +337,7 @@ async function* runDynamicSteps(
   // 把 skill 输入参数合并进 stepsInput（让 dynamicSteps 能直接访问 input.xxx）
   const stepsInput: StepsInput = {
     ...params,
+    selfCallId,
     narrate: (text: string): Promise<void> =>
       ctx.emit({ type: "text", channel: "content", payload: { delta: text } }).then(() => undefined),
     narrateSummary: (text: string): Promise<void> =>

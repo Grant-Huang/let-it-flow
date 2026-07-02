@@ -9,12 +9,26 @@ import type { StreamState } from "@meso.ai/types";
  *
  * 这些都以 tool_result（JSON 字符串）承载。本模块从 toolCalls 识别对应工具并解析。
  */
+export interface ReasoningStep {
+  step: number;
+  action: string;
+  tool: string;
+  finding: string;
+  inference: string;
+}
+
 export interface NexusArtifact {
   id: string;
   type: "recommendations" | "diagnosis" | "analysis_summary" | "html_report";
   title: string;
   content: string;
   ready: boolean;
+  /** 推理链（skill 诊断类产物）：取数→分流→交叉验证→结论 */
+  reasoningChain?: ReasoningStep[];
+  /** 排除的备选解释（透明化不确定性） */
+  ruledOut?: string[];
+  /** 置信度 0-1 */
+  confidence?: number;
 }
 
 /**
@@ -33,9 +47,9 @@ export function extractArtifacts(stream: StreamState): NexusArtifact[] {
       continue;
     }
 
-    if (name === "oee.report_html") {
+    if (name === "oee.report_html" || name === "skill.report_html") {
       const parsed = parseHtmlReportOutput(tc);
-      if (parsed) seen.set("oee.report_html", parsed);
+      if (parsed) seen.set("report_html", parsed);
       continue;
     }
 
@@ -87,19 +101,30 @@ function parseSkillOutput(tc: ToolCallLike): NexusArtifact | null {
   }
   try {
     const obj = JSON.parse(tc.result.output ?? "{}") as {
-      data?: { diagnosis?: string; confidence?: number; skillName?: string };
+      data?: {
+        diagnosis?: string;
+        confidence?: number;
+        skillName?: string;
+        reasoningChain?: ReasoningStep[];
+        ruledOut?: string[];
+      };
     };
     const data = obj.data ?? {};
+    // 仅含 diagnosis 的 skill 进右栏；无 diagnosis 的（如纯成本汇总中间产物）不进右栏
+    if (typeof data.diagnosis !== "string" || data.diagnosis.trim() === "") {
+      return null;
+    }
     const skillName = data.skillName ?? tc.call.name ?? "skill";
+    const friendlyTitle = skillTitle(skillName);
     return {
       id: tc.call.id,
       type: "diagnosis",
-      title: `${skillName} 诊断结论`,
-      content:
-        typeof data.diagnosis === "string"
-          ? `${data.diagnosis}\n\n置信度：${data.confidence ?? "N/A"}`
-          : JSON.stringify(data, null, 2),
+      title: friendlyTitle,
+      content: `${data.diagnosis}\n\n置信度：${data.confidence ?? "N/A"}`,
       ready: true,
+      reasoningChain: Array.isArray(data.reasoningChain) ? data.reasoningChain : undefined,
+      ruledOut: Array.isArray(data.ruledOut) ? data.ruledOut : undefined,
+      confidence: typeof data.confidence === "number" ? data.confidence : undefined,
     };
   } catch {
     return {
@@ -110,6 +135,20 @@ function parseSkillOutput(tc: ToolCallLike): NexusArtifact | null {
       ready: true,
     };
   }
+}
+
+/** 把 skill 名映射为友好的 tab 标题。 */
+function skillTitle(name: string): string {
+  const map: Record<string, string> = {
+    "skill.oee_diagnose": "OEE 诊断",
+    "skill.downtime_root_cause": "停机根因",
+    "skill.multi_perspective_rca": "多视角根因",
+    "skill.cost_summary": "成本汇总",
+    "skill.waste_audit": "七大浪费审计",
+    "skill.dmaic": "DMAIC 路线图",
+    "skill.general_analysis": "综合诊断",
+  };
+  return map[name] ?? `${name.replace("skill.", "")} 诊断`;
 }
 
 function parseHtmlReportOutput(tc: ToolCallLike): NexusArtifact | null {

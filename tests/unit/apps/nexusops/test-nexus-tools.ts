@@ -21,6 +21,12 @@ describe("S4 NexusOps 工具集完整性", () => {
     expect(TOOLS.length).toBeGreaterThanOrEqual(60);
   });
 
+  it("总工具数 ≥ 70（9 域 + finalize + advise，Layer 1/2 解耦后部分跨域工具迁为 skill）", () => {
+    // buildNexusTools 不含 mcp.* 动作工具（单独注册）。
+    // 跨域聚合工具（部分迁为 skill.cost_summary / skill.waste_audit 等），域工具+核心 ≈ 75
+    expect(TOOLS.length).toBeGreaterThanOrEqual(70);
+  });
+
   it("OEE 域 ≥ 11 个工具", () => {
     const oee = TOOLS.filter((t) => t.name.startsWith("oee."));
     expect(oee.length).toBeGreaterThanOrEqual(11);
@@ -54,6 +60,37 @@ describe("S4 NexusOps 工具集完整性", () => {
   it("物料域 ≥ 8 个工具", () => {
     const m = TOOLS.filter((t) => t.name.startsWith("material."));
     expect(m.length).toBeGreaterThanOrEqual(8);
+  });
+
+  it("人员域 ≥ 4 个工具（含 attendance + fatigue）", () => {
+    const p = TOOLS.filter((t) => t.name.startsWith("personnel."));
+    expect(p.length).toBeGreaterThanOrEqual(4);
+    expect(BY_NAME.has("personnel.attendance")).toBe(true);
+    expect(BY_NAME.has("personnel.fatigue")).toBe(true);
+  });
+
+  it("质量域 ≥ 13 个工具（含 sigma_level + dpmo）", () => {
+    const q = TOOLS.filter((t) => t.name.startsWith("quality."));
+    expect(q.length).toBeGreaterThanOrEqual(13);
+    expect(BY_NAME.has("quality.sigma_level")).toBe(true);
+    expect(BY_NAME.has("quality.dpmo")).toBe(true);
+  });
+
+  it("精益域 ≥ 2 个工具（waste_audit + dmaic）", () => {
+    const lean = TOOLS.filter((t) => t.name.startsWith("lean."));
+    expect(lean.length).toBeGreaterThanOrEqual(2);
+    expect(BY_NAME.has("lean.waste_audit")).toBe(true);
+    expect(BY_NAME.has("lean.dmaic")).toBe(true);
+  });
+
+  it("物料域含 routing 工具（VSM 运输浪费）", () => {
+    expect(BY_NAME.has("material.routing")).toBe(true);
+  });
+
+  it("经济性域含 economics.unit 工具（P2 单位经济性）", () => {
+    expect(BY_NAME.has("economics.unit")).toBe(true);
+    const eco = TOOLS.find((t) => t.name === "economics.unit");
+    expect(eco).toBeDefined();
   });
 
   it("含 nexus_finalize + nexus_advise", () => {

@@ -149,13 +149,23 @@ describe("多视角根因分析工具", () => {
       expect(d.excludedDimensions as unknown[]).toHaveLength(6);
     });
 
-    it("excludedDimensions 正确列出空分支", async () => {
+    it("excludedDimensions 正确列出空分支（normal 场景全空）", async () => {
+      // P0-2 补充环境/测量数据后，anomaly L01 的 5M1E 全部有证据；
+      // 改用 normal 场景验证"空分支被排除"机制本身（normal 全部分支为空）
+      const r = await runTool("quality.fishbone", { scenarioId: "normal", line: "L01" });
+      const d = dataOf(r);
+      const excluded = d.excludedDimensions as string[];
+      expect(excluded.length).toBe(6);
+    });
+
+    it("anomaly L01 补充环境/测量数据后 5M1E 全部有证据", async () => {
+      // P0-2：环境（温湿度/HVAC）+ 测量（Gage R&R/校准）数据补全，
+      // anomaly L01 不再有被排除的维度（5M1E 完整）
       const r = await runTool("quality.fishbone", { scenarioId: "anomaly", line: "L01" });
       const d = dataOf(r);
       const excluded = d.excludedDimensions as string[];
-      // anomaly L01 的 environment/measurement 应被排除（见 CAUSAL_CHAIN）
-      expect(excluded.some((e) => e.includes("Environment"))).toBe(true);
-      expect(excluded.some((e) => e.includes("Measurement"))).toBe(true);
+      expect(excluded.some((e) => e.includes("Environment"))).toBe(false);
+      expect(excluded.some((e) => e.includes("Measurement"))).toBe(false);
     });
   });
 

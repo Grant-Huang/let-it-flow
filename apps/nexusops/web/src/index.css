@@ -5,9 +5,6 @@
 @tailwind components;
 @tailwind utilities;
 
-/* 导入平台级流式展示样式 */
-@import "@let-it-flow/common-ui/styles";
-
 /* NexusOps 业务专属覆盖 */
 .nexus-live-trace {
   margin: 8px 0;
@@ -239,4 +236,16 @@
   margin: 4px 0;
   white-space: pre;
   display: block;
+}
+
+/* 会话内指向右栏产物的链接（[xx](#artifact:<id>) 渲染产物） */
+.nexus-artifact-link {
+  color: var(--color-accent, #3b82f6);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  font-weight: 500;
+}
+.nexus-artifact-link:hover {
+  opacity: 0.85;
 }

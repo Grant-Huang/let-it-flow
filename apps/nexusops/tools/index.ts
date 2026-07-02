@@ -21,6 +21,8 @@ import { registerEnergyTools } from "./domains/energy.js";
 import { registerScheduleTools } from "./domains/scheduling.js";
 import { registerMaterialTools } from "./domains/material.js";
 import { registerPersonnelTools } from "./domains/personnel.js";
+import { registerLeanTools } from "./domains/lean.js";
+import { registerEconomicsTools } from "./domains/economics.js";
 
 /**
  * evidenceRefs 白名单 pattern：匹配 NexusOps 已注册工具的命名前缀。
@@ -28,7 +30,7 @@ import { registerPersonnelTools } from "./domains/personnel.js";
  * 涵盖 8 个 domain 域 + core/skill/mcp 三个通用前缀。
  */
 const NEXUS_TOOL_PATTERN =
-  /^(oee|equipment|quality|process|energy|schedule|material|personnel|core|skill|mcp)\./;
+  /^(oee|equipment|quality|process|energy|schedule|material|personnel|lean|economics|core|skill|mcp)\./;
 
 /**
  * 注册全部 NexusOps 业务工具到 ToolRegistry。
@@ -44,6 +46,8 @@ export function buildNexusTools(): FlowConnector[] {
     ...registerScheduleTools(),
     ...registerMaterialTools(),
     ...registerPersonnelTools(),
+    ...registerLeanTools(),
+    ...registerEconomicsTools(),
     createFinalizeTool(),
     createAdviseTool(),
   ];

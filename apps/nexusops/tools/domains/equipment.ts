@@ -5,7 +5,14 @@
  * 数据源：MES（运行状态）+ PLM（维护历史）。
  */
 import { createQueryTool } from "../mock-data/tool-factory.js";
-import { getEquipment, lookupActionOverride, type ScenarioId } from "../mock-data/scenarios.js";
+import {
+  getEquipmentRuntime,
+  getEquipmentReliability,
+  getEquipmentHealth,
+  getEquipmentFailureRisk,
+  lookupActionOverride,
+  type ScenarioId,
+} from "../mock-data/scenarios.js";
 
 const SYSTEM = "MES";
 
@@ -19,11 +26,12 @@ export function registerEquipmentTools(): import("../../../../src/tools/base.js"
       notFor: ["停机原因详情（走 equipment.downtime）", "历史可靠性（走 equipment.mtbf）"],
       inputSchema: { type: "object", properties: {} },
       getData: (ctx) => {
-        const e = getEquipment(ctx);
+        const rt = getEquipmentRuntime(ctx);
+        const h = getEquipmentHealth(ctx);
         const lineStopped = lookupActionOverride(ctx, "equipment.lineStopped") === true;
         return {
-          status: lineStopped ? "down" : e.status,
-          healthScore: e.healthScore,
+          status: lineStopped ? "down" : rt.status,
+          healthScore: h.healthScore,
           line: ctx.line ?? "L01",
           ...(lineStopped ? { note: "产线已被停线动作（mcp.eam.stop_line）置为 down" } : {}),
         };
@@ -40,12 +48,14 @@ export function registerEquipmentTools(): import("../../../../src/tools/base.js"
       notFor: ["实时状态（走 equipment.status）"],
       inputSchema: { type: "object", properties: {} },
       getData: (ctx) => {
-        const e = getEquipment(ctx);
+        const rt = getEquipmentRuntime(ctx);
+        const events = rt.downtimeEvents;
+        const totalDowntimeMinutes = events.reduce((s, x) => s + x.minutes, 0);
         return {
-          totalDowntimeMinutes: e.downtimeEvents.reduce((s, x) => s + x.minutes, 0),
-          eventCount: e.downtimeEvents.length,
-          events: e.downtimeEvents,
-          topReason: e.downtimeEvents[0]?.reason ?? "无停机",
+          totalDowntimeMinutes,
+          eventCount: events.length,
+          events,
+          topReason: events[0]?.reason ?? "无停机",
         };
       },
       system: SYSTEM,
@@ -60,8 +70,8 @@ export function registerEquipmentTools(): import("../../../../src/tools/base.js"
       notFor: ["单次故障详情（走 equipment.downtime）"],
       inputSchema: { type: "object", properties: {} },
       getData: (ctx) => {
-        const e = getEquipment(ctx);
-        return { mtbfHours: e.mtbfHours, baselineHours: 450, ratio: e.mtbfHours / 450 };
+        const rel = getEquipmentReliability(ctx);
+        return { mtbfHours: rel.mtbfHours, baselineHours: 450, ratio: rel.mtbfHours / 450 };
       },
       system: "PLM",
       provenance: (a) => `/plm/equipment/mtbf?line=${(a.line as string) ?? "L01"}&window=30d`,
@@ -76,8 +86,8 @@ export function registerEquipmentTools(): import("../../../../src/tools/base.js"
       notFor: ["故障频率（走 equipment.mtbf）"],
       inputSchema: { type: "object", properties: {} },
       getData: (ctx) => {
-        const e = getEquipment(ctx);
-        return { mttrMinutes: e.mttrMinutes, baselineMinutes: 45, ratio: e.mttrMinutes / 45 };
+        const rel = getEquipmentReliability(ctx);
+        return { mttrMinutes: rel.mttrMinutes, baselineMinutes: 45, ratio: rel.mttrMinutes / 45 };
       },
       system: "PLM",
       provenance: (a) => `/plm/equipment/mttr?line=${(a.line as string) ?? "L01"}&window=30d`,
@@ -92,15 +102,16 @@ export function registerEquipmentTools(): import("../../../../src/tools/base.js"
       notFor: ["实时状态（走 equipment.status）"],
       inputSchema: { type: "object", properties: { days: { type: "number", description: "查询天数（缺省 30）" } } },
       getData: (ctx) => {
-        const e = getEquipment(ctx);
+        const h = getEquipmentHealth(ctx);
+        const lowHealth = h.healthScore < 0.7;
         return {
-          logs: e.healthScore < 0.7
+          logs: lowHealth
             ? [
                 { date: "2026-06-15", type: "计划保养", note: "更换液压油" },
                 { date: "2026-06-10", type: "故障维修", note: "传感器漂移，已校准（疑似复发）" },
               ]
             : [{ date: "2026-06-15", type: "计划保养", note: "常规保养" }],
-          overdueInspection: e.healthScore < 0.7,
+          overdueInspection: lowHealth,
         };
       },
       system: "PLM",
@@ -116,16 +127,16 @@ export function registerEquipmentTools(): import("../../../../src/tools/base.js"
       notFor: ["运行状态（走 equipment.status）", "停机原因（走 equipment.downtime）"],
       inputSchema: { type: "object", properties: {} },
       getData: (ctx) => {
-        const e = getEquipment(ctx);
+        const h = getEquipmentHealth(ctx);
         return {
-          healthScore: e.healthScore,
+          healthScore: h.healthScore,
           threshold: 0.7,
-          status: e.healthScore >= 0.7 ? "healthy" : e.healthScore >= 0.4 ? "warning" : "critical",
-          signals: { vibration: e.healthScore - 0.05, temperature: e.healthScore - 0.1, current: e.healthScore },
+          status: h.healthScore >= 0.7 ? "healthy" : h.healthScore >= 0.4 ? "warning" : "critical",
+          signals: { vibration: h.healthScore - 0.05, temperature: h.healthScore - 0.1, current: h.healthScore },
         };
       },
-      system: "MES",
-      provenance: (a) => `/mes/equipment/health?line=${(a.line as string) ?? "L01"}`,
+      system: "IoT",
+      provenance: (a) => `/iot/equipment/health?line=${(a.line as string) ?? "L01"}`,
       caveat: "健康分基于 IoT 信号融合，采样率 1/min",
     }),
 
@@ -137,18 +148,18 @@ export function registerEquipmentTools(): import("../../../../src/tools/base.js"
       notFor: ["当前健康（走 equipment.health）"],
       inputSchema: { type: "object", properties: {} },
       getData: (ctx) => {
-        const e = getEquipment(ctx);
+        const fr = getEquipmentFailureRisk(ctx);
         return {
-          failureRisk30d: e.failureRisk30d,
+          failureRisk30d: fr.failureRisk30d,
           recommendedAction:
-            e.failureRisk30d > 0.5 ? "建议立即安排预防性维护"
-            : e.failureRisk30d > 0.2 ? "建议下周内安排点检"
+            fr.failureRisk30d > 0.5 ? "建议立即安排预防性维护"
+            : fr.failureRisk30d > 0.2 ? "建议下周内安排点检"
             : "按计划保养即可",
           confidence: 0.78,
         };
       },
-      system: "MES",
-      provenance: (a) => `/mes/equipment/predict?line=${(a.line as string) ?? "L01"}&horizon=30d`,
+      system: "ML",
+      provenance: (a) => `/ml/equipment/predict?line=${(a.line as string) ?? "L01"}&horizon=30d`,
       freshness: "daily",
       confidence: "estimated",
     }),
@@ -161,9 +172,10 @@ export function registerEquipmentTools(): import("../../../../src/tools/base.js"
       notFor: ["维护记录（走 equipment.maintenance_log）"],
       inputSchema: { type: "object", properties: {} },
       getData: (ctx) => {
-        const e = getEquipment(ctx);
+        const h = getEquipmentHealth(ctx);
+        const lowHealth = h.healthScore < 0.7;
         return {
-          criticalParts: e.healthScore < 0.7
+          criticalParts: lowHealth
             ? [{ name: "主轴轴承", stock: 0, required: 2, status: "缺件" }, { name: "液压密封件", stock: 5, required: 3, status: "充足" }]
             : [{ name: "主轴轴承", stock: 4, required: 2, status: "充足" }],
         };
@@ -181,15 +193,16 @@ export function registerEquipmentTools(): import("../../../../src/tools/base.js"
       notFor: ["停机事件（走 equipment.downtime）"],
       inputSchema: { type: "object", properties: { hours: { type: "number", description: "查询小时数（缺省 24）" } } },
       getData: (ctx) => {
-        const e = getEquipment(ctx);
+        const h = getEquipmentHealth(ctx);
+        const lowHealth = h.healthScore < 0.7;
         return {
-          alarms24h: e.healthScore < 0.7
+          alarms24h: lowHealth
             ? [{ code: "E-204", level: "warning", text: "主轴振动超标", count: 18 }, { code: "E-118", level: "info", text: "油温偏高", count: 8 }]
             : [],
-          totalAlarms: e.healthScore < 0.7 ? 26 : 2,
+          totalAlarms: lowHealth ? 26 : 2,
         };
       },
-      system: "MES",
+      system: SYSTEM,
       provenance: (a) => `/mes/equipment/alarms?line=${(a.line as string) ?? "L01"}&hours=${(a.hours as number) ?? 24}`,
     }),
   ];

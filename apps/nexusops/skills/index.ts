@@ -12,6 +12,11 @@
 import { createOeeDiagnoseSkill } from "./oee-diagnose.js";
 import { createDowntimeRootCauseSkill } from "./downtime-root-cause.js";
 import { createMultiPerspectiveRcaSkill } from "./multi-perspective-rca.js";
+import { createCostSummarySkill } from "./cost-summary.js";
+import { createWasteAuditSkill } from "./waste-audit.js";
+import { createDmaicSkill } from "./dmaic.js";
+import { createReportHtmlSkill } from "./report-html.js";
+import { createGeneralAnalysisSkill } from "./general-analysis.js";
 import type { SkillConnector } from "../../../src/agent/skill-bridge.js";
 import type { SkillRegistry } from "../../../src/agent/skill-registry.js";
 
@@ -26,6 +31,11 @@ export function buildNexusSkills(registry?: SkillRegistry): SkillConnector[] {
     createOeeDiagnoseSkill(),
     createDowntimeRootCauseSkill(),
     createMultiPerspectiveRcaSkill(),
+    createCostSummarySkill(),
+    createWasteAuditSkill(),
+    createDmaicSkill(),
+    createReportHtmlSkill(),
+    createGeneralAnalysisSkill(),
   ];
   // registry 的 active skill 暂时只占位（重建 SkillConnector 需 stepsPayload，
   // 由 skill-confirm 在登记 draft 时序列化；当前无 active skill 时返回手写）

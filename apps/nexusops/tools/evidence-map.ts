@@ -27,6 +27,7 @@ const DOMAIN_LABELS: Record<string, string> = {
   schedule: "排产",
   material: "物料/WIP",
   personnel: "人员",
+  lean: "精益分析",
 };
 
 /**

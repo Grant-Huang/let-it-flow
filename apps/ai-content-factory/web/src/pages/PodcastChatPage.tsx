@@ -154,7 +154,7 @@ export default function PodcastChatPage() {
 
 function WelcomeScreen() {
   return (
-    <div className="podcast-welcome" style={{ padding: "48px 24px", textAlign: "center" }}>
+    <div className="aicf-welcome" style={{ padding: "48px 24px", textAlign: "center" }}>
       <h1 style={{ fontSize: 24, marginBottom: 12 }}>Podcast Generator</h1>
       <p style={{ color: "var(--color-text-secondary)", marginBottom: 24 }}>
         输入意图，自动生成播客文稿与视频。

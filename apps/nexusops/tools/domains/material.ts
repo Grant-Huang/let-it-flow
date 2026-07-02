@@ -7,6 +7,7 @@
 import { createQueryTool } from "../mock-data/tool-factory.js";
 import {
   getMaterial,
+  getRouting,
   lookupActionOverride,
   type ScenarioContext,
   type ScenarioId,
@@ -206,6 +207,37 @@ export function registerMaterialTools(): import("../../../../src/tools/base.js")
       system: "ERP",
       provenance: (a) => `/erp/material/suggest?line=${(a.line as string) ?? "L01"}`,
       confidence: "inferred",
+    }),
+
+    // 9. 工序路线与 VSM 数据
+    createQueryTool({
+      name: "material.routing",
+      description:
+        "查工序间搬运路线（距离/时间/等待/方式），用于精益七大浪费中的运输浪费与等待浪费量化、VSM 价值流流效率计算。" +
+        "数据为 IE 部门维护的静态主数据（季度更新），不随场景变化。",
+      triggers: ["搬运路线", "运输路线", "工序路线", "VSM 路径", "物流路径", "价值流图"],
+      notFor: ["WIP 水位（走 material.wip_level）", "库存（走 material.inventory）"],
+      inputSchema: { type: "object", properties: {} },
+      getData: (ctx) => {
+        const r = getRouting(ctx);
+        const totalMove = r.routes.reduce((s, x) => s + x.moveMin, 0);
+        const totalWait = r.routes.reduce((s, x) => s + x.waitMin, 0);
+        const totalDist = r.routes.reduce((s, x) => s + x.distanceM, 0);
+        return {
+          line: ctx.line ?? "L01",
+          processes: r.processes,
+          routes: r.routes,
+          totalDistanceM: totalDist,
+          totalMoveMin: totalMove,
+          totalWaitMin: totalWait,
+          transportWasteMin: Number((totalMove + totalWait).toFixed(1)),
+          note: "搬运+等待=非增值时间，是精益七大浪费中运输与等待的量化来源",
+        };
+      },
+      system: "MES",
+      provenance: (a) => `/mes/material/routing?line=${(a.line as string) ?? "L01"}`,
+      freshness: "historical",
+      confidence: "measured",
     }),
   ];
 }

@@ -6,23 +6,21 @@
  * FMEA 擅长风险量化，三者交叉印证才提高根因置信度。
  *
  * 步骤序列：
- *   1. 锁定问题表象（读 oee 损失分解 + 质量缺陷）
- *   2. 三视角并行取证（5Why + 鱼骨图 + FMEA）
+ *   1. ctx.call("oee.realtime") + ctx.call("quality.defect_rate") → 锁定问题表象
+ *   2. ctx.call("quality.five_why") + ctx.call("quality.fishbone") + ctx.call("process.fmea") → 三视角并行取证
  *   3. 交叉印证（三视角根因重合度判定）
  *   4. 收敛根因 + 置信度（重合度高=高置信）
  *   5. 封装 EvidenceEnvelope
  */
 import { createSkill } from "../../../src/agent/skill-bridge.js";
-import {
-  getOEE,
-  getQuality,
-  getCausalChain,
-  getProcessFmea,
-  ctxFromArgs,
-  type ScenarioContext,
-} from "../tools/mock-data/scenarios.js";
-import { wrapEvidence } from "../../../src/core/evidence-envelope.js";
+import { wrapEvidence, type EvidenceEnvelope } from "../../../src/core/evidence-envelope.js";
 import { narrate, narrateSummary } from "../../../src/core/narrate.js";
+
+/** 从工具返回结果（ToolResult.output）中解包 EvidenceEnvelope.data。 */
+function unpack<T>(env: unknown): T {
+  const e = env as EvidenceEnvelope<T>;
+  return e.data;
+}
 
 /** 从维度名提取归一化域标签，用于交叉印证重合度判定。 */
 function normalizeDomain(dim: string): string {
@@ -39,7 +37,7 @@ export function createMultiPerspectiveRcaSkill() {
   return createSkill({
     name: "skill.multi_perspective_rca",
     description:
-      "多视角根因分析流：对同一问题并行用 5Why + 鱼骨图 + FMEA 三种方法分析，再交叉印证收敛根因。封装'多方法论交叉验证'最佳实践，避免单点归因。",
+      "多视角根因分析流：对同一问题并行用 5Why + 鱼骨图 + FMEA 三种方法分析，再交叉印证收敛根因。封装'多方法论交叉验证'最佳实践，避免单点归因。所有取数走 ctx.call，经过 EvidenceEnvelope 协议。",
     whenToUse: {
       triggers: [
         "多视角分析",
@@ -76,50 +74,58 @@ export function createMultiPerspectiveRcaSkill() {
     },
 
     async steps(input) {
-      const { step, narrate: skillNarrate, narrateSummary: skillSummary } = input;
+      const { step, narrate: skillNarrate, narrateSummary: skillSummary, selfCallId } = input;
       const scenarioId = typeof input.scenarioId === "string" ? input.scenarioId : "anomaly";
-      const line = typeof input.line === "string" ? input.line : undefined;
-      const sctx: ScenarioContext = ctxFromArgs({ scenarioId, line });
+      const line = typeof input.line === "string" ? input.line : "L01";
+      const baseParams = { scenarioId, line };
 
-      await skillNarrate(
-        `我开始多视角根因分析（场景：${scenarioId}${line ? `，产线 ${line}` : ""}）。`,
-      );
+      await skillNarrate(`我开始多视角根因分析（场景：${scenarioId}，产线 ${line}）。`);
 
       // Step 1: 锁定问题表象
       const step1 = await step<{
         symptom: string;
-        oee: ReturnType<typeof getOEE>;
-        quality: ReturnType<typeof getQuality>;
+        oee: { oee: number; availability: number; performance: number; quality: number };
+        defectRate: number;
       }>("锁定问题表象", async (ctx) => {
         await narrate(ctx, "正在取 OEE 损失分解 + 质量缺陷，锁定问题表象…");
-        const oee = getOEE(sctx);
-        const q = getQuality(sctx);
-        const cc = getCausalChain(sctx);
-        const symptom =
-          cc.symptom && cc.chains.length > 0
-            ? cc.symptom
-            : `OEE=${(oee.oee * 100).toFixed(1)}%，缺陷率=${(q.defectRate * 100).toFixed(1)}%`;
+        const oeeEnv = await ctx.call<{ data: { oee: number; availability: number; performance: number; quality: number } }>(
+          "oee.realtime",
+          baseParams,
+        );
+        const oee = unpack<{ oee: number; availability: number; performance: number; quality: number }>(oeeEnv);
+        const qEnv = await ctx.call<{ data: { defectRate: number } }>("quality.defect_rate", baseParams);
+        const q = unpack<{ defectRate: number }>(qEnv);
+        const fwEnv = await ctx.call<{ data: { symptom: string; chains: unknown[] } }>("quality.five_why", baseParams);
+        const fw = unpack<{ symptom: string; chains: unknown[] }>(fwEnv);
+        const symptom = fw.symptom && fw.chains.length > 0
+          ? fw.symptom
+          : `OEE=${(oee.oee * 100).toFixed(1)}%，缺陷率=${(q.defectRate * 100).toFixed(1)}%`;
         await narrate(
           ctx,
           `问题表象：${symptom}（OEE 三要素：可用 ${(oee.availability * 100).toFixed(0)}% / 性能 ${(oee.performance * 100).toFixed(0)}% / 质量 ${(oee.quality * 100).toFixed(0)}%）。`,
         );
-        return { symptom, oee, quality: q };
+        return { symptom, oee, defectRate: q.defectRate };
       });
 
       // Step 2: 三视角并行取证
       const step2 = await step<{
-        fiveWhy: ReturnType<typeof getCausalChain>["chains"];
-        fishbone: ReturnType<typeof getCausalChain>["fishbone"];
-        fmea: ReturnType<typeof getProcessFmea>;
+        fiveWhy: Array<{ rootCause: string }>;
+        fishbone: Array<{ dimension: string; factors: string[] }>;
+        fmeaHighRisk: unknown[];
       }>("三视角并行取证（5Why + 鱼骨图 + FMEA）", async (ctx) => {
-        await narrate(ctx, "正在并行调取 5Why 链 / 鱼骨图 5M1E / FMEA 失效模式…");
-        const cc = getCausalChain(sctx);
-        const fmea = getProcessFmea(sctx);
+        await narrate(ctx, "正在并行调 quality.five_why / quality.fishbone / process.fmea…");
+        const fwEnv = await ctx.call<{ data: { chains: Array<{ rootCause: string }> } }>("quality.five_why", baseParams);
+        const fw = unpack<{ chains: Array<{ rootCause: string }> }>(fwEnv);
+        const fbEnv = await ctx.call<{ data: { branches: Array<{ dimension: string; factors: string[] }> } }>("quality.fishbone", baseParams);
+        const fb = unpack<{ branches: Array<{ dimension: string; factors: string[] }> }>(fbEnv);
+        const fmeaEnv = await ctx.call<{ data: { highRisk: unknown[] } }>("process.fmea", baseParams);
+        const fmea = unpack<{ highRisk: unknown[] }>(fmeaEnv);
+        const nonEmptyBranches = fb.branches.filter((b) => b.factors.length > 0);
         await narrate(
           ctx,
-          `5Why 链 ${cc.chains.length} 条，鱼骨图 ${Object.values(cc.fishbone).filter((a) => a.length > 0).length}/6 维度有证据，FMEA 高风险项 ${fmea.highRisk.length} 个。`,
+          `5Why 链 ${fw.chains.length} 条，鱼骨图 ${nonEmptyBranches.length}/6 维度有证据，FMEA 高风险项 ${fmea.highRisk.length} 个。`,
         );
-        return { fiveWhy: cc.chains, fishbone: cc.fishbone, fmea };
+        return { fiveWhy: fw.chains, fishbone: fb.branches, fmeaHighRisk: fmea.highRisk };
       });
 
       // Step 3: 交叉印证（三视角根因重合度判定）
@@ -130,21 +136,16 @@ export function createMultiPerspectiveRcaSkill() {
       }>("交叉印证（三视角根因重合度判定）", async (ctx) => {
         await narrate(ctx, "正在交叉印证三视角根因…");
 
-        // 5Why 收敛的根因域
-        const fiveWhyDomains = new Set(
-          step2.fiveWhy.map((c) => normalizeDomain(c.rootCause)),
-        );
+        const fiveWhyDomains = new Set(step2.fiveWhy.map((c) => normalizeDomain(c.rootCause)));
 
-        // 鱼骨图证据最多的维度
-        const branchCounts = Object.entries(step2.fishbone).map(([dim, factors]) => ({
-          domain: normalizeDomain(dim),
-          count: factors.length,
+        const branchCounts = step2.fishbone.map((b) => ({
+          domain: normalizeDomain(b.dimension),
+          count: b.factors.length,
         }));
         const topBranch = branchCounts.sort((a, b) => b.count - a.count)[0];
         const fishboneDomain = topBranch && topBranch.count > 0 ? topBranch.domain : "none";
 
-        // FMEA 高风险项的参数域（温度/压力/速度 → method 域）
-        const fmeaDomain = step2.fmea.highRisk.length > 0 ? "method" : "none";
+        const fmeaDomain = step2.fmeaHighRisk.length > 0 ? "method" : "none";
 
         const convergence: string[] = [];
         if (fiveWhyDomains.has(fishboneDomain)) convergence.push("5Why+鱼骨图");
@@ -152,13 +153,11 @@ export function createMultiPerspectiveRcaSkill() {
         if (fiveWhyDomains.has(fmeaDomain) && fmeaDomain !== "none") convergence.push("5Why+FMEA");
 
         const overlapCount = convergence.length;
-        const allThree =
-          fiveWhyDomains.has(fishboneDomain) && fishboneDomain === fmeaDomain && fishboneDomain !== "none";
-        const primaryDomain = allThree ? fishboneDomain : fishboneDomain;
+        const primaryDomain = fishboneDomain;
 
         await narrate(
           ctx,
-          `5Why 收敛域：[${[...fiveWhyDomains].join(", ")}]；鱼骨图主域：${fishboneDomain}；FMEA 域：${fmeaDomain}。重合：${overlapCount}/3${allThree ? "（三视角全重合）" : ""}。`,
+          `5Why 收敛域：[${[...fiveWhyDomains].join(", ")}]；鱼骨图主域：${fishboneDomain}；FMEA 域：${fmeaDomain}。重合：${overlapCount}/3。`,
         );
         return { convergence, overlapCount, primaryDomain };
       });
@@ -171,12 +170,7 @@ export function createMultiPerspectiveRcaSkill() {
       }>("收敛根因 + 置信度", async (ctx) => {
         await narrate(ctx, "正在汇总多视角结论…");
         const root5why = step2.fiveWhy[0]?.rootCause ?? "（5Why 无收敛链，normal 场景）";
-        const confidence =
-          step3.overlapCount >= 2
-            ? 0.9
-            : step3.overlapCount === 1
-              ? 0.7
-              : 0.5;
+        const confidence = step3.overlapCount >= 2 ? 0.9 : step3.overlapCount === 1 ? 0.7 : 0.5;
         const recommendedNext =
           confidence >= 0.9
             ? `三视角重合于 ${step3.primaryDomain} 域，建议直接针对 ${root5why} 立项改善`
@@ -195,17 +189,63 @@ export function createMultiPerspectiveRcaSkill() {
       });
 
       // Step 5: 封装 EvidenceEnvelope
-      const step5 = await step<ReturnType<typeof wrapEvidence>>(
+      const reasoningChain = [
+        {
+          step: 1,
+          action: "锁定问题表象",
+          tool: "oee.realtime + quality.defect_rate + quality.five_why",
+          finding: `表象：${step1.symptom}（OEE=${(step1.oee.oee * 100).toFixed(1)}%，缺陷率=${(step1.defectRate * 100).toFixed(1)}%）`,
+          inference: "问题表象已锁定，进入多视角取证",
+        },
+        {
+          step: 2,
+          action: "三视角并行取证（5Why + 鱼骨图 + FMEA）",
+          tool: "quality.five_why + quality.fishbone + process.fmea",
+          finding: `5Why 链 ${step2.fiveWhy.length} 条，鱼骨图 ${step2.fishbone.filter((b) => b.factors.length > 0).length}/6 维度有证据，FMEA 高风险 ${step2.fmeaHighRisk.length} 项`,
+          inference: "三视角证据已采集，进入交叉印证",
+        },
+        {
+          step: 3,
+          action: "交叉印证（三视角根因重合度判定）",
+          tool: "normalizeDomain 重合度计算",
+          finding: `5Why 域 ∩ 鱼骨图域 ∩ FMEA 域，重合 ${step3.overlapCount}/3，主域=${step3.primaryDomain}`,
+          inference: step3.overlapCount >= 2 ? "三视角高度重合，根因置信度高" : step3.overlapCount === 1 ? "部分重合，置信度中" : "未重合，置信度低",
+        },
+        {
+          step: 4,
+          action: "收敛根因 + 置信度",
+          tool: "重合度→置信度映射",
+          finding: step4.rootCause,
+          inference: `置信度 ${(step4.confidence * 100).toFixed(0)}%，建议：${step4.recommendedNext}`,
+        },
+      ];
+      const ruledOut: string[] = [];
+      const allDomains = ["man", "machine", "material", "method", "environment", "measurement"];
+      const involvedDomains = new Set([
+        ...step2.fiveWhy.map((c) => normalizeDomain(c.rootCause)),
+        ...step2.fishbone.filter((b) => b.factors.length > 0).map((b) => normalizeDomain(b.dimension)),
+      ]);
+      allDomains.forEach((d) => {
+        if (!involvedDomains.has(d) && d !== step3.primaryDomain) {
+          ruledOut.push(`${d} 域（三视角均无证据指向）`);
+        }
+      });
+
+      const step5 = await step<EvidenceEnvelope>(
         "封装多视角分析 EvidenceEnvelope",
         async (ctx) => {
           await narrate(ctx, "正在封装多视角分析结论…");
+          const diagnosis = `${line} 多视角根因：${step4.rootCause}（重合 ${step3.overlapCount}/3）`;
           return wrapEvidence(
             {
-              scenarioId: sctx.scenarioId,
-              line: sctx.line ?? "L01",
+              scenarioId,
+              line,
               symptom: step1.symptom,
+              diagnosis,
               rootCause: step4.rootCause,
               confidence: step4.confidence,
+              reasoningChain,
+              ruledOut,
               convergence: step3.convergence,
               overlapCount: step3.overlapCount,
               primaryDomain: step3.primaryDomain,
@@ -213,9 +253,10 @@ export function createMultiPerspectiveRcaSkill() {
               perspectives: {
                 fiveWhy: step2.fiveWhy,
                 fishbone: step2.fishbone,
-                fmeaHighRisk: step2.fmea.highRisk,
+                fmeaHighRisk: step2.fmeaHighRisk,
               },
               stepsExecuted: 5,
+              dataSource: "ctx.call: oee.realtime + quality.* + process.fmea",
             },
             {
               freshness: "realtime",
@@ -229,7 +270,9 @@ export function createMultiPerspectiveRcaSkill() {
       );
 
       await skillSummary(
-        `多视角分析完成：${step4.rootCause}（置信度 ${(step4.confidence * 100).toFixed(0)}%，重合 ${step3.overlapCount}/3）。`,
+        `推理完成（${reasoningChain.length} 步）：${reasoningChain.map((s) => s.inference).join(" → ")}。\n` +
+        `结论：${step4.rootCause}（置信度 ${(step4.confidence * 100).toFixed(0)}%，重合 ${step3.overlapCount}/3）。\n` +
+        `详见 [完整诊断](#artifact:${selfCallId})。`,
       );
 
       return step5;

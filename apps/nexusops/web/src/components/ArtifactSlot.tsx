@@ -2,21 +2,26 @@ import { useEffect, useRef } from "react";
 import type { StreamState } from "@meso.ai/types";
 import { ArtifactPaneShell, ArtifactPanel } from "@meso.ai/ui";
 import { extractArtifacts, inferLabel, isHtmlArtifact } from "../lib/artifacts.js";
+import { DiagnosisPanel } from "./DiagnosisPanel.js";
 
 /**
  * NexusOps 产物面板插槽。
  *
  * 展示 ReAct 分析的"产物"：
  *  - nexus_advise 的结构化建议（JSON，含 impact/confidence/actionTool）
- *  - skill.* 的诊断结论
- *  - oee.report_html 的 HTML 诊断报告（iframe 渲染，含 postMessage 按钮桥）
+ *  - skill.* 的诊断结论（含推理链 reasoningChain，DiagnosisPanel 渲染）
+ *  - skill.report_html / oee.report_html 的 HTML 诊断报告（iframe 渲染）
+ *
+ * 受控：activeTabId 由父组件持有，便于点击会话中 #artifact 链接时切换 tab。
  */
 export interface ArtifactSlotProps {
   stream: StreamState | null | undefined;
   onMcpAction?: (tool: string, args: Record<string, unknown>) => void;
+  activeArtifactId?: string;
+  onArtifactTabChange?: (id: string) => void;
 }
 
-export function ArtifactSlot({ stream, onMcpAction }: ArtifactSlotProps) {
+export function ArtifactSlot({ stream, onMcpAction, activeArtifactId, onArtifactTabChange }: ArtifactSlotProps) {
   if (!stream) return <EmptyPanel />;
 
   const arts = extractArtifacts(stream);
@@ -24,10 +29,12 @@ export function ArtifactSlot({ stream, onMcpAction }: ArtifactSlotProps) {
 
   const tabs = arts.map((art) => ({
     id: art.id,
-    label: inferLabel(art.type),
+    label: art.type === "diagnosis" ? art.title : inferLabel(art.type),
     ready: art.ready,
     content: art.ready ? (
-      isHtmlArtifact(art.type) ? (
+      art.type === "diagnosis" ? (
+        <DiagnosisPanel artifact={art} />
+      ) : isHtmlArtifact(art.type) ? (
         <HtmlReportFrame html={art.content} onMcpAction={onMcpAction} />
       ) : (
         <ArtifactPanel type="code" content={art.content} streaming={!art.ready} />
@@ -39,7 +46,14 @@ export function ArtifactSlot({ stream, onMcpAction }: ArtifactSlotProps) {
     ),
   }));
 
-  return <ArtifactPaneShell tabs={tabs} autoSelectFirstReady />;
+  return (
+    <ArtifactPaneShell
+      tabs={tabs}
+      activeTabId={activeArtifactId}
+      onTabChange={onArtifactTabChange}
+      autoSelectFirstReady
+    />
+  );
 }
 
 interface HtmlReportFrameProps {

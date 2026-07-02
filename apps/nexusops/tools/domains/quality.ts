@@ -8,6 +8,7 @@ import { createQueryTool } from "../mock-data/tool-factory.js";
 import {
   getQuality,
   getCausalChain,
+  getSpcSamples,
   lookupActionOverride,
   type ScenarioContext,
   type ScenarioId,
@@ -92,25 +93,55 @@ export function registerQualityTools(): import("../../../../src/tools/base.js").
       freshness: "daily",
     }),
 
-    // 3. SPC 统计过程控制
+    // 3. SPC 统计过程控制（30 样本 + Nelson 判异规则）
     createQueryTool({
       name: "quality.spc",
-      description: "查关键尺寸的 SPC 控制图数据（CL/UCL/LCL + 最近样本）。判断过程是否受控。",
-      triggers: ["SPC", "控制图", "过程受控", "UCL LCL", "均值极差图"],
-      notFor: ["过程能力指数（走 quality.cp_cpk）"],
-      inputSchema: { type: "object", properties: {} },
-      getData: (ctx) => {
-        const q = getQuality(ctx);
-        const outOfControl = q.cpk < 1.0;
+      description:
+        "查关键尺寸的 SPC 控制图数据（CL/UCL/LCL + 30 个连续样本 + Nelson 八大判异规则）。" +
+        "支持多关键尺寸切换（通过 dimensionIndex 参数）。判断过程是否受控、有无漂移趋势。",
+      triggers: ["SPC", "控制图", "过程受控", "UCL LCL", "均值极差图", "X-bar R"],
+      notFor: ["过程能力指数（走 quality.cp_cpk）", "Sigma 水平（走 quality.sigma_level）"],
+      inputSchema: {
+        type: "object",
+        properties: {
+          dimensionIndex: { type: "number", description: "尺寸索引（0=第一关键尺寸，1=第二，缺省 0）" },
+        },
+      },
+      getData: (ctx, args) => {
+        const data = getSpcSamples(ctx);
+        const dimIdx = (args?.dimensionIndex as number) ?? 0;
+        const dim = data.dimensions[dimIdx] ?? data.dimensions[0]!;
+        const samples = dim.samples;
+        const n = samples.length;
+        const cl = samples.reduce((s, v) => s + v, 0) / n;
+        // sigma = sqrt(sum((x-mean)^2)/n)
+        const variance = samples.reduce((s, v) => s + (v - cl) ** 2, 0) / n;
+        const sigma = Math.sqrt(variance);
+        const ucl = cl + 3 * sigma;
+        const lcl = cl - 3 * sigma;
+        const violations = checkNelsonRules(samples, cl, ucl, lcl, sigma);
+        const outOfSpec = samples.filter((v) => v > dim.usl || v < dim.lsl).length;
         return {
-          cl: 10.0, ucl: 10.15, lcl: 9.85,
-          recentSamples: [10.02, 10.05, outOfControl ? 10.21 : 10.08, 10.04, outOfControl ? 10.18 : 10.06],
-          outOfControl,
-          ruleViolations: outOfControl ? ["连续 3 点超 UCL"] : [],
+          dimension: dim.name,
+          unit: dim.unit,
+          target: dim.target,
+          usl: dim.usl,
+          lsl: dim.lsl,
+          cl: Number(cl.toFixed(4)),
+          ucl: Number(ucl.toFixed(4)),
+          lcl: Number(lcl.toFixed(4)),
+          sigma: Number(sigma.toFixed(4)),
+          samples,
+          sampleCount: n,
+          subgroupSize: dim.subgroupSize,
+          outOfSpecCount: outOfSpec,
+          nelsonViolations: violations,
+          outOfControl: violations.length > 0,
+          hasDrift: samples[n - 1]! - samples[0]! > sigma,
         };
       },
       system: SYSTEM,
-      provenance: (a) => `/mom/quality/spc?line=${(a.line as string) ?? "L01"}&dim=critical`,
+      provenance: (a) => `/mom/quality/spc?line=${(a.line as string) ?? "L01"}&dim=${(a.dimensionIndex as number) ?? 0}`,
     }),
 
     // 4. 过程能力（Cp/Cpk）
@@ -297,7 +328,183 @@ export function registerQualityTools(): import("../../../../src/tools/base.js").
       provenance: (a) => `/mom/quality/fishbone?line=${(a.line as string) ?? "L01"}`,
       confidence: "inferred",
     }),
+
+    // 12. Sigma 水平（6Sigma DMAIC M 阶段核心指标）
+    createQueryTool({
+      name: "quality.sigma_level",
+      description:
+        "查过程 Sigma 水平（短期 Z.st + 长期 Z.lt）+ DPMO + 能力评级。" +
+        "6Sigma DMAIC 的 Measure 阶段核心指标，量化过程离 6Sigma 目标的差距。" +
+        "Z.st = 3×Cpk（短期）；Z.lt = Z.st - 1.5（经验偏移，长期含漂移）。",
+      triggers: ["Sigma 水平", "西格玛水平", "Z值", "Z-bench", "6Sigma 水平", "六西格玛评估"],
+      notFor: ["过程能力 Cp/Cpk（走 quality.cp_cpk）", "DPMO 趋势（走 quality.dpmo）"],
+      inputSchema: { type: "object", properties: {} },
+      getData: (ctx) => {
+        const q = getQuality(ctx);
+        const zSt = 3 * q.cpk;
+        const zLt = zSt - 1.5;
+        const dpmo = Math.round(q.defectRate * 1_000_000);
+        const level = zLt >= 6 ? "world_class" : zLt >= 4 ? "adequate" : zLt >= 3 ? "marginal" : "inadequate";
+        const sigmaGap = Math.max(0, 6 - zLt);
+        return {
+          cpk: q.cpk,
+          shortTermSigma: Number(zSt.toFixed(2)),
+          longTermSigma: Number(zLt.toFixed(2)),
+          dpmo,
+          level,
+          targetSigma: 6,
+          gapToTarget: Number(sigmaGap.toFixed(2)),
+          dpmoTarget: 3.4,
+          assessment:
+            level === "world_class" ? "已达 6Sigma 世界级水平"
+            : level === "adequate" ? `距 6Sigma 目标差 ${sigmaGap.toFixed(1)}σ，DPMO ${dpmo} 远高于 3.4 目标`
+            : level === "marginal" ? `过程能力边缘，距 6Sigma 目标差 ${sigmaGap.toFixed(1)}σ，需系统改善`
+            : `过程能力不足，距 6Sigma 目标差 ${sigmaGap.toFixed(1)}σ，优先解决关键缺陷`,
+          recommendedTools: "DMAIC 改善路径：走 lean.dmaic 生成五阶段路线图",
+        };
+      },
+      system: "MOM",
+      provenance: (a) => `/mom/quality/sigma_level?line=${(a.line as string) ?? "L01"}`,
+      freshness: "daily",
+      confidence: "inferred",
+    }),
+
+    // 13. DPMO 趋势（按缺陷类型分解的百万机会缺陷数）
+    createQueryTool({
+      name: "quality.dpmo",
+      description:
+        "查 DPMO（Defects Per Million Opportunities，百万机会缺陷数）+ 按缺陷类型分解的 DPMO 贡献。" +
+        "用于识别 DPMO 的主要贡献缺陷类型，为 DMAIC 改善课题选择提供数据支撑。",
+      triggers: ["DPMO", "DPMO 趋势", "缺陷机会", "百万缺陷数", "百万机会缺陷"],
+      notFor: ["Sigma 水平（走 quality.sigma_level）", "缺陷帕累托（走 quality.pareto）"],
+      inputSchema: { type: "object", properties: {} },
+      getData: (ctx) => {
+        const q = getQuality(ctx);
+        const totalDpmo = Math.round(q.defectRate * 1_000_000);
+        const opportunitiesPerUnit = 5;
+        const byDefectType = q.topDefects.map((d) => ({
+          defectType: d.type,
+          count: d.count,
+          share: d.pct,
+          dpmoContribution: Math.round(totalDpmo * d.pct),
+          isVitalFew: false,
+        }));
+        const sortedByDpmo = [...byDefectType].sort((a, b) => b.dpmoContribution - a.dpmoContribution);
+        const cumulativeThreshold = totalDpmo * 0.8;
+        let cumulative = 0;
+        for (const item of sortedByDpmo) {
+          cumulative += item.dpmoContribution;
+          item.isVitalFew = cumulative <= cumulativeThreshold;
+        }
+        return {
+          totalDpmo,
+          opportunitiesPerUnit,
+          defectRate: q.defectRate,
+          byDefectType: sortedByDpmo,
+          vitalFew: sortedByDpmo.filter((d) => d.isVitalFew),
+          paretoInsight:
+            sortedByDpmo.length > 0
+              ? `前 ${sortedByDpmo.filter((d) => d.isVitalFew).length} 类缺陷贡献了约 80% 的 DPMO，应优先攻关`
+              : "无缺陷数据",
+          sixSigmaDpmoTarget: 3.4,
+          gapToTarget: totalDpmo - 3.4,
+        };
+      },
+      system: "MOM",
+      provenance: (a) => `/mom/quality/dpmo?line=${(a.line as string) ?? "L01"}&window=7d`,
+      freshness: "daily",
+      confidence: "inferred",
+    }),
   ];
+}
+
+/**
+ * Nelson 八大判异规则（SPC 控制图异常模式识别）。
+ *
+ * 国际标准（Nelson Rules / Western Electric Rules 变体），用于自动判定过程是否受控：
+ *   Rule 1：任一点超 3σ（UCL/LCL 外）
+ *   Rule 2：连续 9 点在中心线同一侧
+ *   Rule 3：连续 6 点单调递增或递减（趋势）
+ *   Rule 4：连续 14 点交替上下（震荡）
+ *   Rule 5：连续 3 点中 2 点在 2σ 外（同侧）
+ *   Rule 6：连续 5 点中 4 点在 1σ 外（同侧）
+ *   Rule 7：连续 15 点在 1σ 内（变异过小，可能数据造假或分层不足）
+ *   Rule 8：连续 8 点在 1σ 外（双侧）
+ *
+ * @returns 违规列表，每项含规则号、描述、涉及的样本索引
+ */
+function checkNelsonRules(
+  samples: number[],
+  cl: number,
+  ucl: number,
+  lcl: number,
+  sigma: number,
+): Array<{ rule: number; name: string; indices: number[] }> {
+  const violations: Array<{ rule: number; name: string; indices: number[] }> = [];
+  const s2u = cl + 2 * sigma;
+  const s2l = cl - 2 * sigma;
+  const s1u = cl + 1 * sigma;
+  const s1l = cl - 1 * sigma;
+  const n = samples.length;
+
+  // Rule 1：任一点超 3σ
+  const r1 = samples.reduce((acc: number[], v, i) => (v > ucl || v < lcl ? [...acc, i] : acc), []);
+  if (r1.length > 0) violations.push({ rule: 1, name: "点超出 3σ 控制限", indices: r1 });
+
+  // Rule 2：连续 9 点同侧
+  let run = 1;
+  for (let i = 1; i < n; i++) {
+    if ((samples[i]! > cl && samples[i - 1]! > cl) || (samples[i]! < cl && samples[i - 1]! < cl)) {
+      run++;
+      if (run >= 9) {
+        violations.push({ rule: 2, name: "连续 9 点在中心线同一侧", indices: range(i - 8, i + 1) });
+        break;
+      }
+    } else run = 1;
+  }
+
+  // Rule 3：连续 6 点单调趋势
+  let trend = 1;
+  for (let i = 1; i < n; i++) {
+    const diff = samples[i]! - samples[i - 1]!;
+    const prevDiff = i >= 2 ? samples[i - 1]! - samples[i - 2]! : diff;
+    if (diff !== 0 && ((diff > 0 && prevDiff > 0) || (diff < 0 && prevDiff < 0))) {
+      trend++;
+      if (trend >= 6) {
+        violations.push({ rule: 3, name: "连续 6 点单调递增或递减", indices: range(i - 5, i + 1) });
+        break;
+      }
+    } else trend = 1;
+  }
+
+  // Rule 5：连续 3 点中 2 点在 2σ 外（同侧）
+  for (let i = 2; i < n; i++) {
+    const w = [samples[i - 2]!, samples[i - 1]!, samples[i]!];
+    const above = w.filter((v) => v > s2u);
+    const below = w.filter((v) => v < s2l);
+    if (above.length >= 2 || below.length >= 2) {
+      violations.push({ rule: 5, name: "连续 3 点中 2 点超 2σ（同侧）", indices: [i - 2, i - 1, i] });
+      break;
+    }
+  }
+
+  // Rule 6：连续 5 点中 4 点在 1σ 外（同侧）
+  for (let i = 4; i < n; i++) {
+    const w = samples.slice(i - 4, i + 1);
+    const above = w.filter((v) => v > s1u);
+    const below = w.filter((v) => v < s1l);
+    if (above.length >= 4 || below.length >= 4) {
+      violations.push({ rule: 6, name: "连续 5 点中 4 点超 1σ（同侧）", indices: range(i - 4, i + 1) });
+      break;
+    }
+  }
+
+  return violations;
+}
+
+/** 生成 [start, end) 的整数序列。 */
+function range(start: number, end: number): number[] {
+  return Array.from({ length: end - start }, (_, i) => start + i);
 }
 
 export type { ScenarioId };

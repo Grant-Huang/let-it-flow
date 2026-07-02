@@ -1,21 +1,24 @@
 import type { StreamState } from "@meso.ai/types";
-import { WorkflowTimeline, ProcessTrace, CollapsibleToolTrace } from "@meso.ai/ui";
+import { WorkflowTimeline } from "@meso.ai/ui";
+import { ExecutionDetails } from "./ExecutionDetails.js";
 
 /**
  * 实时执行轨迹渲染（传给 MessageList.renderLiveTrace）。
  *
- * 设计：采用Claude Code的设计思路
- *  - Verbose OFF: 简洁模式 - 仅展示 WorkflowTimeline，工具细节按需展开
- *  - Verbose ON: 详细模式 - 展示 ProcessTrace + 工具调用完整链
+ * 风格规范见 docs/24-conversational-streaming-style.md。
+ * 采用自写 ExecutionDetails（叙述文本 + 工具行交错），与 nexusops 视觉统一：
+ *   - 工具行不装箱：mono 工具名 + chevron + 状态文本 + 证据徽章
+ *   - 叙述文本 14px，简单 markdown（**bold** / - bullet）
+ *   - 隐藏 meta 工具（nexus_finalize 等）
+ *   - 工具参数/输出可折叠，代码块低对比
  *
- * 组件来源：完全使用 @meso.ai/ui 的流式 UI 套件
- *  1. WorkflowTimeline —— DAG run + 节点状态时间线
- *  2. ProcessTrace —— phase / think / tool_call 执行过程
- *  3. CollapsibleToolTrace —— 可折叠的工具调用详情（仅在 verbose 或需要时展开）
+ * verbose 开关仅控制是否显示 WorkflowTimeline（DAG 时间线）。
+ * 工具细节的展开/折叠由 ExecutionDetails 内部 chevron 管理，无需外层 verbose。
  */
 export interface RenderLiveTraceOptions {
   streaming: boolean;
   verbose?: boolean;
+  /** 保留字段以兼容调用方；ExecutionDetails 不处理 tool_call 级确认（走 extension ConfirmGateCard）。 */
   onToolConfirm?: (toolCallId: string) => void;
   onToolCancel?: (toolCallId: string) => void;
 }
@@ -26,10 +29,7 @@ export function createRenderLiveTrace(opts: RenderLiveTraceOptions) {
 
 function LiveTrace({
   stream,
-  streaming,
   verbose = false,
-  onToolConfirm,
-  onToolCancel,
 }: {
   stream: StreamState;
   streaming: boolean;
@@ -38,54 +38,14 @@ function LiveTrace({
   onToolCancel?: (toolCallId: string) => void;
 }) {
   const runs = stream.workflowRunOrder.map((id) => stream.workflowRuns[id]).filter(Boolean);
-  const toolCallCount = stream.toolCallOrder.length;
 
   return (
-    <div className="podcast-live-trace">
-      {runs.length > 0 && <WorkflowTimeline runs={runs} />}
+    <div className="aicf-live-trace">
+      {/* verbose 模式才显示 DAG 时间线（podcast 多为线性 ReAct，默认折叠减少噪音） */}
+      {verbose && runs.length > 0 && <WorkflowTimeline runs={runs} />}
 
-      {/* 根据 verbose 模式决定显示策略 */}
-      {verbose ? (
-        /* Verbose ON: 展示完整的 ProcessTrace + 可折叠工具细节 */
-        <>
-          <ProcessTrace
-            stream={stream}
-            streaming={streaming}
-            turnStreaming={stream.status === "streaming"}
-            onToolConfirm={onToolConfirm}
-            onToolCancel={onToolCancel}
-          />
-
-          {toolCallCount > 0 && (
-            <details className="streaming-details">
-              <summary className="streaming-summary">
-                📋 完整工具链 ({toolCallCount} 步操作)
-              </summary>
-              <CollapsibleToolTrace stream={stream} />
-            </details>
-          )}
-        </>
-      ) : (
-        /* Verbose OFF: 简洁模式 - 仅展示工具细节（可折叠） */
-        <>
-          <ProcessTrace
-            stream={stream}
-            streaming={streaming}
-            turnStreaming={stream.status === "streaming"}
-            onToolConfirm={onToolConfirm}
-            onToolCancel={onToolCancel}
-          />
-
-          {toolCallCount > 0 && (
-            <details className="streaming-details">
-              <summary className="streaming-summary">
-                📋 执行细节 ({toolCallCount} 步)
-              </summary>
-              <CollapsibleToolTrace stream={stream} />
-            </details>
-          )}
-        </>
-      )}
+      {/* 叙述文本 + 工具行交错（自写组件，与 nexusops 风格统一） */}
+      <ExecutionDetails stream={stream} />
     </div>
   );
 }

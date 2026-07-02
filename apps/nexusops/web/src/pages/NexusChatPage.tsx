@@ -8,6 +8,7 @@ import { createRenderExtension } from "../components/renderExtension.js";
 import { ArtifactSlot } from "../components/ArtifactSlot.js";
 import { SessionList } from "../components/SessionList.js";
 import { extractArtifacts } from "../lib/artifacts.js";
+import { renderMarkdown } from "../lib/markdown.js";
 import type { ConfirmDecision } from "../lib/api.js";
 
 /** 从 StreamState 的 eventLog 中拼接所有文本 delta，得到本轮 AI 回答的完整文本。 */
@@ -33,6 +34,8 @@ export default function NexusChatPage() {
   const [history, setHistory] = useState<Message[]>([]);
   const [artifactVisible, setArtifactVisible] = useState(false);
   const [verboseMode, setVerboseMode] = useState(false);
+  /** 受控的右栏产物 tab id（点击会话中 #artifact 链接时切换）。 */
+  const [activeArtifactId, setActiveArtifactId] = useState<string | undefined>(undefined);
 
   const { state, taskId, conversationId, isStreaming, start, followUp, replay, confirm, clarify, abort, reset } = useNexusStream();
 
@@ -69,6 +72,12 @@ export default function NexusChatPage() {
       reset();
       await start(intent);
     }
+  };
+
+  /** 从示例卡片填充输入框（不自动提交，由用户确认后发送）。 */
+  const handleFillIntent = (intent: string) => {
+    if (isStreaming) return;
+    setInput(intent);
   };
 
   const handleAbort = () => {
@@ -146,7 +155,14 @@ export default function NexusChatPage() {
           onNewSession={handleNewSession}
         />
       }
-      artifactPanel={<ArtifactSlot stream={state} onMcpAction={handleMcpAction} />}
+      artifactPanel={
+        <ArtifactSlot
+          stream={state}
+          onMcpAction={handleMcpAction}
+          activeArtifactId={activeArtifactId}
+          onArtifactTabChange={setActiveArtifactId}
+        />
+      }
       artifactVisible={showArtifact}
       onArtifactToggle={setArtifactVisible}
       defaultArtifactVisible={false}
@@ -154,22 +170,38 @@ export default function NexusChatPage() {
     >
       <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
         <div style={{ flex: 1, overflow: "auto" }}>
-          <MessageList
-            messages={history}
-            streaming={isStreaming || state.status !== "idle" ? state : undefined}
-            emptyState={<WelcomeScreen />}
-            emptyStateAlign="top"
-            renderLiveTrace={renderLiveTrace}
-            renderExtension={renderExtension}
-            onToolConfirm={(toolCallId) => {
-              void toolCallId;
-              handleConfirm("approve");
+          <div
+            onClick={(e) => {
+              // 委托捕获产物链接点击：聚焦右栏对应产物 tab
+              const target = (e.target as HTMLElement).closest("[data-artifact-id]");
+              if (target) {
+                const id = target.getAttribute("data-artifact-id");
+                if (id) {
+                  e.preventDefault();
+                  setActiveArtifactId(id);
+                  setArtifactVisible(true);
+                }
+              }
             }}
-            onToolCancel={(toolCallId) => {
-              void toolCallId;
-              handleConfirm("reject");
-            }}
-          />
+          >
+            <MessageList
+              messages={history}
+              streaming={isStreaming || state.status !== "idle" ? state : undefined}
+              emptyState={<WelcomeScreen onPick={handleFillIntent} />}
+              emptyStateAlign="top"
+              renderLiveTrace={renderLiveTrace}
+              renderExtension={renderExtension}
+              renderMarkdown={renderMarkdown}
+              onToolConfirm={(toolCallId) => {
+                void toolCallId;
+                handleConfirm("approve");
+              }}
+              onToolCancel={(toolCallId) => {
+                void toolCallId;
+                handleConfirm("reject");
+              }}
+            />
+          </div>
         </div>
         <div style={{ flexShrink: 0, padding: "0 0 8px" }}>
           {state.status === "error" && state.errorMessage && (
@@ -194,7 +226,7 @@ export default function NexusChatPage() {
             onSubmit={handleSend}
             onStop={handleAbort}
             streaming={isStreaming}
-            placeholder="输入运营分析问题，如：L01产线OEE最近偏低，帮我诊断原因并给改善建议"
+            placeholder="输入运营分析问题，如：L01产线OEE偏低帮我诊断 / 做七大浪费审计 / 评估6Sigma水平 / 分析PFMEA风险"
           />
         </div>
       </div>
@@ -206,43 +238,66 @@ export default function NexusChatPage() {
 // 欢迎屏 + 占位组件
 // ─────────────────────────────────────────────────────────────────────────────
 
-function WelcomeScreen() {
+function WelcomeScreen({ onPick }: { onPick: (intent: string) => void }) {
+  const examples = [
+    { category: "效率诊断", title: "OEE 诊断", desc: "L01产线OEE最近偏低，帮我诊断原因并给改善建议" },
+    { category: "效率诊断", title: "停机根因", desc: "L01上周停机时间激增，分析根因" },
+    { category: "质量分析", title: "质量缺陷帕累托", desc: "L01产线缺陷率超标，帕累托分析主因" },
+    { category: "质量分析", title: "PFMEA 风险分析", desc: "L01注塑工艺做PFMEA风险分析，输出AP行动优先级" },
+    { category: "质量分析", title: "6Sigma 水平评估", desc: "评估L01产线的Sigma水平和DPMO，距6Sigma目标差多少" },
+    { category: "精益改善", title: "七大浪费审计", desc: "L01产线做精益七大浪费审计，识别主要浪费并量化损失" },
+    { category: "精益改善", title: "库存/WIP 分析", desc: "L01产线WIP水位偏高，分析物料流效率并给改善建议" },
+    { category: "精益改善", title: "DMAIC 改善项目", desc: "为L01产线生成DMAIC五阶段改善路线图" },
+    { category: "综合分析", title: "能耗异常诊断", desc: "L01产线能耗飙升，诊断原因并给节能建议" },
+  ];
   return (
     <div className="nexus-welcome" style={{ padding: "48px 24px", textAlign: "center" }}>
       <h1 style={{ fontSize: 24, marginBottom: 12 }}>NexusOps · 运营智能分析</h1>
       <p style={{ color: "var(--color-text-secondary)", marginBottom: 24 }}>
         精益生产智能分析助手。ReAct 多步取证 + 证据驱动建议。
+        <br />
+        支持 OEE 诊断、PFMEA、6Sigma、七大浪费、DMAIC、库存分析等多类分析方法。
       </p>
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
           gap: 12,
-          maxWidth: 640,
+          maxWidth: 700,
           margin: "0 auto",
         }}
       >
-        <ExampleCard title="OEE 诊断" desc="L01产线OEE最近偏低，帮我诊断原因并给改善建议" />
-        <ExampleCard title="停机根因" desc="L01上周停机时间激增，分析根因" />
-        <ExampleCard title="质量缺陷" desc="L01产线缺陷率超标，帕累托分析主因" />
+        {examples.map((ex) => (
+          <ExampleCard key={ex.title} title={ex.title} desc={ex.desc} category={ex.category} onClick={() => onPick(ex.desc)} />
+        ))}
       </div>
     </div>
   );
 }
 
-function ExampleCard({ title, desc }: { title: string; desc: string }) {
+function ExampleCard({ title, desc, category, onClick }: { title: string; desc: string; category: string; onClick: () => void }) {
   return (
     <div
+      onClick={onClick}
       style={{
-        padding: 16,
+        padding: 14,
         borderRadius: 10,
         background: "var(--color-bg-elevated)",
         border: "1px solid var(--color-border-light)",
         textAlign: "left",
+        cursor: "pointer",
+        transition: "border-color 0.15s, transform 0.1s",
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.borderColor = "var(--color-accent)";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.borderColor = "var(--color-border-light)";
       }}
     >
+      <div style={{ fontSize: 11, color: "var(--color-text-muted)", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.03em" }}>{category}</div>
       <div style={{ fontWeight: 600, marginBottom: 4 }}>{title}</div>
-      <div style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>{desc}</div>
+      <div style={{ fontSize: 12, color: "var(--color-text-secondary)", lineHeight: 1.4 }}>{desc}</div>
     </div>
   );
 }
