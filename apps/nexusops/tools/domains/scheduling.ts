@@ -6,6 +6,7 @@
  */
 import { createQueryTool } from "../mock-data/tool-factory.js";
 import { getSchedule, lookupActionOverride, type ScenarioId } from "../mock-data/scenarios.js";
+import { DEFAULT_LINE } from "../../config/defaults.js";
 
 export function registerScheduleTools(): import("../../../../src/tools/base.js").FlowConnector[] {
   return [
@@ -28,7 +29,7 @@ export function registerScheduleTools(): import("../../../../src/tools/base.js")
         };
       },
       system: "ERP",
-      provenance: (a) => `/erp/schedule/current?line=${(a.line as string) ?? "L01"}`,
+      provenance: (a) => `/erp/schedule/current?line=${(a.line as string) ?? DEFAULT_LINE}`,
       semanticTags: ["schedule_attainment"],
     }),
 
@@ -52,7 +53,7 @@ export function registerScheduleTools(): import("../../../../src/tools/base.js")
         };
       },
       system: "MES",
-      provenance: (a) => `/mes/schedule/attainment?line=${(a.line as string) ?? "L01"}&today=true`,
+      provenance: (a) => `/mes/schedule/attainment?line=${(a.line as string) ?? DEFAULT_LINE}&today=true`,
       semanticTags: ["schedule_attainment"],
     }),
 
@@ -74,7 +75,7 @@ export function registerScheduleTools(): import("../../../../src/tools/base.js")
         };
       },
       system: "MES",
-      provenance: (a) => `/mes/schedule/changeover?line=${(a.line as string) ?? "L01"}&today=true`,
+      provenance: (a) => `/mes/schedule/changeover?line=${(a.line as string) ?? DEFAULT_LINE}&today=true`,
       semanticTags: ["schedule_attainment", "oee_availability"],
     }),
 
@@ -96,7 +97,7 @@ export function registerScheduleTools(): import("../../../../src/tools/base.js")
         };
       },
       system: "MES",
-      provenance: (a) => `/mes/schedule/bottleneck?line=${(a.line as string) ?? "L01"}`,
+      provenance: (a) => `/mes/schedule/bottleneck?line=${(a.line as string) ?? DEFAULT_LINE}`,
       semanticTags: ["schedule_attainment"],
     }),
 
@@ -115,7 +116,7 @@ export function registerScheduleTools(): import("../../../../src/tools/base.js")
         };
       },
       system: "ERP",
-      provenance: (a) => `/erp/schedule/capacity?line=${(a.line as string) ?? "L01"}&week=current`,
+      provenance: (a) => `/erp/schedule/capacity?line=${(a.line as string) ?? DEFAULT_LINE}&week=current`,
       freshness: "weekly",
       semanticTags: ["schedule_attainment"],
     }),
@@ -138,7 +139,7 @@ export function registerScheduleTools(): import("../../../../src/tools/base.js")
         };
       },
       system: "MES",
-      provenance: (a) => `/mes/schedule/ct_vs_takt?line=${(a.line as string) ?? "L01"}`,
+      provenance: (a) => `/mes/schedule/ct_vs_takt?line=${(a.line as string) ?? DEFAULT_LINE}`,
       semanticTags: ["schedule_attainment"],
     }),
 
@@ -161,7 +162,7 @@ export function registerScheduleTools(): import("../../../../src/tools/base.js")
         };
       },
       system: "ERP",
-      provenance: (a) => `/erp/schedule/queue?line=${(a.line as string) ?? "L01"}`,
+      provenance: (a) => `/erp/schedule/queue?line=${(a.line as string) ?? DEFAULT_LINE}`,
       semanticTags: ["schedule_attainment"],
     }),
 
@@ -185,7 +186,7 @@ export function registerScheduleTools(): import("../../../../src/tools/base.js")
         };
       },
       system: "ERP",
-      provenance: (a) => `/erp/schedule/suggest?line=${(a.line as string) ?? "L01"}`,
+      provenance: (a) => `/erp/schedule/suggest?line=${(a.line as string) ?? DEFAULT_LINE}`,
       confidence: "inferred",
       semanticTags: ["schedule_attainment"],
     }),

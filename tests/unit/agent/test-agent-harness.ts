@@ -127,6 +127,50 @@ describe("tool-adapter", () => {
     expect(events.some((e) => e.type === "tool_result")).toBe(true);
   });
 
+  it("adaptTool emit tool_call 时 metadata.description 优先用 uiLabel", async () => {
+    // 工具同时带 description（给 LLM）和 uiLabel（给 UI）
+    const t: FlowConnector = {
+      name: "test.labeled",
+      tier: "domain",
+      description: "给 LLM 看的长描述（含使用建议）",
+      uiLabel: "测试标签",
+      inputSchema: { type: "object", properties: {} },
+      whenToUse: { triggers: ["t"], notFor: [] },
+      outputSchema: { type: "object" },
+      outputExample: {},
+      async *execute(): AsyncGenerator<ToolEvent, ToolResult> {
+        return { output: { ok: true } };
+      },
+    };
+    const calls: Array<{ type: string; payload: Record<string, unknown> }> = [];
+    const adapted = adaptTool(
+      t,
+      { emit: async (e) => { calls.push({ type: e.type as string, payload: e.payload as Record<string, unknown> }); } },
+      { taskId: "t1", runId: "r1", nodeId: "n1" },
+    );
+    await adapted.execute?.({}, { toolCallId: "tc_test", messages: [] } as never);
+    const callEvent = calls.find((c) => c.type === "tool_call");
+    expect(callEvent).toBeDefined();
+    const meta = (callEvent!.payload.metadata as { custom?: { description?: string } }).custom;
+    expect(meta?.description).toBe("测试标签");
+  });
+
+  it("adaptTool 缺省 uiLabel 时 metadata.description 回退到 description", async () => {
+    // 仅带 description（无 uiLabel）—— 沿用旧行为
+    const t = makeEchoTool("test.nolabel"); // makeEchoTool 不设 uiLabel
+    const calls: Array<{ type: string; payload: Record<string, unknown> }> = [];
+    const adapted = adaptTool(
+      t,
+      { emit: async (e) => { calls.push({ type: e.type as string, payload: e.payload as Record<string, unknown> }); } },
+      { taskId: "t1", runId: "r1", nodeId: "n1" },
+    );
+    await adapted.execute?.({ msg: "x" }, { toolCallId: "tc_test", messages: [] } as never);
+    const callEvent = calls.find((c) => c.type === "tool_call");
+    expect(callEvent).toBeDefined();
+    const meta = (callEvent!.payload.metadata as { custom?: { description?: string } }).custom;
+    expect(meta?.description).toBe("echo 工具 test.nolabel");
+  });
+
   it("write 工具未配置 requireConfirmation 时直接执行（降级）", async () => {
     const t = makeEchoTool("test.write", "write");
     const adapted = adaptTool(t, {}, { taskId: "t1", runId: "r1", nodeId: "n1" });

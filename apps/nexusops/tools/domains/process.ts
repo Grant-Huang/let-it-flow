@@ -12,6 +12,7 @@ import {
   lookupActionOverride,
   type ScenarioId,
 } from "../mock-data/scenarios.js";
+import { DEFAULT_LINE } from "../../config/defaults.js";
 
 export function registerProcessTools(): import("../../../../src/tools/base.js").FlowConnector[] {
   return [
@@ -32,7 +33,7 @@ export function registerProcessTools(): import("../../../../src/tools/base.js").
         return { parameters: actuals, inSpecCount: Object.values(params.parameters).filter((v) => v.inSpec).length };
       },
       system: "MES",
-      provenance: (a) => `/mes/process/parameters?line=${(a.line as string) ?? "L01"}&realtime=true`,
+      provenance: (a) => `/mes/process/parameters?line=${(a.line as string) ?? DEFAULT_LINE}&realtime=true`,
       semanticTags: ["process_deviation"],
     }),
 
@@ -61,7 +62,7 @@ export function registerProcessTools(): import("../../../../src/tools/base.js").
         };
       },
       system: "MES",
-      provenance: (a) => `/mes/process/deviation?line=${(a.line as string) ?? "L01"}`,
+      provenance: (a) => `/mes/process/deviation?line=${(a.line as string) ?? DEFAULT_LINE}`,
       semanticTags: ["process_deviation"],
     }),
 
@@ -81,7 +82,7 @@ export function registerProcessTools(): import("../../../../src/tools/base.js").
         return { recipe, productCode: "P-2026-A" };
       },
       system: "PLM",
-      provenance: (a) => `/plm/process/recipe?line=${(a.line as string) ?? "L01"}&product=P-2026-A`,
+      provenance: (a) => `/plm/process/recipe?line=${(a.line as string) ?? DEFAULT_LINE}&product=P-2026-A`,
       freshness: "historical",
       semanticTags: ["process_recipe"],
     }),
@@ -102,7 +103,7 @@ export function registerProcessTools(): import("../../../../src/tools/base.js").
         };
       },
       system: "MES",
-      provenance: (a) => `/mes/process/compare?line=${(a.line as string) ?? "L01"}`,
+      provenance: (a) => `/mes/process/compare?line=${(a.line as string) ?? DEFAULT_LINE}`,
       semanticTags: ["process_deviation"],
     }),
 
@@ -121,7 +122,7 @@ export function registerProcessTools(): import("../../../../src/tools/base.js").
         };
       },
       system: "MES",
-      provenance: (a) => `/mes/process/capability?line=${(a.line as string) ?? "L01"}`,
+      provenance: (a) => `/mes/process/capability?line=${(a.line as string) ?? DEFAULT_LINE}`,
       freshness: "daily",
       semanticTags: ["process_capability"],
     }),
@@ -150,7 +151,7 @@ export function registerProcessTools(): import("../../../../src/tools/base.js").
         };
       },
       system: "MES",
-      provenance: (a) => `/mes/process/adjustment_suggest?line=${(a.line as string) ?? "L01"}`,
+      provenance: (a) => `/mes/process/adjustment_suggest?line=${(a.line as string) ?? DEFAULT_LINE}`,
       confidence: "inferred",
       semanticTags: ["process_deviation"],
     }),
@@ -166,7 +167,7 @@ export function registerProcessTools(): import("../../../../src/tools/base.js").
         return getProcessFmea(ctx);
       },
       system: "PLM",
-      provenance: (a) => `/plm/process/fmea?line=${(a.line as string) ?? "L01"}&standard=AIAG-VDA-v5`,
+      provenance: (a) => `/plm/process/fmea?line=${(a.line as string) ?? DEFAULT_LINE}&standard=AIAG-VDA-v5`,
       freshness: "historical",
       semanticTags: ["fmea"],
     }),
@@ -190,7 +191,7 @@ export function registerProcessTools(): import("../../../../src/tools/base.js").
         };
       },
       system: "PLM",
-      provenance: (a) => `/plm/process/control_plan?line=${(a.line as string) ?? "L01"}`,
+      provenance: (a) => `/plm/process/control_plan?line=${(a.line as string) ?? DEFAULT_LINE}`,
       freshness: "historical",
       semanticTags: ["fmea", "process_recipe"],
     }),
@@ -270,7 +271,7 @@ export function registerProcessTools(): import("../../../../src/tools/base.js").
             deviation: `${delta > 0 ? "+" : ""}${delta.toFixed(1)} (${delta > 0 ? "+" : ""}${deltaPct}%)`,
             mechanism: matched?.mechanism ?? "偏差机制待确认（需查工艺 PFMEA）",
             qualityEffects: matched?.qualityEffects ?? [],
-            evidenceRef: `PROCESS.${ctx.line ?? "L01"}.parameters.${paramName}`,
+            evidenceRef: `PROCESS.${ctx.line ?? DEFAULT_LINE}.parameters.${paramName}`,
           };
         });
 
@@ -284,7 +285,7 @@ export function registerProcessTools(): import("../../../../src/tools/base.js").
         };
       },
       system: "MES",
-      provenance: (a) => `/mes/process/quality_impact?line=${(a.line as string) ?? "L01"}&mode=mechanism`,
+      provenance: (a) => `/mes/process/quality_impact?line=${(a.line as string) ?? DEFAULT_LINE}&mode=mechanism`,
       semanticTags: ["process_deviation", "causal_chain"],
     }),
   ];

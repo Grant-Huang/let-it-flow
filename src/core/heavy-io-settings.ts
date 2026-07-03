@@ -18,13 +18,13 @@ import { getDataDir } from "./config.js";
 export interface HeavyIoSettings {
   /** rewrite 用的 LLM 后端。原 "ollama"。env: LIF_REWRITE_BACKEND。 */
   rewriteBackend: "ollama" | "openai";
-  /** ollama rewrite 模型名。原 "huihui-qwen3.6-35b-a3b-abliterated:latest"。env: LIF_OLLAMA_MODEL。 */
+  /** ollama rewrite 模型名。env: LIF_OLLAMA_MODEL。无默认（部署时按实际环境配置）。 */
   ollamaRewriteModel: string;
   /** openai rewrite 模型 id。env: LIF_REWRITE_MODEL。 */
   rewriteOpenaiModel: string;
   /** TTS 引擎。原 "edge"。env: LIF_TTS_ENGINE。 */
   ttsEngine: "edge" | "qwen";
-  /** TTS 参考音色路径（qwen 引擎用）。原 "tones/Grant_tone.ref.wav"。env: LIF_TTS_REF_AUDIO。 */
+  /** TTS 参考音色路径（qwen 引擎用）。env: LIF_TTS_REF_AUDIO。 */
   ttsRefAudio: string;
   /** 通用 Python 解释器。原 "python3"。env: LIF_PYTHON_BIN。 */
   pythonBin: string;
@@ -37,10 +37,10 @@ export type HeavyIoSettingsPatch = Partial<HeavyIoSettings>;
 
 export const DEFAULT_HEAVY_IO_SETTINGS: HeavyIoSettings = {
   rewriteBackend: "ollama",
-  ollamaRewriteModel: "huihui-qwen3.6-35b-a3b-abliterated:latest",
+  ollamaRewriteModel: "",
   rewriteOpenaiModel: "",
   ttsEngine: "edge",
-  ttsRefAudio: "tones/Grant_tone.ref.wav",
+  ttsRefAudio: "",
   pythonBin: "python3",
   ttsPythonBin: "python3",
 };

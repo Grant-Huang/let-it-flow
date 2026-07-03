@@ -7,6 +7,7 @@ import type { ConsumerTemplate } from "./consumer-template.js";
 import { routeConsumerTemplate, findTemplate } from "./consumer-template.js";
 import { guardrailCheck } from "./guardrail.js";
 import { validateDag } from "./validator.js";
+import { resolveCallSiteParams } from "../llm/llm-config.js";
 
 /**
  * Planner —— 意图 → DAG（见 06 §6.1 两层规划）。
@@ -165,7 +166,7 @@ async function planWithLlmRouter(
       const { text } = await generateText({
         model,
         ...llmCallArgs(weakSystem, weakUser, true),
-        temperature: 0.2,
+        temperature: resolveCallSiteParams("planner").temperature,
       });
       const result = extractAndParseDag(text);
       if (result.dag) return { dag: result.dag };
@@ -178,7 +179,7 @@ async function planWithLlmRouter(
       model,
       ...callArgs,
       output: Output.object({ schema: WorkflowDAG }),
-      temperature: 0.2,
+      temperature: resolveCallSiteParams("planner").temperature,
     });
     if (!output) return { fallback: true };
     return { dag: WorkflowDAG.parse(output) };

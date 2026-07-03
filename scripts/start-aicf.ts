@@ -22,6 +22,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, copyFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { argv, cwd, env, exit, platform } from "node:process";
+import { AICF_PORT, AICF_WEB_PORT } from "../src/core/ports.js";
 
 const ROOT = cwd();
 const AICF_DIR = join(ROOT, "apps", "ai-content-factory");
@@ -82,7 +83,7 @@ function continueStart(): void {
   const apiEnv: NodeJS.ProcessEnv = {
     ...env,
     OBSIDIAN_VAULT_PATH: VAULT_PATH,
-    AICF_PORT: env.AICF_PORT ?? "8789",
+    AICF_PORT: env.AICF_PORT ?? String(AICF_PORT),
     LIF_DATA_DIR: env.LIF_DATA_DIR ?? join(ROOT, "data"),
   };
   // 前端通过 vite proxy 把 /api 转到后端，preview/dev 都复用 server.proxy 配置
@@ -118,10 +119,10 @@ function continueStart(): void {
 
 /** 并行启动 web + api，统一日志，任一退出则全部退出。 */
 function launchParallel(apiEnv: NodeJS.ProcessEnv, webEnv: NodeJS.ProcessEnv): void {
-  console.log(`\n[start-aicf] 启动 ${mode} 模式：后端 :${apiEnv.AICF_PORT} + 前端 :5174\n`);
+  console.log(`\n[start-aicf] 启动 ${mode} 模式：后端 :${apiEnv.AICF_PORT} + 前端 :${AICF_WEB_PORT}\n`);
 
   const apiCmd = isDev ? ["tsx", "watch", "apps/ai-content-factory/server/index.ts"] : ["tsx", "apps/ai-content-factory/server/index.ts"];
-  const webCmd = isDev ? ["vite", "--port", "5174"] : ["vite", "preview", "--port", "5174"];
+  const webCmd = isDev ? ["vite", "--port", String(AICF_WEB_PORT)] : ["vite", "preview", "--port", String(AICF_WEB_PORT)];
 
   const api = spawn("pnpm", apiCmd, {
     stdio: ["ignore", "pipe", "pipe"],
@@ -164,7 +165,7 @@ function launchParallel(apiEnv: NodeJS.ProcessEnv, webEnv: NodeJS.ProcessEnv): v
   process.on("SIGINT", () => killAll(0));
   process.on("SIGTERM", () => killAll(0));
 
-  console.log(`[start-aicf] 前端访问：http://localhost:5174`);
+  console.log(`[start-aicf] 前端访问：http://localhost:${AICF_WEB_PORT}`);
   console.log(`[start-aicf] 后端 API：http://localhost:${apiEnv.AICF_PORT}/health`);
   console.log(`[start-aicf] Ctrl+C 退出全部\n`);
 }

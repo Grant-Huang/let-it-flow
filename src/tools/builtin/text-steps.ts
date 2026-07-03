@@ -13,6 +13,7 @@ import type { CallSite } from "../../llm/call-sites.js";
 import { tracedGenerateText } from "../../llm/call-tracer.js";
 import type { TraceContext } from "../../llm/call-tracer.js";
 import type { LlmCallEvent } from "../../llm/call-log.js";
+import { resolveCallSiteParams } from "../../llm/llm-config.js";
 
 /** TS 直连路径下 prompt 文件所在目录。 */
 const PROMPTS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "heavy-io", "prompts");
@@ -370,7 +371,7 @@ async function runSeamRepairTs(
   try {
     const r = await tracedGenerateText(
       llm.model("seam_repair" as CallSite),
-      { system: introPrompt, prompt: introUser, temperature: 0.38 },
+      { system: introPrompt, prompt: introUser, temperature: resolveCallSiteParams("seam_repair").temperature },
       traceCtxFor(llm, "seam_repair", taskId),
       onLlmCall ?? (() => {}),
     );
@@ -387,7 +388,7 @@ async function runSeamRepairTs(
     try {
       const r = await tracedGenerateText(
         llm.model("seam_repair" as CallSite),
-        { system: seamPrompt, prompt: user, temperature: 0.35 },
+        { system: seamPrompt, prompt: user, temperature: resolveCallSiteParams("seam_repair").temperature },
         traceCtxFor(llm, "seam_repair", taskId),
         onLlmCall ?? (() => {}),
       );
@@ -410,7 +411,7 @@ async function runSeamRepairTs(
   try {
     const r = await tracedGenerateText(
       llm.model("seam_repair" as CallSite),
-      { system: outroPrompt, prompt: outroUser, temperature: 0.35 },
+      { system: outroPrompt, prompt: outroUser, temperature: resolveCallSiteParams("seam_repair").temperature },
       traceCtxFor(llm, "seam_repair", taskId),
       onLlmCall ?? (() => {}),
     );
@@ -539,7 +540,7 @@ async function runTerminologyTs(
   try {
     const r = await tracedGenerateText(
       llm.model("terminology" as CallSite),
-      { system: systemPrompt, prompt: userPrompt, temperature: 0.05 },
+      { system: systemPrompt, prompt: userPrompt, temperature: resolveCallSiteParams("terminology").temperature },
       traceCtxFor(llm, "terminology", taskId),
       onLlmCall ?? (() => {}),
     );

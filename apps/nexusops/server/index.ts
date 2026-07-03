@@ -14,6 +14,7 @@ import { serve } from "@hono/node-server";
 import { createApp } from "../../../src/api/app.js";
 import { TaskRegistry } from "../../../src/tasks/registry.js";
 import { getDataDir, resolveAppDataDir } from "../../../src/core/config.js";
+import { NEXUS_PORT } from "../../../src/core/ports.js";
 import { bootNexusOps } from "./boot.js";
 import { createReportTemplatesApp } from "./api-report-templates.js";
 
@@ -31,7 +32,7 @@ async function main(): Promise<void> {
   // 应用层路由：报表固化模板（依赖 NexusRuntime.skillRegistry）
   app.route("/api/report-templates", createReportTemplatesApp(runtime.skillRegistry));
 
-  const port = Number(process.env.NEXUS_PORT ?? process.env.PORT ?? "8788");
+  const port = NEXUS_PORT;
   const toolCount = runtime.toolRegistry.list().length;
 
   serve({ fetch: app.fetch, port }, (info) => {

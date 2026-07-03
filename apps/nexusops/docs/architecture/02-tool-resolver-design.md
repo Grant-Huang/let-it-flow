@@ -147,6 +147,8 @@ class CompositeToolResolver implements ToolResolver {
 }
 ```
 
+> **注意**：本节描述的"三档解析"是 ToolResolver **内部**解析策略（index→LLM→null），目的是把语义需求解析为真实工具名。当 mock 工具被 `NEXUS_MOCK_TOOLS=0` 关闭后，**运行时取证**会走更高层的"三档降级链"（resolver 查 MCP 等价 → 反问用户 → 标证据缺失），让数据缺口显式暴露而非静默失败。两者的差别：前者是"找一个工具"，后者是"找不到工具时的整体兜底"。详见 [07 §9.2](07-mestar-integration-spec.md)。
+
 #### 档位 ①：索引解析（IndexToolResolver）
 
 数据源：企业工具索引。当前统一读 `data/relos-mock/tool-index.json`（由 `syncToolIndex` 在 boot 时从 registry 的 `semanticTags` 派生写出）。`IndexToolResolver` 兼容两种格式：
@@ -241,6 +243,39 @@ class LlmToolResolver implements ToolResolver {
 **性能考量**：LLM 解析慢（一次调用约 1-3 秒）。优化措施：
 - 解析结果缓存到会话内存（同 semantic 不重复解析）
 - 批量解析（`resolveBatch` 一次 LLM 调用处理多个 need）
+
+**Phase M 增强：域内小集合选择（D13 决策）**
+
+接入 mestar 等 catalog 模式 MCP server 后，工具池从 ~60 个 domain 工具暴涨到数千个。全量喂给 LLM 会导致 context 爆炸（2850 × 200 token ≈ 57 万 token）。
+
+引入 `candidateProvider` 让 LlmToolResolver 只在 **EmbeddingToolRouter 路由出的小集合**（约 30 个候选）里选择，而非全量 domain：
+
+```typescript
+class LlmToolResolver implements ToolResolver {
+  // 新增构造签名：注入 candidateProvider（限定候选集合）
+  constructor(opts: {
+    registry: ToolRegistry;
+    llm: LlmClient;
+    /** 限定候选集合（注入时只在小集合里选；缺省走 registry 全量）。 */
+    candidateProvider?: (need: SemanticNeed) => Promise<CandidateManifest[] | null>;
+  });
+
+  async resolve(need: SemanticNeed, ctx: BizContext): Promise<ResolvedTool | null> {
+    // 优先用 candidateProvider（限定集合），否则全量 domain
+    let toolList: CandidateManifest[];
+    if (this.candidateProvider) {
+      const candidates = await this.candidateProvider(need);
+      toolList = candidates ?? this.getFullDomainManifests();  // 候选为空则兜底全量
+    } else {
+      toolList = this.getFullDomainManifests();
+    }
+    // 后续 prompt 只喂 toolList（从 ~140K token 降到 ~4K）
+    // ...
+  }
+}
+```
+
+效果：catalog 模式的 LLM 解析 token 成本从 ~57 万降到 ~4K（降 99%+）。详见 [07-mestar-integration-spec.md §6](07-mestar-integration-spec.md)。
 
 #### 档位 ③：返回 null
 
@@ -401,8 +436,37 @@ async function prepareStep(state: ReActState) {
 
 ## 7. 开放问题
 
-| # | 问题 | 当前倾向 |
+| # | 问题 | 当前倾向 / 状态 |
 |---|---|---|
-| Q1 | LLM 解析的缓存粒度？按 semantic 缓存，还是按 semantic+context 缓存？ | 倾向：按 semantic 缓存（context 主要影响 params，不影响 toolName 选择） |
-| Q2 | 一个 semantic 对应多个工具时（如 `defect_rate` 有 `quality.defect_rate` 和 `quality.defects`），如何选？ | 倾向：索引里标 `primary: true` 的优先；都未标主则取置信度最高 |
-| Q3 | 工具回写 relos 的频率？ | 倾向：boot 时一次 + 工具注册变更时触发（监听 registry 变化） |
+| Q1 | LLM 解析的缓存粒度？按 semantic 缓存，还是按 semantic+context 缓存？ | ✅ **已定**：按 semantic 缓存（context 主要影响 params，不影响 toolName 选择）。CompositeToolResolver 已实现会话级 cache。 |
+| Q2 | 一个 semantic 对应多个工具时（如 `defect_rate` 有 `quality.defect_rate` 和 `quality.defects`），如何选？ | ✅ **已定**：索引里标 `primary: true` 的优先；都未标主则取置信度最高。 |
+| Q3 | 工具回写 relos 的频率？ | ✅ **已定**：boot 时一次（`syncToolIndex`） + 工具注册变更时触发。catalog 模式下额外由 `CatalogSearchResolver` 在线兜底命中时回写。 |
+| Q4 | 数千工具的大目录 MCP server 如何接入？ | ✅ **已定（Phase M）**：catalog 模式预热 + 五层解析管道。详见 [07-mestar-integration-spec.md](07-mestar-integration-spec.md)。 |
+| Q5 | catalog 工具的 semanticTags 如何派生？ | ✅ **已定（D14）**：启动时规则派生（module/menu/method 启发式映射）覆盖高频项；后台 LLM 派生补全长尾。 |
+| Q6 | Embedding 实现选型？ | ✅ **已定（D17）**：ai SDK 内置 `embedMany` + `cosineSimilarity`，零新依赖；`@ai-sdk/openai` 提供 `text-embedding-3-small`。`Embedder` 接口抽象便于未来切换到本地模型。 |
+| Q7 | catalog 工具的执行入口？ | ✅ **已定（D16）**：每 server 一个 `LazyMcpActionTool` 代理（`mcp.<serverId>.call`），内部完成 activate→build_params→callTool。 |
+
+---
+
+## 8. catalog 模式扩展（Phase M，详见 07-mestar-integration-spec.md）
+
+接入 mestar 等"目录驱动型"MCP server（8 个元工具 + 数千 catalog 候选）后，本层扩展为**五层解析管道**。新增三个解析器按优先级插入 CompositeToolResolver：
+
+```
+① 会话缓存（CompositeToolResolver.cache）          ~40% 命中   <1ms   0 token
+② IndexToolResolver（本地索引查表）                 ~50%       <1ms   0 token
+③ EmbeddingToolRouter（向量检索 top-K）             ~7%        50-200ms 1 次 embedding
+④ LlmToolResolver（域内小集合 LLM 选择）            ~2%        0.5-1s  ~2K token
+⑤ CatalogSearchResolver（在线 catalog.search 兜底）  ~1%        1-2s   1 次工具调用 + 2K token
+```
+
+**关键组件**（详见 07-mestar-integration-spec.md）：
+
+| 组件 | 职责 | 文件 |
+|---|---|---|
+| `McpCatalogCache` | boot 预热全量 catalog，派生 semanticTags，按 module 分桶缓存 | `src/tools/mcp/mcp-catalog-cache.ts` |
+| `EmbeddingToolRouter` | 向量化 semantic 需求，检索 top-K 候选工具；top-1 高相似度直接返回 | `src/orchestrator/embedding-router.ts` |
+| `CatalogSearchResolver` | 前四层都未命中时在线搜 catalog，命中后回写本地索引（下次走 ②） | `src/orchestrator/catalog-search-resolver.ts` |
+| `LazyMcpActionTool` | catalog 工具的执行代理，LLM 调 `mcp.<serverId>.call` 完成执行 | `src/tools/mcp/lazy-mcp-action-tool.ts` |
+
+**与现有架构的边界**：catalog 模式不改 ToolResolver 接口、不改 CompositeToolResolver 的会话缓存、不改 FlowConnector 接口。新增的三个解析器都是 `ToolResolver` 实现，按优先级插入 resolver 数组。

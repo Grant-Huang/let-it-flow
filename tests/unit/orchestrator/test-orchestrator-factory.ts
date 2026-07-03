@@ -137,12 +137,15 @@ beforeEach(() => {
     "---\ntitle: OEE 计算口径\ntags: [oee, sop]\n---\nOEE = 可用率 × 表现率 × 质量率。\n",
     "utf8",
   );
-  for (const k of ["LIF_DATA_DIR", "OBSIDIAN_VAULT_PATH", "NEXUS_MCP_SERVERS"]) {
+  for (const k of ["LIF_DATA_DIR", "OBSIDIAN_VAULT_PATH", "NEXUS_MCP_SERVERS", "NEXUS_MOCK_TOOLS", "NEXUS_MOCK_ACTIONS"]) {
     savedBootEnv[k] = process.env[k];
   }
   process.env.LIF_DATA_DIR = bootDataDir;
   process.env.OBSIDIAN_VAULT_PATH = bootVaultPath;
   delete process.env.NEXUS_MCP_SERVERS;
+  // 测试默认在全开 mock 模式跑（避免 .env 的 NEXUS_MOCK_TOOLS=0 污染测试）
+  delete process.env.NEXUS_MOCK_TOOLS;
+  delete process.env.NEXUS_MOCK_ACTIONS;
 });
 
 afterEach(() => {

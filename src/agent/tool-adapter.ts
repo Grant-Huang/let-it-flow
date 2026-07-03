@@ -137,7 +137,7 @@ export function adaptTool(
             args,
             risk,
             groupId: ctxMeta.nodeId,
-            metadata: { custom: { description: connector.description } },
+            metadata: { custom: { description: connector.uiLabel ?? connector.description } },
           }),
         });
       }

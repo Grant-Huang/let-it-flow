@@ -10,6 +10,7 @@
  *
  * 触发纪律：只在"已识别出主导域"时裁工具，否则返回全部工具（避免过早收窄）。
  */
+import { generateText } from "ai";
 import type { LanguageModel } from "ai";
 import type { PrepareStepContext, PrepareStepResult } from "../../../src/agent/types.js";
 import { collectEveryStepReminders } from "./preconditions.js";
@@ -83,6 +84,10 @@ export interface PrepareStepConfig {
   evidenceGateCompatMode?: boolean;
   /** 编排知识层（注入方法论指导；缺省则不注入）。 */
   orchestrator?: Orchestrator;
+  /** 意图分类模型（首步用，把用户意图分类到方法论 topic）。缺省则降级为关键词匹配。 */
+  topicClassifyModel?: LanguageModel;
+  /** 意图分类模型兼容模式。 */
+  topicClassifyCompatMode?: boolean;
 }
 
 /**
@@ -106,6 +111,8 @@ export function buildNexusPrepareStep(
   const gateModel = config.evidenceGateModel;
   const gateCompat = config.evidenceGateCompatMode;
   const orchestrator = config.orchestrator;
+  const topicClassifyModel = config.topicClassifyModel;
+  const topicClassifyCompatMode = config.topicClassifyCompatMode;
 
   // 缓存首步注入的方法论（避免重复查询）
   let cachedMethodology: Methodology | null | undefined;
@@ -115,7 +122,13 @@ export function buildNexusPrepareStep(
 
     // 0. 首步注入 Orchestrator 方法论指导（Phase 4.1）
     if (orchestrator && ctx.stepNumber === 1) {
-      const guide = await buildMethodologyGuidance(orchestrator, ctx.intent, cachedMethodology);
+      const guide = await buildMethodologyGuidance(
+        orchestrator,
+        ctx.intent,
+        cachedMethodology,
+        topicClassifyModel,
+        topicClassifyCompatMode,
+      );
       if (cachedMethodology === undefined) cachedMethodology = guide.methodology;
       if (guide.system) {
         result.system = guide.system;
@@ -179,13 +192,26 @@ async function buildMethodologyGuidance(
   orchestrator: Orchestrator,
   intent: string,
   cached: Methodology | null | undefined,
+  classifyModel?: LanguageModel,
+  classifyCompatMode?: boolean,
 ): Promise<{ system: string | undefined; methodology: Methodology | null }> {
   // 已缓存则直接用
   if (cached !== undefined) {
     return { system: cached ? formatMethodologyPrompt(cached) : undefined, methodology: cached };
   }
 
-  const topic = inferMethodologyTopic(intent);
+  // 优先用 LLM 分类（语义级，覆盖关键词匹配的盲区）
+  let topic: string;
+  if (classifyModel) {
+    const llmTopic = await classifyMethodologyTopicWithLLM(intent, {
+      model: classifyModel,
+      compatMode: classifyCompatMode,
+    });
+    topic = llmTopic ?? inferMethodologyTopic(intent); // LLM 失败降级为关键词
+  } else {
+    topic = inferMethodologyTopic(intent); // 无分类模型，直接关键词匹配
+  }
+
   const ctx: BizContext = { scenarioId: undefined, line: undefined };
   try {
     const methodology = await orchestrator.getMethodology(topic, ctx);
@@ -195,6 +221,67 @@ async function buildMethodologyGuidance(
     return { system: undefined, methodology: null };
   }
 }
+
+/**
+ * 用 LLM 把用户意图分类到方法论 topic。
+ *
+ * 比关键词匹配更鲁棒：能理解"效率不行"="oee_diagnose"、"老是坏"="downtime_root_cause" 等
+ * 非字面匹配的意图。失败/超时返回 null（调用方降级为关键词匹配）。
+ *
+ * 设计（与 narrate-pass / review-pass 对齐，轻量模型一次性 generateText）：
+ *   - 纯文本 prompt + 纯文本输出（只返回 topic id，兼容弱 provider）
+ *   - 受控词表（只允许返回预定义 topic，避免 LLM 编造）
+ */
+async function classifyMethodologyTopicWithLLM(
+  intent: string,
+  options: { model: LanguageModel; compatMode?: boolean },
+): Promise<string | null> {
+  const { model, compatMode = false } = options;
+  const system = [
+    "你是运营分析方法论分类器。把用户的分析请求分类到最匹配的方法论 topic。",
+    "只输出一个 topic id（从下面的列表选），不要任何解释或其他文字：",
+    ...SUPPORTED_TOPICS.map((t) => `- ${t.id}：${t.desc}`),
+  ].join("\n");
+  const user = `用户请求：${intent}`;
+
+  try {
+    const callArgs = compatMode
+      ? { messages: [{ role: "user" as const, content: `${system}\n\n---\n${user}` }] }
+      : { system, messages: [{ role: "user" as const, content: user }] };
+
+    const { text } = await generateText({
+      model,
+      ...callArgs,
+      temperature: 0,
+      maxOutputTokens: 30,
+    });
+
+    const cleaned = text.trim().toLowerCase();
+    // 精确匹配受控词表
+    const hit = SUPPORTED_TOPICS.find((t) => t.id === cleaned);
+    if (hit) return hit.id;
+    // 容错：LLM 可能输出多余文字，尝试提取 topic id
+    for (const t of SUPPORTED_TOPICS) {
+      if (cleaned.includes(t.id)) return t.id;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** 支持的方法论 topic 受控词表（与 Orchestrator 的 getMethodology 对齐）。 */
+const SUPPORTED_TOPICS: ReadonlyArray<{ id: string; desc: string }> = [
+  { id: "dmaic", desc: "DMAIC / 6Sigma / 六西格玛 / DPMO / Cpk 改善项目" },
+  { id: "oee_diagnose", desc: "OEE 诊断 / 综合效率 / 可用率 / 表现率 / 质量率" },
+  { id: "downtime_root_cause", desc: "停机 / 故障 / 宕机 / MTBF / MTTR 根因" },
+  { id: "waste_audit", desc: "七大浪费 / 精益 / VSM 价值流审计" },
+  { id: "energy_analysis", desc: "能耗 / 能源 / 功率 / 节能分析" },
+  { id: "qs16949_audit", desc: "IATF 16949 内审 / 过程审核 / 符合性评估" },
+  { id: "cost_summary", desc: "成本 / 损失 / 经济性 / 费用汇总" },
+  { id: "multi_perspective_rca", desc: "多视角根因 / RCA / 鱼骨图 / FMEA" },
+  { id: "general_analysis", desc: "通用分析（不属于以上任何一类时使用）" },
+];
 
 /** 把方法论格式化为 system prompt 片段。 */
 function formatMethodologyPrompt(m: Methodology): string {

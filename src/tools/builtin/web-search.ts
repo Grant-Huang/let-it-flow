@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { FlowConnector, ToolResult, ExecutionContext } from "../base.js";
-import { RUNTIME } from "../../core/config.js";
+import { RUNTIME, SERVICE_URLS } from "../../core/config.js";
 import { toolCallPayload, toolResultPayload } from "../../core/stream-events.js";
 import type { ToolEvent } from "../../core/stream-events.js";
 import { randomUUID } from "node:crypto";
@@ -32,7 +32,7 @@ export function createTavilyProvider(apiKey: string): SearchProvider {
   return {
     name: "tavily",
     async search(query, opts) {
-      const res = await fetch("https://api.tavily.com/search", {
+      const res = await fetch(SERVICE_URLS.tavilySearch, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -61,7 +61,7 @@ export function createNativeProvider(): SearchProvider {
   return {
     name: "native",
     async search(query, opts) {
-      const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+      const url = `${SERVICE_URLS.duckduckgoHtml}?q=${encodeURIComponent(query)}`;
       const res = await fetch(url, {
         headers: { "user-agent": "Mozilla/5.0 (let-it-flow/0.1)" },
       });

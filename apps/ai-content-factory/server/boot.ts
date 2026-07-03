@@ -25,6 +25,7 @@ import { globalEventBus } from "../../../src/core/event-bus.js";
 import { runReactHarness } from "../../../src/agent/react-harness.js";
 import type { HarnessConfig, EmitFn, StepTrace } from "../../../src/agent/types.js";
 import { governanceToHooks } from "../../../src/agent/governance.js";
+import { DEFAULT_MAX_STEPS } from "../../../src/agent/stop-policy.js";
 import type { FlowConnector, ToolResult } from "../../../src/tools/base.js";
 import type { ToolEvent } from "../../../src/core/stream-events.js";
 import { toolCallPayload, toolResultPayload } from "../../../src/core/stream-events.js";
@@ -127,7 +128,9 @@ export async function bootAiContentFactory(
   const governanceHooks = governanceToHooks(governanceChain);
 
   // 5. customRunner：把 ReAct Harness 接到内核 task store + HITL
-  const maxSteps = Number(process.env.PODCAST_MAX_STEPS ?? "20");
+  // PODCAST_MAX_STEPS 应用级覆盖 > LIF_MAX_STEPS 全局 > DEFAULT_MAX_STEPS
+  // 注：podcast 链路比 nexus 长（多步 TTS/video），保留较高应用缺省 20
+  const maxSteps = Number(process.env.PODCAST_MAX_STEPS ?? Math.max(20, DEFAULT_MAX_STEPS));
 
   const toolTiers: ("core" | "domain" | "custom")[] = ["core", "domain", "custom"];
 

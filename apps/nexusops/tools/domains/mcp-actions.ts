@@ -25,6 +25,7 @@
  */
 import { createActionTool } from "../mock-data/tool-factory.js";
 import type { FlowConnector } from "../../../../src/tools/base.js";
+import { DEFAULT_LINE } from "../../config/defaults.js";
 
 /**
  * 构造全部 mock MCP 动作工具。
@@ -178,7 +179,7 @@ export function registerMcpActionTools(): FlowConnector[] {
       run: (args) => ({
         ticketId: "",
         status: "executed",
-        summary: `已出库 ${args.materialCode} × ${args.qty} 至 ${args.toLine ?? "L01"} 线边`,
+        summary: `已出库 ${args.materialCode} × ${args.qty} 至 ${args.toLine ?? DEFAULT_LINE} 线边`,
         sideEffects: { "material.issued": true },
       }),
       provenance: (a) => `/erp/material/issue?mat=${a.materialCode ?? ""}&qty=${a.qty ?? ""}`,

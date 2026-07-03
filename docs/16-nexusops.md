@@ -47,7 +47,11 @@ NexusOps 注入 `customRunner`（绕过 planner+DAG），内部调 `runReactHarn
 
 ### 16.2.3 T 层（工具集）
 
-60+ mock 工具，按精益域分层（`apps/nexusops/tools/`），全部返回 EvidenceEnvelope：
+工具池由两路组成，通过 `NEXUS_MOCK_TOOLS` 开关组合：
+
+**路 A：本地 mock 工具**（缺省开启，`apps/nexusops/tools/`）
+
+60+ mock 工具，按精益域分层，全部返回 EvidenceEnvelope：
 
 | 域 | 工具前缀 | 示例 | 数据时效 |
 |----|----------|------|----------|
@@ -60,7 +64,32 @@ NexusOps 注入 `customRunner`（绕过 planner+DAG），内部调 `runReactHarn
 | 物料 | `material.*` | `material.inventory` / `material.shortage` / `material.wip` | realtime |
 | 安全 | `safety.*` | `safety.events` / `safety.near_miss` / `safety.audit` | daily |
 
-加 MCP 动作工具（`mcp.<server>.<tool>`，风险推断 write/destructive）和收尾工具 `nexus_finalize` / `nexus_advise`。
+另含 12 个 mock MCP 动作工具（`mcp.mes/erp/qms/eam/process.*`，风险推断 write/destructive）和收尾工具 `nexus_finalize` / `nexus_advise`。
+
+**路 B：真实 MCP 工具**（`NEXUS_MCP_SERVERS` 配置，详见 [07-mestar-integration-spec.md](../apps/nexusops/docs/architecture/07-mestar-integration-spec.md)）
+
+通过 catalog 预热 + LazyMcpActionTool 接入，工具按需激活而非全量注册（避免 context 爆炸）。
+
+#### mock 开关（`NEXUS_MOCK_TOOLS`）
+
+统一管理路 A 的两类 mock（域取证 + mock MCP 动作）：
+
+| 取值 | 域取证（oee.*/quality.* 等） | mock MCP 动作（mcp.mes/erp/...） | 适用场景 |
+|------|----------------|------------------|----------|
+| `1` / 未设（缺省） | ✅ 注册 | ✅ 注册 | 本地开发、demo、未接 mestar |
+| `0` / `off` | ❌ 跳过 | ❌ 跳过 | 接入真实 mestar，全链路走 MCP |
+| `actions` | ✅ 注册 | ❌ 跳过 | mestar 仅提供动作，取证仍用 mock（= 旧 `NEXUS_MOCK_ACTIONS=0`） |
+| `evidence` | ❌ 跳过 | ✅ 注册 | 少见，对称性提供 |
+
+> 旧变量 `NEXUS_MOCK_ACTIONS=0` 仍兼容，内部映射为 `actions` 档。建议迁移到 `NEXUS_MOCK_TOOLS`。
+
+**关闭 mock 后的三档降级链**（`NEXUS_MOCK_TOOLS=0` 且 mestar 已接入）：
+
+1. **nexus_tool_resolver 查等价工具** → `mcp.<server>.call(toolName, args)` 走真实 MCP
+2. **找不到等价工具** → LLM 反问用户索取数据
+3. **用户也给不出** → `nexus_advise` 标注证据缺失，给出有限结论（不强答）
+
+降级链保证"mestar 没覆盖的能力不静默失败，而是显式暴露数据缺口"。
 
 ### 16.2.4 C 层（上下文：三源）
 

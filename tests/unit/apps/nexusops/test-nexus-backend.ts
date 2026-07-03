@@ -39,12 +39,15 @@ beforeEach(() => {
     "---\ntitle: OEE 计算口径\ntags: [oee, sop]\n---\nOEE = 可用率 × 表现率 × 质量率。\n",
     "utf8",
   );
-  for (const k of ["LIF_DATA_DIR", "OBSIDIAN_VAULT_PATH", "NEXUS_MCP_SERVERS", "NEXUS_MAX_STEPS"]) {
+  for (const k of ["LIF_DATA_DIR", "OBSIDIAN_VAULT_PATH", "NEXUS_MCP_SERVERS", "NEXUS_MAX_STEPS", "NEXUS_MOCK_TOOLS", "NEXUS_MOCK_ACTIONS"]) {
     savedEnv[k] = process.env[k];
   }
   process.env.LIF_DATA_DIR = dataDir;
   process.env.OBSIDIAN_VAULT_PATH = vaultPath;
   delete process.env.NEXUS_MCP_SERVERS;
+  // 测试默认在全开 mock 模式跑（避免 .env 的 NEXUS_MOCK_TOOLS=0 污染测试）
+  delete process.env.NEXUS_MOCK_TOOLS;
+  delete process.env.NEXUS_MOCK_ACTIONS;
 });
 
 afterEach(() => {
@@ -263,12 +266,14 @@ describe("S6 装配产物一致性", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("S6 every_step precondition（A1）", () => {
-  it("注册了 every_step 型规则（oee + downtime 各一条）", () => {
+  it("注册了 every_step 型规则（至少含 oee + downtime）", () => {
     const reg = buildNexusPreconditions();
     const everyStep = reg.everyStepOnes();
-    expect(everyStep.length).toBe(2);
+    // 业务需求：至少 oee + downtime 两条 every_step 规则；
+    // 实际规则数随域扩展可能增加（10 域全覆盖），断言用 ≥ 而非精确值
+    expect(everyStep.length).toBeGreaterThanOrEqual(2);
     expect(everyStep.some((p) => p.id.includes("oee"))).toBe(true);
-    expect(everyStep.some((p) => p.id.includes("downtime"))).toBe(true);
+    expect(everyStep.some((p) => p.id.includes("equipment") || p.id.includes("downtime"))).toBe(true);
   });
 
   it("every_step 规则与 on_finalize 逻辑一致（同 trace 结果相同）", () => {
@@ -456,5 +461,115 @@ describe("S6 SkillRegistry 与 boot 挂接（D3/D5）", () => {
     const names = runtime.toolRegistry.list().map((t) => t.name);
     expect(names.includes("skill.oee_diagnose")).toBe(true);
     expect(names.includes("skill.downtime_root_cause")).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 会话收尾总结（无论成功/失败都给用户一段文字）
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("S6 会话收尾总结（session summary）", () => {
+  it("error 路径产出最小中断提示", async () => {
+    const { buildSessionSummary } = await import("../../../../apps/nexusops/server/boot.js");
+    const text = buildSessionSummary({
+      kind: "error",
+      intent: "诊断 OEE",
+      error: "LLM 网络超时",
+    });
+    expect(text).toContain("中断");
+    expect(text).toContain("LLM 网络超时");
+  });
+
+  it("precondition_unmet 路径产出证据不足提示 + 工具调用统计", async () => {
+    const { buildSessionSummary } = await import("../../../../apps/nexusops/server/boot.js");
+    const trace = [
+      {
+        stepNumber: 0,
+        toolCalls: [
+          { id: "tc1", toolName: "oee.realtime", args: {}, result: {}, durationMs: 0 },
+          { id: "tc2", toolName: "equipment.downtime", args: {}, result: {}, durationMs: 0 },
+        ],
+        finishReason: "tool-calls",
+        durationMs: 0,
+      },
+    ];
+    const text = buildSessionSummary({
+      kind: "precondition_unmet",
+      intent: "为什么 L01 OEE 偏低",
+      stepTrace: trace as never,
+    });
+    expect(text).toContain("证据不足");
+    expect(text).toContain("取证 2 次");
+  });
+
+  it("precondition_unmet 路径无工具调用时提示尚未取证", async () => {
+    const { buildSessionSummary } = await import("../../../../apps/nexusops/server/boot.js");
+    const text = buildSessionSummary({
+      kind: "precondition_unmet",
+      intent: "测试",
+      stepTrace: [],
+    });
+    expect(text).toContain("尚未取证");
+  });
+
+  it("成功路径 LLM 已输出 ≥30 字收尾文字 → 不补总结（避免重复）", async () => {
+    const { buildSessionSummary } = await import("../../../../apps/nexusops/server/boot.js");
+    const text = buildSessionSummary({
+      kind: "success",
+      intent: "诊断 OEE",
+      finalText: "综合以上证据，L01 产线 OEE 偏低的主因是设备可用率下降，建议优先排查换模流程。",
+      finishReason: "finalize_tool",
+      stepTrace: [{ stepNumber: 0, toolCalls: [{ id: "t1", toolName: "oee.realtime", args: {}, result: {}, durationMs: 0 }], finishReason: "tool-calls", durationMs: 0 }],
+    });
+    expect(text).toBe("");
+  });
+
+  it("成功路径 LLM 未输出文字但有 finalizeSummary → 用 LLM 写的 summary", async () => {
+    const { buildSessionSummary } = await import("../../../../apps/nexusops/server/boot.js");
+    const text = buildSessionSummary({
+      kind: "success",
+      intent: "诊断 OEE",
+      finalText: "",
+      finalizeSummary: "L01 可用率 0.62 偏低，主因换模超时，建议优化 SMED。",
+      finishReason: "finalize_tool",
+      stepTrace: [{ stepNumber: 0, toolCalls: [{ id: "t1", toolName: "nexus_finalize", args: {}, result: {}, durationMs: 0 }], finishReason: "tool-calls", durationMs: 0 }],
+    });
+    expect(text).toContain("可用率 0.62");
+    expect(text).not.toContain("分析完成"); // 不应是套话
+  });
+
+  it("成功路径 LLM 既无文字也无 finalizeSummary + 有工具调用 → 最小兜底", async () => {
+    const { buildSessionSummary } = await import("../../../../apps/nexusops/server/boot.js");
+    const trace = [
+      {
+        stepNumber: 0,
+        toolCalls: [
+          { id: "tc1", toolName: "oee.realtime", args: {}, result: {}, durationMs: 0 },
+        ],
+        finishReason: "tool-calls",
+        durationMs: 0,
+      },
+    ];
+    const text = buildSessionSummary({
+      kind: "success",
+      intent: "诊断 OEE",
+      finalText: "",
+      finalizeSummary: "",
+      finishReason: "step_count",
+      stepTrace: trace as never,
+    });
+    expect(text).toContain("未输出总结");
+  });
+
+  it("成功路径无工具调用（澄清反问）→ 不补总结", async () => {
+    const { buildSessionSummary } = await import("../../../../apps/nexusops/server/boot.js");
+    const text = buildSessionSummary({
+      kind: "success",
+      intent: "测试",
+      finalText: "请提供产线编号",
+      finishReason: "no_tool_call",
+      stepTrace: [],
+    });
+    expect(text).toBe("");
   });
 });

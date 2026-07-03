@@ -37,7 +37,7 @@ export default function NexusChatPage() {
   /** 受控的右栏产物 tab id（点击会话中 #artifact 链接时切换）。 */
   const [activeArtifactId, setActiveArtifactId] = useState<string | undefined>(undefined);
 
-  const { state, taskId, conversationId, isStreaming, start, followUp, replay, confirm, clarify, abort, reset } = useNexusStream();
+  const { state, taskId, conversationId, isStreaming, start, followUp, replayConversation, confirm, clarify, abort, reset } = useNexusStream();
 
   const navItems: NavItem[] = [
     { id: "analyze", label: "分析", icon: <IconChart />, active: activeNav === "analyze", onClick: () => setActiveNav("analyze") },
@@ -49,12 +49,14 @@ export default function NexusChatPage() {
     const intent = input.trim();
     if (!intent || isStreaming) return;
     // Bug Fix 1: 发新问题前，先把上一轮 AI 回答存入历史（否则 state 被重置后回答消失）
+    // 附 trace 快照：MessageList 会用与流式相同的 blend 路径渲染历史消息，
+    // 保持工具卡片 + 文本交错原貌，追问后不再重新渲染成纯文本。
     if (taskId) {
       const prevText = extractFinalText(state);
       if (prevText) {
         setHistory((prev) => [
           ...prev,
-          { id: `a-${taskId}`, role: "assistant", content: prevText, timestamp: new Date().toISOString() },
+          { id: `a-${taskId}`, role: "assistant", content: prevText, timestamp: new Date().toISOString(), trace: state },
         ]);
       }
     }
@@ -84,10 +86,12 @@ export default function NexusChatPage() {
     abort();
   };
 
-  const handleSelectHistory = (historyTaskId: string) => {
+  const handleSelectConversation = (selectedConversationId: string) => {
     reset();
     setHistory([]);
-    void replay(historyTaskId);
+    void replayConversation(selectedConversationId).then((messages) => {
+      if (messages.length > 0) setHistory(messages);
+    });
   };
 
   const handleNewSession = () => {
@@ -110,7 +114,7 @@ export default function NexusChatPage() {
         if (prevText) {
           setHistory((prev) => [
             ...prev,
-            { id: `a-${taskId}`, role: "assistant", content: prevText, timestamp: new Date().toISOString() },
+            { id: `a-${taskId}`, role: "assistant", content: prevText, timestamp: new Date().toISOString(), trace: state },
           ]);
         }
       }
@@ -150,8 +154,8 @@ export default function NexusChatPage() {
       sidebarFooter={<SidebarFooter />}
       sessionColumn={
         <SessionList
-          activeTaskId={taskId}
-          onSelect={handleSelectHistory}
+          activeConversationId={conversationId}
+          onSelect={handleSelectConversation}
           onNewSession={handleNewSession}
         />
       }
@@ -226,7 +230,7 @@ export default function NexusChatPage() {
             onSubmit={handleSend}
             onStop={handleAbort}
             streaming={isStreaming}
-            placeholder="输入运营分析问题，如：L01产线OEE偏低帮我诊断 / 做七大浪费审计 / 评估6Sigma水平 / 分析PFMEA风险"
+            placeholder="输入要分析的问题，如：诊断某条产线的效率损失 / 审计浪费与改善机会 / 评估风险与瓶颈 / 根因分析"
           />
         </div>
       </div>

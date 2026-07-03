@@ -6,6 +6,8 @@
  */
 import { createQueryTool } from "../mock-data/tool-factory.js";
 import { getEnergy, type ScenarioId } from "../mock-data/scenarios.js";
+import { ENERGY_EFFICIENCY_GOOD, ENERGY_EFFICIENCY_WARNING, ENERGY_BASELINE_KWH_PER_UNIT } from "../../config/business-thresholds.js";
+import { DEFAULT_LINE } from "../../config/defaults.js";
 
 export function registerEnergyTools(): import("../../../../src/tools/base.js").FlowConnector[] {
   return [
@@ -26,7 +28,7 @@ export function registerEnergyTools(): import("../../../../src/tools/base.js").F
         };
       },
       system: "智能电表",
-      provenance: (a) => `/iot/energy/realtime?line=${(a.line as string) ?? "L01"}`,
+      provenance: (a) => `/iot/energy/realtime?line=${(a.line as string) ?? DEFAULT_LINE}`,
       semanticTags: ["energy_consumption"],
     }),
 
@@ -69,7 +71,7 @@ export function registerEnergyTools(): import("../../../../src/tools/base.js").F
         };
       },
       system: "智能电表",
-      provenance: (a) => `/iot/energy/by_process?line=${(a.line as string) ?? "L01"}`,
+      provenance: (a) => `/iot/energy/by_process?line=${(a.line as string) ?? DEFAULT_LINE}`,
       semanticTags: ["energy_consumption"],
     }),
 
@@ -90,7 +92,7 @@ export function registerEnergyTools(): import("../../../../src/tools/base.js").F
         };
       },
       system: "智能电表",
-      provenance: (a) => `/iot/energy/peak?line=${(a.line as string) ?? "L01"}&today=true`,
+      provenance: (a) => `/iot/energy/peak?line=${(a.line as string) ?? DEFAULT_LINE}&today=true`,
       semanticTags: ["energy_consumption"],
     }),
 
@@ -111,7 +113,7 @@ export function registerEnergyTools(): import("../../../../src/tools/base.js").F
         };
       },
       system: "ERP",
-      provenance: (a) => `/erp/energy/cost?line=${(a.line as string) ?? "L01"}&today=true`,
+      provenance: (a) => `/erp/energy/cost?line=${(a.line as string) ?? DEFAULT_LINE}&today=true`,
       freshness: "daily",
       semanticTags: ["energy_consumption", "cost_summary"],
     }),
@@ -127,13 +129,13 @@ export function registerEnergyTools(): import("../../../../src/tools/base.js").F
         const e = getEnergy(ctx);
         return {
           kwhPerUnit: e.carbonKgPerUnit / 0.5,
-          baselineKwhPerUnit: 0.42,
+          baselineKwhPerUnit: ENERGY_BASELINE_KWH_PER_UNIT,
           efficiencyRatio: e.efficiency,
-          status: e.efficiency >= 0.85 ? "good" : e.efficiency >= 0.7 ? "warning" : "poor",
+          status: e.efficiency >= ENERGY_EFFICIENCY_GOOD ? "good" : e.efficiency >= ENERGY_EFFICIENCY_WARNING ? "warning" : "poor",
         };
       },
       system: "MES",
-      provenance: (a) => `/mes/energy/efficiency?line=${(a.line as string) ?? "L01"}&today=true`,
+      provenance: (a) => `/mes/energy/efficiency?line=${(a.line as string) ?? DEFAULT_LINE}&today=true`,
       semanticTags: ["energy_consumption"],
     }),
 
@@ -153,7 +155,7 @@ export function registerEnergyTools(): import("../../../../src/tools/base.js").F
         };
       },
       system: "MES",
-      provenance: (a) => `/mes/energy/carbon?line=${(a.line as string) ?? "L01"}&today=true`,
+      provenance: (a) => `/mes/energy/carbon?line=${(a.line as string) ?? DEFAULT_LINE}&today=true`,
       semanticTags: ["energy_consumption", "carbon_emission"],
     }),
 
@@ -175,7 +177,7 @@ export function registerEnergyTools(): import("../../../../src/tools/base.js").F
         };
       },
       system: "智能电表",
-      provenance: (a) => `/iot/energy/anomaly?line=${(a.line as string) ?? "L01"}&window=24h`,
+      provenance: (a) => `/iot/energy/anomaly?line=${(a.line as string) ?? DEFAULT_LINE}&window=24h`,
       semanticTags: ["energy_consumption"],
     }),
   ];

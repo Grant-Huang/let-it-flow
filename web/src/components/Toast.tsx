@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { UI_CONSTANTS } from "../lib/ui-constants";
 
 // 简易全局提示（成功/错误），无需第三方依赖。
 type ToastState = { kind: "success" | "error"; msg: string } | null;
@@ -18,7 +19,7 @@ export function ToastHost(): JSX.Element {
   }, []);
   useEffect(() => {
     if (!state) return;
-    const t = setTimeout(() => setState(null), 3000);
+    const t = setTimeout(() => setState(null), UI_CONSTANTS.toastAutoDismissMs);
     return () => clearTimeout(t);
   }, [state]);
   if (!state) return <></>;

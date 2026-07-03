@@ -7,6 +7,7 @@
  */
 import { createQueryTool } from "../mock-data/tool-factory.js";
 import { getUnitEconomics } from "../mock-data/scenarios.js";
+import { DEFAULT_LINE } from "../../config/defaults.js";
 
 export function registerEconomicsTools(): import("../../../../src/tools/base.js").FlowConnector[] {
   return [
@@ -35,7 +36,7 @@ export function registerEconomicsTools(): import("../../../../src/tools/base.js"
         };
       },
       system: "ERP",
-      provenance: (args) => `economics.unit?line=${args.line ?? "L01"}`,
+      provenance: (args) => `economics.unit?line=${args.line ?? DEFAULT_LINE}`,
       semanticTags: ["cost_summary"],
     }),
   ];

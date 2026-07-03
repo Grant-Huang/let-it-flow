@@ -16,6 +16,7 @@ import {
   type ScenarioContext,
   type ScenarioId,
 } from "../mock-data/scenarios.js";
+import { DEFAULT_LINE } from "../../config/defaults.js";
 
 const SYSTEM = "MES";
 
@@ -67,7 +68,7 @@ export function registerOeeTools(): import("../../../../src/tools/base.js").Flow
       inputSchema: { type: "object", properties: {} },
       getData: (ctx) => applyOeeOverrides(ctx, getOEE(ctx)),
       system: SYSTEM,
-      provenance: (a) => `/mes/oee/realtime?line=${(a.line as string) ?? "L01"}`,
+      provenance: (a) => `/mes/oee/realtime?line=${(a.line as string) ?? DEFAULT_LINE}`,
       semanticTags: ["oee", "oee_availability", "oee_performance", "oee_quality"],
     }),
 
@@ -80,7 +81,7 @@ export function registerOeeTools(): import("../../../../src/tools/base.js").Flow
       inputSchema: { type: "object", properties: {} },
       getData: (ctx) => ({ trend7d: getOEE(ctx).trend7d, scenarioId: ctx.scenarioId }),
       system: SYSTEM,
-      provenance: (a) => `/mes/oee/history?line=${(a.line as string) ?? "L01"}&days=7`,
+      provenance: (a) => `/mes/oee/history?line=${(a.line as string) ?? DEFAULT_LINE}&days=7`,
       freshness: "daily",
       semanticTags: ["oee"],
     }),
@@ -108,7 +109,7 @@ export function registerOeeTools(): import("../../../../src/tools/base.js").Flow
         };
       },
       system: SYSTEM,
-      provenance: (a) => `/mes/oee/decompose?line=${(a.line as string) ?? "L01"}`,
+      provenance: (a) => `/mes/oee/decompose?line=${(a.line as string) ?? DEFAULT_LINE}`,
       semanticTags: ["oee"],
     }),
 
@@ -151,7 +152,7 @@ export function registerOeeTools(): import("../../../../src/tools/base.js").Flow
         };
       },
       system: SYSTEM,
-      provenance: (a) => `/mes/oee/trend?line=${(a.line as string) ?? "L01"}`,
+      provenance: (a) => `/mes/oee/trend?line=${(a.line as string) ?? DEFAULT_LINE}`,
       freshness: "weekly",
       semanticTags: ["oee"],
     }),
@@ -176,7 +177,7 @@ export function registerOeeTools(): import("../../../../src/tools/base.js").Flow
         };
       },
       system: SYSTEM,
-      provenance: (a) => `/mes/oee/by_shift?line=${(a.line as string) ?? "L01"}`,
+      provenance: (a) => `/mes/oee/by_shift?line=${(a.line as string) ?? DEFAULT_LINE}`,
       freshness: "shift",
       semanticTags: ["oee", "shift_deviation"],
     }),
@@ -208,14 +209,14 @@ export function registerOeeTools(): import("../../../../src/tools/base.js").Flow
       },
       getData: (ctx, args) => {
         const all = getOEEAllLines(ctx.scenarioId);
-        const line1 = ctx.line ?? "L01";
+        const line1 = ctx.line ?? DEFAULT_LINE;
         const line2 = (args.line2 as typeof line1) ?? "L02";
         const a = all.find((x) => x.line === line1);
         const b = all.find((x) => x.line === line2);
         return { line1: a, line2: b, delta: (a?.oee ?? 0) - (b?.oee ?? 0) };
       },
       system: "MOM",
-      provenance: (a) => `/mom/oee/compare?l1=${(a.line as string) ?? "L01"}&l2=${(a.line2 as string) ?? "L02"}`,
+      provenance: (a) => `/mom/oee/compare?l1=${(a.line as string) ?? DEFAULT_LINE}&l2=${(a.line2 as string) ?? "L02"}`,
       semanticTags: ["oee"],
     }),
 
@@ -238,7 +239,7 @@ export function registerOeeTools(): import("../../../../src/tools/base.js").Flow
         };
       },
       system: SYSTEM,
-      provenance: (a) => `/mes/oee/availability_loss?line=${(a.line as string) ?? "L01"}`,
+      provenance: (a) => `/mes/oee/availability_loss?line=${(a.line as string) ?? DEFAULT_LINE}`,
       semanticTags: ["oee_availability", "oee"],
     }),
 
@@ -257,7 +258,7 @@ export function registerOeeTools(): import("../../../../src/tools/base.js").Flow
         };
       },
       system: SYSTEM,
-      provenance: (a) => `/mes/oee/performance_loss?line=${(a.line as string) ?? "L01"}`,
+      provenance: (a) => `/mes/oee/performance_loss?line=${(a.line as string) ?? DEFAULT_LINE}`,
       semanticTags: ["oee_performance", "oee"],
     }),
 
@@ -276,7 +277,7 @@ export function registerOeeTools(): import("../../../../src/tools/base.js").Flow
         };
       },
       system: SYSTEM,
-      provenance: (a) => `/mes/oee/quality_loss?line=${(a.line as string) ?? "L01"}`,
+      provenance: (a) => `/mes/oee/quality_loss?line=${(a.line as string) ?? DEFAULT_LINE}`,
       semanticTags: ["oee_quality", "oee"],
     }),
 

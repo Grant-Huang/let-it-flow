@@ -20,6 +20,7 @@ import {
   getCausalChain,
   type ScenarioId,
 } from "../mock-data/scenarios.js";
+import { DEFAULT_LINE } from "../../config/defaults.js";
 
 export function registerLeanTools(): import("../../../../src/tools/base.js").FlowConnector[] {
   return [
@@ -58,7 +59,7 @@ export function registerLeanTools(): import("../../../../src/tools/base.js").Flo
           typeEn: "Overproduction",
           detected: overproduction,
           severity: overproduction ? (m.wipLevel > m.wipMax * 1.2 ? "high" : "medium") : "none",
-          evidence: `WIP=${m.wipLevel}/${m.wipMax}（${overproduction ? "超容" : "正常"}），见 MATERIAL.${ctx.line ?? "L01"}`,
+          evidence: `WIP=${m.wipLevel}/${m.wipMax}（${overproduction ? "超容" : "正常"}），见 MATERIAL.${ctx.line ?? DEFAULT_LINE}`,
           lossEstimate: overproduction ? `WIP 积压 ${m.wipLevel - m.wipMax} 件，占用资金 + 隐性库存成本` : "无",
           recommendation: overproduction ? "降低投放节拍，实施限产去库存化" : "维持拉动式生产",
         });
@@ -86,7 +87,7 @@ export function registerLeanTools(): import("../../../../src/tools/base.js").Flo
           typeEn: "Transport",
           detected: totalDist > 20,
           severity: totalDist > 40 ? "medium" : totalDist > 20 ? "low" : "none",
-          evidence: `搬运总距离 ${totalDist}m，搬运时间 ${totalMove}min/件（见 ROUTING.${ctx.line ?? "L01"}）`,
+          evidence: `搬运总距离 ${totalDist}m，搬运时间 ${totalMove}min/件（见 ROUTING.${ctx.line ?? DEFAULT_LINE}）`,
           lossEstimate: `搬运非增值时间 ${totalMove}min/件 × 日产量`,
           recommendation: totalDist > 40 ? "优化产线布局缩短搬运距离，或改用连续流" : "布局合理",
         });
@@ -159,7 +160,7 @@ export function registerLeanTools(): import("../../../../src/tools/base.js").Flo
         });
 
         return {
-          line: ctx.line ?? "L01",
+          line: ctx.line ?? DEFAULT_LINE,
           scenarioId: ctx.scenarioId,
           wastes: sorted,
           detectedCount: detected.length,
@@ -178,7 +179,7 @@ export function registerLeanTools(): import("../../../../src/tools/base.js").Flo
         };
       },
       system: "MOM",
-      provenance: (a) => `/mom/lean/waste_audit?line=${(a.line as string) ?? "L01"}`,
+      provenance: (a) => `/mom/lean/waste_audit?line=${(a.line as string) ?? DEFAULT_LINE}`,
       freshness: "daily",
       confidence: "inferred",
       semanticTags: ["waste_audit"],
@@ -210,9 +211,9 @@ export function registerLeanTools(): import("../../../../src/tools/base.js").Flo
           : `OEE=${(oee.oee * 100).toFixed(1)}%，Cpk=${q.cpk.toFixed(2)}，存在改善空间`;
 
         return {
-          line: ctx.line ?? "L01",
+          line: ctx.line ?? DEFAULT_LINE,
           scenarioId: ctx.scenarioId,
-          projectTitle: `${ctx.line ?? "L01"} 产线改善项目`,
+          projectTitle: `${ctx.line ?? DEFAULT_LINE} 产线改善项目`,
           phases: [
             {
               phase: "D",
@@ -304,7 +305,7 @@ export function registerLeanTools(): import("../../../../src/tools/base.js").Flo
         };
       },
       system: "MOM",
-      provenance: (a) => `/mom/lean/dmaic?line=${(a.line as string) ?? "L01"}`,
+      provenance: (a) => `/mom/lean/dmaic?line=${(a.line as string) ?? DEFAULT_LINE}`,
       freshness: "daily",
       confidence: "inferred",
       semanticTags: ["dmaic", "six_sigma_level"],

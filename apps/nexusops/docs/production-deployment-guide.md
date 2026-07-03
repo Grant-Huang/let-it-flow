@@ -499,11 +499,23 @@ data/nexus-vault/
 - [ ] 工序级电表已部署（否则 `energy.by_process` 仍是固定比例）
 
 **工具替换验证**
-- [ ] 所有 mock `getData` 函数已替换为真实 API 调用（逐工具检查 `tool-factory.ts` 注册）
-- [ ] actionStore 副作用闭环语义保留（动作执行后读取工具反映新状态）
+- [ ] `NEXUS_MOCK_TOOLS=0` 已配置（关闭全部本地 mock，强制走真实 MCP 三档降级链）
+- [ ] `NEXUS_MCP_SERVERS` 已配置真实 mestar（catalog 模式，`catalog.enabled=true`）
+- [ ] boot 启动日志确认：`MCP server "mestar" catalog 预热完成` 且**无** `mock MCP 动作工具已注册` 日志
+- [ ] 启动日志确认 `EmbeddingRouter 就绪`（向量检索路由可用，提升 nexus_tool_resolver 精度）
+- [ ] actionStore 副作用闭环语义保留（mestar 动作执行后，相关查询反映新状态）
 - [ ] MCP 动作工具已完成集成测试（在 staging 环境验证 HITL 流程）
 - [ ] `oee.report_html` 生成的 HTML 中 `postMessage` 动作按钮指向正确的 MCP 工具名
-- [ ] 9 个工具域 × 全部 89 个工具均已逐个验证数据源替换（含 lean 域 2 个元分析工具 + 12 个 MCP 动作工具）
+- [ ] 三档降级链端到端测试（详见 [07 §9.2](architecture/07-mestar-integration-spec.md)）：
+  - [ ] **第一档（重定向 MCP）**：`nexus_tool_resolver(semantic="...")` 命中等价工具 → `mcp.mestar.call(toolName, args)` 正常执行
+  - [ ] **第二档（反问用户）**：mestar 无等价工具时，LLM 反问用户索取数据（不静默失败）；用户提供后 LLM 标注 `source=user` 采用
+  - [ ] **第三档（标证据缺失）**：用户也给不出时，`nexus_advise` 在 rationale 显式标注"证据缺失：<X> 无法取证"，给有限结论（不强答）
+
+> **替换路径说明**：当前代码支持两条替换路径：
+> 1. **整体开关**（推荐）：`NEXUS_MOCK_TOOLS=0` 关闭全部本地 mock，走真实 MCP。无需改代码。
+> 2. **逐工具替换**：保留 mock 开关，在 `tool-factory.ts` 里把单个工具的 `getData` 改成真实 API。适用于 mestar 还没覆盖全部域的过渡期。
+>
+> 两条路径可组合（如 `NEXUS_MOCK_TOOLS=actions` 仅关动作、保留取证 mock）。开关的完整 4 档语义（all/off/actions/evidence）与三档降级链的实现细节（含 EvidenceGate 双模式判定）详见 [04-mock-rules-spec.md](architecture/04-mock-rules-spec.md) 和 [07-mestar-integration-spec.md §9.2](architecture/07-mestar-integration-spec.md)，环境变量说明见 `.env.example` 的 `NEXUS_MOCK_TOOLS` 段。
 
 ---
 

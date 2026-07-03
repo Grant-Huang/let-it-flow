@@ -21,8 +21,13 @@ type AnyStopCondition = (opts: {
   }>;
 }) => boolean;
 
-/** 缺省值。 */
-export const DEFAULT_MAX_STEPS = 15;
+/**
+ * 缺省值（从环境变量读取，便于部署期调参，避免在多处重复硬编码字面量）。
+ *
+ * 优先级：LIF_MAX_STEPS env > 代码默认 15。
+ * 各应用（nexusops/aicf/...）应引用本常量，而非各自重复 "15" / "20" 字符串。
+ */
+export const DEFAULT_MAX_STEPS = Number(process.env.LIF_MAX_STEPS ?? 15);
 export const DEFAULT_FINALIZE_TOOL = "nexus_finalize";
 
 /**

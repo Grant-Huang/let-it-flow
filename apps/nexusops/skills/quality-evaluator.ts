@@ -17,6 +17,15 @@ import { wrapEvidence, type EvidenceEnvelope } from "../../../src/core/evidence-
 import { createSkill } from "../../../src/agent/skill-bridge.js";
 import type { ComponentLayout } from "../../../src/orchestrator/report-types.js";
 import { renderReport } from "./report-renderer.js";
+import { resolveCallSiteParams } from "../../../src/llm/llm-config.js";
+
+/**
+ * quality-evaluator 的 temperature 基线。
+ *
+ * 复用 nexus_review 调用点（同为"事后审计 / 评分"性质），
+ * 通过 resolveCallSiteParams 集中管理；如需独立调参，可设 LIF_NEXUS_REVIEW_TEMP env。
+ */
+const EVAL_TEMP = resolveCallSiteParams("nexus_review").temperature;
 
 /** 单维度评分。 */
 export interface DimensionScore {
@@ -151,7 +160,7 @@ export async function evaluateAnalysisQuality(
     const { text } = await generateText({
       model: opts.model,
       ...callArgs,
-      temperature: 0.2,
+      temperature: EVAL_TEMP,
       maxOutputTokens: 800,
     });
 

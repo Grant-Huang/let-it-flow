@@ -79,7 +79,7 @@ interface ReportComponent<TData = unknown> {
 
 ### 3.2 初始组件清单
 
-从现有 `report-html.ts` 的 `SHARED_CSS` 和模板片段反推，初始组件库：
+从现有 `report-html.ts` 的 `SHARED_CSS` 和模板片段反推，组件库共 15 个组件（13 个业务组件 + 2 个容器/通用）：
 
 | 组件名 | 用途 | 现有代码来源 | dataSchema 要点 |
 |---|---|---|---|
@@ -91,11 +91,13 @@ interface ReportComponent<TData = unknown> {
 | `fishbone-summary` | 鱼骨图摘要（5M1E 分支标签） | `.aux-list` | `{branches: {dimension, factors[]}[]}` |
 | `confidence-bar` | 置信度进度条 | `.confidence-bar` | `{label, value, color?}` |
 | `recommendation-card` | 建议卡片（含可执行按钮） | `.rec-card` | `{title, rationale, impact, executionScore, actionTool?, actionArgs?}` |
+| `recommendation-list` | 建议列表容器（包装多个 recommendation-card，批量渲染） | `.rec-list` | `{recommendations: RecommendationCard[]}` |
 | `phase-card` | 阶段卡片（DMAIC 等用） | `.phase-card` | `{phase, name, objective, detail, status}` |
 | `reasoning-table` | 推理链表格 | reasoningRows | `{steps: {action, tool, finding, inference}[]}` |
 | `action-button` | 可执行按钮（触发 postMessage） | `.action-btn` | `{tool, args, label}` |
 | `section` | 通用 section 容器（带标题） | `.section` | `{title, innerHtml}` |
 | `text-block` | 通用文本块 | — | `{text, variant?}` |
+| `score-card` | 评分卡片（质量评估报告专用，显示 0-10 分值 + 标签） | `.score-card` | `{value: number, label: string, max?: number}` |
 
 ### 3.3 组件库实现示例
 
@@ -481,8 +483,71 @@ async function generateReport(topic: string, evidenceData: unknown): Promise<str
 
 ## 9. 开放问题
 
-| # | 问题 | 当前倾向 |
-|---|---|---|
-| Q1 | LLM 编排失败（输出非法 JSON）时如何兜底？ | 倾向：降级为"纯文本摘要"组件（`text-block`），保证有报告输出 |
-| Q2 | 固化模板的 `fillTemplateData` 如何处理"本次数据缺某字段"？ | 倾向：缺字段时该组件跳过渲染，显示"数据不可用"占位 |
-| Q3 | 是否支持"模板继承"（如 energy_anomaly 继承 oee 的部分组件）？ | 倾向：Phase 2 先不做，保持模板独立；未来按需引入 |
+| # | 问题 | 当前倾向 | 状态 |
+|---|---|---|---|
+| Q1 | LLM 编排失败（输出非法 JSON）时如何兜底？ | 倾向：降级为"纯文本摘要"组件（`text-block`），保证有报告输出 | 已实现：report-html 在 LLM 编排失败时降级为固定模板取数渲染 |
+| Q2 | 固化模板的 `fillTemplateData` 如何处理"本次数据缺某字段"？ | 倾向：缺字段时该组件跳过渲染，显示"数据不可用"占位 | 已实现：模板匹配路径直接用 layout（不填占位），未命中走正常工具取数 |
+| Q3 | 是否支持"模板继承"（如 energy_anomaly 继承 oee 的部分组件）？ | 倾向：Phase 2 先不做，保持模板独立；未来按需引入 | 未做，保持独立 |
+
+---
+
+## 10. 质量评估报告（Phase 4 新增报告类型）
+
+### 10.1 设计动机
+
+LLM 主导编排后，分析质量不再由硬编码 skill 保证，需要一个**独立的自检机制**：用便宜模型（`nexus_review`）对主分析结果做多维评分，产出评估报告作为**右栏第二个 artifact**（与原分析报告并列展示）。
+
+这解决了"LLM 自己说自己对不对"的信任问题——评估报告是独立产出，用户可对比判断。
+
+### 10.2 评估维度（5 维度，每维 0-10 分）
+
+| 维度 | 评估内容 | 诊断类（DMAIC/OEE） | 评估类（QS16949） |
+|---|---|---|---|
+| 主题一致性（topic_consistency） | 分析主题是否贯穿始终，有无漂移 | 严格：DMAIC 不能漂移到 OEE 根因 | 严格：QS16949 不能漂移到根因诊断 |
+| 证据充分性（evidence_sufficiency） | 核心结论是否有足够工具调用支撑 | 工具调用数 + EvidenceEnvelope 链 | 同左 |
+| 根因合理性（root_cause_rationality） | 根因是否符合 5Why 逻辑，鱼骨图覆盖 5M1E | 严格评分 | **中性分**（评估类不需要根因） |
+| 建议可执行性（recommendation_actionability） | 建议项是否带 actionTool + impact/executionScore | 严格评分 | 严格评分（纠正措施可执行性） |
+| 方法合规性（methodology_compliance） | 是否遵循所选方法论的阶段顺序 | 严格：D→M→A→I→C | 严格：scope→evidence→gap_analysis→improve |
+
+### 10.3 评估报告的 ComponentLayout
+
+质量评估报告本身也用组件库渲染（复用 Phase 1 的组件，不新建渲染路径）：
+
+```jsonc
+{
+  "reportType": "quality_assessment",
+  "title": "分析质量评估报告",
+  "components": [
+    // 总分卡片
+    { "name": "score-card", "data": { "value": 7.5, "label": "总体评分", "max": 10 } },
+    // 各维度评分网格
+    { "name": "kpi-grid", "data": { "cards": [
+        { "label": "主题一致性", "value": "8.5", "color": "#22c55e" },
+        { "label": "证据充分性", "value": "7.0", "color": "#f59e0b" }
+        // ...
+    ] } },
+    // 改进建议
+    { "name": "text-block", "data": { "text": "改进建议：...", "variant": "warn" } }
+  ]
+}
+```
+
+### 10.4 评估器的两档实现
+
+| 档位 | 触发条件 | 实现 | 评分稳定性 |
+|---|---|---|---|
+| LLM 档（主用） | 注入了 `nexus_review` 模型 | 用便宜模型 + 结构化 prompt 输出 JSON 评分 | 中（多维度降低单点偏差） |
+| 启发式档（降级） | 无模型 / LLM 调用失败 | 基于轨迹的规则打分（工具数、是否含根因、是否含建议） | 高（但粗糙） |
+
+**设计要点**：
+- 评估器无状态，可独立调用（`evaluateAnalysisQuality` 函数）
+- skill 形态（`skill.quality_evaluate`）与工具形态（`nexus_quality_evaluate`）共用评估内核，不重复实现
+- 评估报告标注"参考性评分"（LLM 评估，非绝对标准），避免用户过度依赖
+
+### 10.5 评估类问题的特殊处理
+
+QS16949 内审评估是**符合性评估类**问题（非诊断类），评估器对其做差异化处理：
+- `root_cause_rationality` 维度给中性分（这类问题本就不需要根因，不应因"无根因"而扣分）
+- `methodology_compliance` 按 QS16949 的四阶段（scope→evidence→gap_analysis→improve）校验，而非 DMAIC 五阶段
+
+这一区分由 `methodologyTopic` 参数传入，评估器据此判断问题类型。

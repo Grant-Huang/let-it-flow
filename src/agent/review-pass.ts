@@ -16,6 +16,7 @@ import { generateText } from "ai";
 import type { LanguageModel } from "ai";
 import type { StepTrace } from "./types.js";
 import { isEvidenceEnvelope, summarizeEvidence } from "../core/evidence-envelope.js";
+import { resolveCallSiteParams } from "../llm/llm-config.js";
 
 /** review pass 产出的可信度报告。 */
 export interface ReviewReport {
@@ -75,7 +76,7 @@ export async function runReviewPass(
     const { text } = await generateText({
       model,
       ...callArgs,
-      temperature: 0.1,
+      temperature: resolveCallSiteParams("nexus_review").temperature,
       abortSignal,
     });
 

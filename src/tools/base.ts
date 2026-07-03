@@ -90,6 +90,13 @@ export interface FlowConnector<TOutput = unknown> {
   readonly tier: ToolTier;
   /** 人/LLM 可读描述（喂给 planner 选工具）。 */
   readonly description: string;
+  /**
+   * 给终端用户看的简短描述（会话流里 tool_call 元信息显示）。
+   * 不填则 UI 回退到本地映射表或 description。
+   * 与 description 拆分：description 服务 LLM 选工具（可长、可含使用建议），
+   * uiLabel 服务人类阅读（一句话、面向业务）。
+   */
+  readonly uiLabel?: string;
   /** 输入参数 JSON Schema（Zod 或原生 schema）。MVP 用 Zod schema 对象描述。 */
   readonly inputSchema: Record<string, unknown>;
 

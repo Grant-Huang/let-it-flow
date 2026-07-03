@@ -14,6 +14,18 @@ import type { BizContext, SemanticNeed } from "./types.js";
 import type { McpClient, McpToolCallResult } from "../tools/mcp/mcp-client.js";
 import { deriveSemantic, type CatalogItem } from "../tools/mcp/mcp-catalog-cache.js";
 
+/**
+ * 工具路由置信度基线（resolver 链各档的默认值）。
+ *
+ * 命名常量替代散落的 0.6/0.7 字面量。优先级低于调用方显式传值。
+ */
+export const ROUTING_CONFIDENCE = {
+  /** 在线 catalog 搜索（兜底）：低于 Index/LLM 路径。 */
+  catalogSearch: 0.6,
+  /** LLM 推断兜底：中等置信度。 */
+  llmResolver: 0.7,
+} as const;
+
 /** 构造选项。 */
 export interface CatalogSearchResolverOptions {
   /** MCP server id。 */
@@ -61,7 +73,7 @@ export class CatalogSearchResolver implements ToolResolver {
         toolName: preferred.name,
         params: {},
         source: "fallback",
-        confidence: 0.6, // 在线搜索结果置信度低于 Index/LLM
+        confidence: ROUTING_CONFIDENCE.catalogSearch,
       };
     } catch {
       // mestar 不可达或解析失败 → null

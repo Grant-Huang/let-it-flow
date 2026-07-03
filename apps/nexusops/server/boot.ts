@@ -35,6 +35,7 @@ import type { HarnessConfig, EmitFn, StepTrace } from "../../../src/agent/types.
 import { governanceToHooks } from "../../../src/agent/governance.js";
 import { SkillRegistry } from "../../../src/agent/skill-registry.js";
 import { promotableCandidates } from "../../../src/agent/skill-miner.js";
+import { DEFAULT_MAX_STEPS } from "../../../src/agent/stop-policy.js";
 import { buildNexusTools } from "../tools/index.js";
 import { registerMcpActionTools } from "../tools/domains/mcp-actions.js";
 import { createToolResolverTool } from "../tools/tool-resolver-tool.js";
@@ -57,6 +58,7 @@ import { McpCatalogCache } from "../../../src/tools/mcp/mcp-catalog-cache.js";
 import { EmbeddingToolRouter, makeAiEmbedder } from "../../../src/orchestrator/embedding-router.js";
 import { CatalogSearchResolver } from "../../../src/orchestrator/catalog-search-resolver.js";
 import { createLazyMcpActionTool } from "../../../src/tools/mcp/lazy-mcp-action-tool.js";
+import { createBootLogger, type BootLogger } from "../../../src/core/boot-logger.js";
 
 /** 解析 MCP server 配置（NEXUS_MCP_SERVERS env，JSON 数组）。 */
 function parseMcpConfigs(): import("../../../src/tools/mcp/mcp-client.js").McpServerConfig[] {
@@ -66,9 +68,41 @@ function parseMcpConfigs(): import("../../../src/tools/mcp/mcp-client.js").McpSe
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed : [];
   } catch {
-    console.warn("[nexusops] NEXUS_MCP_SERVERS 解析失败，跳过 MCP 装配");
+    console.warn("NEXUS_MCP_SERVERS 解析失败，跳过 MCP 装配");
     return [];
   }
+}
+
+/**
+ * 解析 mock 工具开关档位（统一管理域取证 + mock MCP 动作两类 mock）。
+ *
+ * 优先级：NEXUS_MOCK_TOOLS > NEXUS_MOCK_ACTIONS（向后兼容） > 缺省 "all"
+ *
+ * 取值映射：
+ *   - NEXUS_MOCK_TOOLS 未设 + NEXUS_MOCK_ACTIONS 未设 → "all"（全开）
+ *   - NEXUS_MOCK_TOOLS 未设 + NEXUS_MOCK_ACTIONS=0     → "actions"（仅关动作，旧行为）
+ *   - NEXUS_MOCK_TOOLS="0"/"off"                       → "off"（全关，走 mestar）
+ *   - NEXUS_MOCK_TOOLS="1"/"all"                       → "all"（全开）
+ *   - NEXUS_MOCK_TOOLS="actions"                       → "actions"（仅关动作）
+ *   - NEXUS_MOCK_TOOLS="evidence"                      → "evidence"（仅关取证）
+ *
+ * @returns "all" | "off" | "actions" | "evidence"
+ */
+function resolveMockMode(): "all" | "off" | "actions" | "evidence" {
+  const raw = process.env.NEXUS_MOCK_TOOLS;
+  if (raw !== undefined) {
+    const v = raw.trim().toLowerCase();
+    if (v === "0" || v === "off") return "off";
+    if (v === "1" || v === "all" || v === "") return "all";
+    if (v === "actions") return "actions";
+    if (v === "evidence") return "evidence";
+    // 未知值：保守按全开（向后兼容）
+    console.warn(`NEXUS_MOCK_TOOLS="${raw}" 未识别，按缺省 "all" 处理`);
+    return "all";
+  }
+  // 向后兼容：NEXUS_MOCK_ACTIONS=0 → "actions" 档
+  if (process.env.NEXUS_MOCK_ACTIONS === "0") return "actions";
+  return "all";
 }
 
 /** NexusOps 装配选项（测试可注入）。 */
@@ -81,6 +115,8 @@ export interface NexusBootOptions {
   llm?: LlmService;
   /** 注入测试用 toolRegistry（缺省构造默认）。 */
   toolRegistry?: ToolRegistry;
+  /** 日志目录（缺省 <dataDir>/logs；留空字符串则仅控制台输出）。 */
+  logDir?: string;
 }
 
 /** 装配产物。 */
@@ -116,6 +152,12 @@ export interface NexusRuntime {
 export async function bootNexusOps(opts: NexusBootOptions = {}): Promise<NexusRuntime> {
   if (opts.dataDir) process.env.LIF_DATA_DIR = opts.dataDir;
 
+  // 启动日志：控制台 + 文件双写（按天滚动）
+  // logDir 解析：opts.logDir 显式指定 → <dataDir>/logs → 仅控制台（向后兼容）
+  const { getDataDir } = await import("../../../src/core/config.js");
+  const logDir = opts.logDir !== undefined ? opts.logDir : `${getDataDir()}/logs`;
+  const log: BootLogger = createBootLogger({ logDir: logDir || undefined, ns: "nexusops" });
+
   // 1. 配置 seed（首次启动从 .env 派生）+ LlmService
   ensureSeedConfig();
   const runtimeConfig = loadConfig();
@@ -140,21 +182,40 @@ export async function bootNexusOps(opts: NexusBootOptions = {}): Promise<NexusRu
       : undefined,
   });
 
-  // NexusOps domain.* 业务取证工具（返回 EvidenceEnvelope）
-  for (const connector of buildNexusTools()) {
-    if (!toolRegistry.has(connector.name)) toolRegistry.register(connector);
+  // NexusOps mock 工具开关（统一管理取证 + 动作两类 mock）
+  // 取值：
+  //   - "1" / 未设置：全部开启（缺省，向后兼容）
+  //   - "0" / "off"：全部关闭（域取证 + mock MCP 动作），走 mestar 三档降级链
+  //   - "actions"：只关 mock MCP 动作工具，保留域取证（= 旧 NEXUS_MOCK_ACTIONS=0）
+  //   - "evidence"：只关域取证，保留 mock MCP 动作（少见，对称性提供）
+  // 旧变量 NEXUS_MOCK_ACTIONS=0 兼容映射为 "actions" 档。
+  const mockMode = resolveMockMode();
+  const includeEvidence = mockMode !== "off" && mockMode !== "evidence";
+  const includeMockActions = mockMode !== "off" && mockMode !== "actions";
+
+  // NexusOps domain.* 业务取证工具（mock 实现，返回 EvidenceEnvelope）
+  // includeEvidence=false 时跳过注册，LLM 通过 nexus_tool_resolver + mcp.<server>.call 走真实 MCP
+  if (includeEvidence) {
+    for (const connector of buildNexusTools({ includeEvidence: true })) {
+      if (!toolRegistry.has(connector.name)) toolRegistry.register(connector);
+    }
+  } else {
+    // 仍注册收尾工具（finalize + advise），但不注册域取证工具
+    for (const connector of buildNexusTools({ includeEvidence: false })) {
+      if (!toolRegistry.has(connector.name)) toolRegistry.register(connector);
+    }
+    log.info("mock 域取证工具已关闭（NEXUS_MOCK_TOOLS），取证走 MCP + 三档降级链");
   }
 
   // NexusOps mock MCP 动作工具（write/destructive，走 HITL 确认门）
-  // 开关 NEXUS_MOCK_ACTIONS（缺省开启，测试可关闭）。命名遵循 mcp.<sys>.<tool>
-  // 让 governance 规则（按 mcp.mes.*/mcp.qms.* 前缀）与 nexus_advise 的 actionTool 直接生效。
-  const enableMockActions = process.env.NEXUS_MOCK_ACTIONS !== "0";
-  if (enableMockActions) {
+  // includeMockActions=false 时跳过注册（已被真实 MCP 动作工具替代）
+  if (includeMockActions) {
     actionStore.reset();
-    for (const connector of registerMcpActionTools()) {
+    const mockActionConnectors = registerMcpActionTools();
+    for (const connector of mockActionConnectors) {
       if (!toolRegistry.has(connector.name)) toolRegistry.register(connector);
     }
-    console.log(`[nexusops] mock MCP 动作工具已注册（${registerMcpActionTools().length} 个）`);
+    log.info(`mock MCP 动作工具已注册（${mockActionConnectors.length} 个）`);
   }
 
   // NexusOps skill.* 沉淀流程（L 层 —— 手写 skill + registry active skill）
@@ -175,9 +236,9 @@ export async function bootNexusOps(opts: NexusBootOptions = {}): Promise<NexusRu
     await obsidian.init();
     if (obsidian.ready()) {
       knowledgeProviders.push(obsidian);
-      console.log(`[nexusops] Obsidian vault 已加载 @ ${vaultPath}`);
+      log.info(`Obsidian vault 已加载 @ ${vaultPath}`);
     } else {
-      console.warn(`[nexusops] Obsidian vault 未就绪（路径不存在或为空）：${vaultPath}`);
+      log.warn(`Obsidian vault 未就绪（路径不存在或为空）：${vaultPath}`);
     }
   }
 
@@ -208,8 +269,8 @@ export async function bootNexusOps(opts: NexusBootOptions = {}): Promise<NexusRu
       if (cache.isReady()) {
         catalogCaches.set(serverId, cache);
         const map = cache.getModuleMap();
-        console.log(
-          `[nexusops] MCP server "${serverId}" catalog 预热完成：${map?.totalTools ?? 0} 个工具（${map?.totalExecutable ?? 0} 可执行，${map?.modules.length ?? 0} 模块）`,
+        log.info(
+          `MCP server "${serverId}" catalog 预热完成：${map?.totalTools ?? 0} 个工具（${map?.totalExecutable ?? 0} 可执行，${map?.modules.length ?? 0} 模块）`,
         );
 
         // 注册 LazyMcpActionTool（catalog 模式的执行入口）
@@ -219,7 +280,13 @@ export async function bootNexusOps(opts: NexusBootOptions = {}): Promise<NexusRu
 
         // 构建 EmbeddingToolRouter（向量检索路由）
         const cacheDir = `data/mcp-catalog-cache/${serverId}`;
-        const embedder = makeAiEmbedder(llm.embeddingModel());
+        const embedModel = llm.embeddingModel();
+        const embedBaseURL = process.env.LIF_EMBEDDING_BASE_URL ?? "(复用 chat provider)";
+        const embedModelId = process.env.LIF_EMBEDDING_MODEL ?? "text-embedding-3-small";
+        log.info(
+          `MCP server "${serverId}" EmbeddingRouter 初始化：provider=${embedBaseURL} model=${embedModelId}`,
+        );
+        const embedder = makeAiEmbedder(embedModel);
         const router = new EmbeddingToolRouter({ cacheDir, embedder });
         // 优先加载已持久化的向量索引，否则构建
         if (!router.loadIndex()) {
@@ -228,8 +295,12 @@ export async function bootNexusOps(opts: NexusBootOptions = {}): Promise<NexusRu
         }
         if (router.isReady()) {
           catalogRouters.set(serverId, router);
-          console.log(
-            `[nexusops] MCP server "${serverId}" EmbeddingRouter 就绪（${router.indexSize()} 个向量）`,
+          log.info(
+            `MCP server "${serverId}" EmbeddingRouter 就绪（${router.indexSize()} 个向量）`,
+          );
+        } else {
+          log.warn(
+            `MCP server "${serverId}" EmbeddingRouter 未就绪（向量索引构建失败，nexus_tool_resolver 将走 Index+LLM 兜底解析）`,
           );
         }
 
@@ -247,7 +318,7 @@ export async function bootNexusOps(opts: NexusBootOptions = {}): Promise<NexusRu
     } else {
       // 普通模式：全量注册（现有路径）
       const n = await registerMcpServerTools(toolRegistry, mcpRouter, serverId);
-      if (n > 0) console.log(`[nexusops] MCP server "${serverId}" 注册 ${n} 个动作工具`);
+      if (n > 0) log.info(`MCP server "${serverId}" 注册 ${n} 个动作工具`);
     }
 
     // 读桥：把 server resources 适配成 KB provider（两种模式都做）
@@ -309,7 +380,8 @@ export async function bootNexusOps(opts: NexusBootOptions = {}): Promise<NexusRu
   const preconditions = nexusPreconditionList(preconditionReg);
 
   // 6. customRunner：把 ReAct Harness 接到内核 task store + HITL
-  const maxSteps = Number(process.env.NEXUS_MAX_STEPS ?? "15");
+  // NEXUS_MAX_STEPS 应用级覆盖 > LIF_MAX_STEPS 全局 > DEFAULT_MAX_STEPS（已含 env 解析）
+  const maxSteps = Number(process.env.NEXUS_MAX_STEPS ?? DEFAULT_MAX_STEPS);
   const costCapInput = process.env.NEXUS_COST_CAP_INPUT
     ? Number(process.env.NEXUS_COST_CAP_INPUT)
     : undefined;
@@ -318,10 +390,13 @@ export async function bootNexusOps(opts: NexusBootOptions = {}): Promise<NexusRu
   const toolTiers: ("core" | "domain" | "custom")[] = ["core", "domain", "custom"];
   const allToolNames = toolRegistry.listByTiers(toolTiers).map((t) => t.name);
   // 收尾前证据评估用主力模型（与主循环同款），仅收尾意图时触发，控制延迟
+  // 意图分类用轻量模型（首步一次性，把用户意图分类到方法论 topic）
   const prepareStep = buildNexusPrepareStep({
     allToolNames,
     evidenceGateModel: llm.model("nexus_agent"),
     evidenceGateCompatMode: llm.compatModeFor ? llm.compatModeFor("nexus_agent") : false,
+    topicClassifyModel: llm.model("nexus_narrate"),
+    topicClassifyCompatMode: llm.compatModeFor ? llm.compatModeFor("nexus_narrate") : false,
     orchestrator,
   });
 
@@ -372,7 +447,9 @@ export async function bootNexusOps(opts: NexusBootOptions = {}): Promise<NexusRu
     // MCP catalog 模块目录地图（07-mestar-integration-spec.md §8）：
     // 把数千工具压缩成几十个模块目录喂给 LLM，引导其用 resolver 按需定位具体工具
     const catalogMap = buildMcpCatalogPrompt(catalogCaches);
+    const mockModePrompt = buildMockModePrompt(includeEvidence, includeMockActions);
     const systemPromptParts = [NEXUS_SYSTEM_PROMPT];
+    if (mockModePrompt) systemPromptParts.push(mockModePrompt);
     if (evidenceMap) systemPromptParts.push(evidenceMap);
     if (catalogMap) systemPromptParts.push(catalogMap);
     const systemPrompt = systemPromptParts.join("\n\n");
@@ -407,6 +484,13 @@ export async function bootNexusOps(opts: NexusBootOptions = {}): Promise<NexusRu
 
     // 终态：按 finishReason 决定 status
     if (result.finishReason === "precondition_unmet") {
+      // 证据不足收尾：面向用户给出总结文字，避免"调完工具嘎然而止"
+      await emitSessionSummary(emit, {
+        kind: "precondition_unmet",
+        intent,
+        stepTrace: result.stepTrace,
+        finalText: result.finalText,
+      });
       hooks.emit(
         "extension",
         {
@@ -424,6 +508,12 @@ export async function bootNexusOps(opts: NexusBootOptions = {}): Promise<NexusRu
     }
 
     if (result.finishReason === "error") {
+      // 异常收尾：把 error 信息转成用户可读文字
+      await emitSessionSummary(emit, {
+        kind: "error",
+        intent,
+        error: result.error,
+      });
       hooks.emit("error", { message: result.error ?? "执行出错" } as never);
       hooks.setStatus("error", result.error);
       return;
@@ -529,6 +619,17 @@ export async function bootNexusOps(opts: NexusBootOptions = {}): Promise<NexusRu
       // 挖矿失败不阻断主结果
     }
 
+    // 成功收尾兜底：LLM 应已按"收尾纪律"输出完整陈述；仅在 LLM 没输出文字时，
+    // 把 nexus_finalize 的 summary 参数 emit 给用户（该值是 LLM 自己写的结论摘要）
+    await emitSessionSummary(emit, {
+      kind: "success",
+      intent,
+      stepTrace: result.stepTrace,
+      finalText: result.finalText,
+      finalizeSummary: extractFinalizeSummary(result.stepTrace),
+      finishReason: result.finishReason,
+    });
+
     hooks.emit("done", {} as never);
     hooks.setStatus("done");
   };
@@ -565,6 +666,60 @@ function buildMcpCatalogPrompt(caches: Map<string, McpCatalogCache>): string {
   return sections.length > 0 ? `## 可用的 MCP 业务系统\n${sections.join("\n\n")}` : "";
 }
 
+/**
+ * 构造 mock 模式提示段（注入 systemPrompt）。
+ *
+ * - 全开模式：返回空字符串（不注入，向后兼容）
+ * - 关闭取证模式：注入"三档降级纪律"段，引导 LLM 走
+ *   resolver → mcp.<server>.call → 反问用户 → 标注证据缺失
+ *
+ * @param includeEvidence  是否注册了域取证工具
+ * @param includeMockActions 是否注册了 mock MCP 动作工具
+ * @returns 提示段文本（全开模式返回空）
+ */
+function buildMockModePrompt(includeEvidence: boolean, includeMockActions: boolean): string {
+  // 全开：不注入（保持现状）
+  if (includeEvidence && includeMockActions) return "";
+
+  const parts: string[] = ["## 工具模式与降级纪律（当前为非全 mock 模式）"];
+
+  if (!includeEvidence) {
+    parts.push(
+      "**域取证工具（oee.*/quality.*/process.* 等）未启用**。所有数据取证必须按以下三档降级链处理，禁止编造数据：",
+      "",
+      "1. **第一档（重定向 MCP）**：调 \`nexus_tool_resolver(semantic=\"<业务语义>\")\` 查找 MCP 等价工具。",
+      "   - 命中（resolved 非空）→ 调 \`mcp.<server>.call(toolName=\"<resolver 返回>\", args={...})\` 取数",
+      "   - resolver 返回 source=index 或 confidence≥0.7 视为高置信等价，可直接采信",
+      "   - resolver 返回 source=llm（兜底推断）需谨慎，建议交叉验证后再下结论",
+      "",
+      "2. **第二档（询问用户）**：resolver 返回 null 或低置信度且语义不明确 →",
+      "   不要编造数据。直接以纯文本反问用户：",
+      '   "MCP 未提供 <X> 数据。如果你手头有该数据（如 OEE=0.65、缺陷率=5.8%），请直接告诉我；',
+      '   否则我将基于现有证据给出有限结论。"',
+      "   （注：首步直接输出文本不调任何工具，系统会以 no_tool_call 结束并把文本回传给你）",
+      "",
+      "3. **第三档（标注证据缺失）**：用户也无法提供 →",
+      "   在 \`nexus_advise\` 的 rationale 里显式标注 \"证据缺失：<X> 无法取证\"，",
+      "   给出基于现有证据的有限结论 + 数据补全建议，不要硬下结论。",
+      "",
+      "**纪律**：",
+      "- 禁止用 skill.* 内部 mock 数据冒充实测（skill 是参考诊断模板，内部仍调 mock accessor）",
+      "- 证据来源必须如实标注（mcp.<server>.<tool> / 用户提供 / 缺失）",
+    );
+  }
+
+  if (!includeMockActions) {
+    parts.push(
+      "",
+      "**mock MCP 动作工具（mcp.mes.*/mcp.qms.* 等）未启用**。需要执行写/破坏操作时：",
+      "- 调 \`nexus_tool_resolver\` 查 MCP 等价动作工具，再走 \`mcp.<server>.call\`",
+      "- 找不到等价工具 → 在 nexus_advise 的 actionTool 留空，仅给出建议不附行动按钮",
+    );
+  }
+
+  return parts.join("\n");
+}
+
 /** NexusOps 默认 system prompt（追加到 harness 默认 prompt 之后）。 */
 const NEXUS_SYSTEM_PROMPT = `
 ## NexusOps 运营智能分析专家角色
@@ -581,6 +736,22 @@ const NEXUS_SYSTEM_PROMPT = `
   - 主题一致性纪律：若前置分析是 DMAIC，绝不用 oee 模板（否则 σ/DPMO 主题会被 OEE 根因树覆盖）。
 6. 收尾前调 nexus_quality_evaluate 对本次分析结果做多维质量评分（主题一致性/证据充分性/根因合理性/建议可执行性/方法合规性），产出评估报告（参考性评分，用于自检与改进）。
 7. 最后调 nexus_finalize 收尾。
+
+## 首步纪律（开场过渡，必须遵守）
+- **第一步必须先输出 2-3 句开场白，然后再调第一个工具**，不能上来就直接调工具。
+- 开场白要讲清楚两件事（用自然口语，不要套话模板）：
+  1. 你对这个问题的理解——点出核心矛盾（如"OEE 偏低通常是可用率或表现率拖累"），**不要复读用户原话**。
+  2. 你打算先查什么数据、为什么——让用户知道接下来的取证路径（如"我先拉一下实时 OEE 分解数据，看是哪一项最拉胯"）。
+- 开场白不要预先下结论，也不要罗列所有可能的方法论（用户不需要听教科书）。聚焦"我马上要做什么"。
+- 这段开场白会实时呈现给用户，是会话的第一次反馈——它让用户确认你理解对了，并感知到分析已启动。
+
+## 收尾纪律（结束前必须输出完整收尾陈述）
+- **调用 \`nexus_finalize\` 之前，必须先输出一段完整的收尾陈述**，不能调完工具就结束。
+- 这段陈述是用户最终看到的内容（\`nexus_finalize\` 工具本身在前端隐藏），必须根据实际情况覆盖：
+  - **成功时**：得出了什么结论、关键发现是什么、生成了哪些产物（报告/建议）、可信度如何、有什么后续建议。
+  - **证据不足以定论时**：诚实说明哪些证据缺失、基于现有证据能得出什么有限结论、可信度为何偏低、建议用户补充什么数据。
+- 不要用套话（如"分析已完成"），要讲实质内容——用户看完这段应能回答"所以呢？"。
+- 这段陈述会实时呈现给用户，是会话最后的总结，务必写完整。
 
 ## 编排知识层与工具解析（LLM 主导）
 - **方法论指导**：每轮分析首步会收到来自编排知识层（Orchestrator）的方法论指导（注入到 system prompt）。指导含阶段路线图（如 DMAIC 的 D→M→A→I→C）和每阶段必取证项。严格按阶段顺序执行，不要跳过必取证项。
@@ -617,62 +788,6 @@ const NEXUS_SYSTEM_PROMPT = `
 - 若 quality.five_why 返回空 chains（normal 场景），说明无已识别根因，需诚实说明"当前证据不足以确定根因，建议现场 5Why 补充排查"，不得凭 LLM 先验编造根因。
 - 工艺参数偏差导致质量缺陷时，必须调 process.quality_impact 获取「偏差量→物理机制→缺陷类型」完整映射；不得仅凭"温度偏高"直接写"导致尺寸超差"而不说明物理机制。
 `.trim();
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 意图理解和编排说明生成辅助函数
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * 根据用户意图生成"意图理解"的文本说明，帮助用户确认我们的理解。
- * 如果 intent 过长或复杂，可能返回 undefined（略去不显示）。
- */
-function generateIntentSummary(intent: string): string | undefined {
-  // 简单启发式：如果 intent 包含问号或疑问词，就认为是合法问题
-  // 实际可接入 LLM 来生成更自然的表述
-  if (intent.length > 200) {
-    // 太长的意图，略去不显示
-    return undefined;
-  }
-
-  // 检查是否包含问题关键词
-  const questionPatterns = [
-    /为什么|什么|怎样|如何|帮我|分析|诊断|查看|检查/,
-    /OEE|停机|缺陷|良率|产能|成本|能耗/,
-  ];
-
-  const isQuestion = questionPatterns.some((p) => p.test(intent));
-  if (!isQuestion) {
-    return undefined;
-  }
-
-  // 生成简短的理解确认语（可扩展为调用 LLM）
-  return `\n我理解你的需求是：${intent}\n`;
-}
-
-/**
- * 根据用户意图生成"编排说明"的文本说明，描述我们的分析方法。
- * 这帮助用户了解后续会执行的步骤。
- */
-function generateOrchestrationExplanation(intent: string): string | undefined {
-  // 简单启发式：根据 intent 的关键词选择不同的分析方法
-  // 实际可接入 LLM 来生成更自然的表述
-
-  let methodology = "";
-
-  if (intent.includes("OEE") || intent.includes("效率")) {
-    methodology = "我将从 OEE 三维度（可用率、性能、质量）分解问题，查实测数据，并用多视角分析（鱼骨图、FMEA）交叉验证，最后给出改善建议。";
-  } else if (intent.includes("停机") || intent.includes("下降")) {
-    methodology = "我将先查设备停机日志和根本原因，再用 5Why 和故障树分析，查找深层触发因素，最后给出预防和改善方案。";
-  } else if (intent.includes("缺陷") || intent.includes("良率")) {
-    methodology = "我将分析缺陷分布（帕累托分析），找出主要不良模式，再用工艺参数和过程能力分析定位原因，最后给出质量改善方案。";
-  } else if (intent.includes("成本") || intent.includes("效益")) {
-    methodology = "我将从成本结构和关键驱动因素入手，分析物料成本、能耗、产能利用等，给出成本优化方向。";
-  } else {
-    methodology = "我将通过数据取证、多视角分析、证据交叉验证，为你给出数据驱动的建议。";
-  }
-
-  return `\n我的分析方法是：${methodology}\n`;
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 多轮追问辅助：从 parentTask 还原上一轮压缩上下文
@@ -737,4 +852,117 @@ function extractStepTraceFromTask(
     }
   }
   return null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 会话收尾总结（无论成功/失败都给用户一段文字，避免"调完工具嘎然而止"）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 会话总结输入。 */
+interface SessionSummaryInput {
+  /** 终态类型。 */
+  kind: "success" | "precondition_unmet" | "error";
+  /** 用户原始意图。 */
+  intent: string;
+  /** 完整轨迹（成功路径用于提取 finalize summary；证据不足路径用于统计工具调用数）。 */
+  stepTrace?: StepTrace[];
+  /** LLM 已输出的最终文本（成功路径用于判定是否需补总结）。 */
+  finalText?: string;
+  /** nexus_finalize 工具的 summary 参数值（LLM 调 finalize 时填写的结论摘要）。 */
+  finalizeSummary?: string;
+  /** 停止原因（成功路径细分：finalize_tool / no_tool_call / step_count / ...）。 */
+  finishReason?: string;
+  /** 异常信息（error 路径）。 */
+  error?: string;
+}
+
+/**
+ * 会话结束时 emit 一段面向用户的总结文字（兜底机制）。
+ *
+ * 设计原则：
+ *   - 正常路径（success + finalize_tool）：LLM 已按"收尾纪律"输出完整收尾陈述，
+ *     后端只在 LLM 完全没输出文字时，把 nexus_finalize 的 summary 参数 emit 给用户
+ *     （该参数是 LLM 自己写的结论摘要，不是套话）。
+ *   - 异常/证据不足路径：LLM 没机会输出收尾陈述，后端 emit 最小兜底文字
+ *     （只说清楚"为什么停在这"，不生成建议列表等套话）。
+ *
+ * 文字通过 text/content 事件 emit，前端沿用 narrate 同一渲染通道，无需改动。
+ */
+async function emitSessionSummary(emit: EmitFn, input: SessionSummaryInput): Promise<void> {
+  const text = buildSessionSummary(input);
+  if (!text) return;
+  await emit({
+    type: "text",
+    channel: "content",
+    payload: { delta: text },
+  });
+}
+
+/**
+ * 构造会话兜底总结文字。返回空字符串表示无需 emit。
+ *
+ * 导出供单测验证（不直接测 emit 副作用，只测文案生成逻辑）。
+ */
+export function buildSessionSummary(input: SessionSummaryInput): string {
+  const { kind } = input;
+
+  if (kind === "error") {
+    const reason = input.error?.trim() || "未知错误";
+    return `\n\n---\n分析中断：${truncate(reason, 120)}。可稍后重试。\n`;
+  }
+
+  if (kind === "precondition_unmet") {
+    const toolCount = countToolCalls(input.stepTrace ?? []);
+    const toolHint = toolCount > 0
+      ? `已取证 ${toolCount} 次，但关键证据仍不足。`
+      : "尚未取证。";
+    return `\n\n---\n证据不足，无法给出可靠结论。${toolHint}请补充更具体的信息（产线/设备/时间范围，或直接提供实测数据）后再分析。\n`;
+  }
+
+  // 成功路径：LLM 应已按"收尾纪律"输出完整收尾陈述
+  const finalText = (input.finalText ?? "").trim();
+  // LLM 已输出收尾文字 → 不补（避免重复）
+  if (finalText.length >= 30) return "";
+
+  // LLM 没输出收尾文字，但调了 nexus_finalize 并填了 summary → 用 LLM 写的 summary
+  const finalizeSummary = (input.finalizeSummary ?? "").trim();
+  if (finalizeSummary) {
+    return `\n\n${finalizeSummary}\n`;
+  }
+
+  // 都没有（极罕见：LLM 调了工具但既没输出文字也没填 summary）→ 最小兜底
+  const toolCount = countToolCalls(input.stepTrace ?? []);
+  if (toolCount === 0) return ""; // 未调工具（澄清反问等），LLM 文本已 emit
+  const reasonLabel = input.finishReason === "step_count" ? "（已达步数上限）" : "";
+  return `\n\n---\n分析结束${reasonLabel}，但未输出总结。如需继续可追问。\n`;
+}
+
+/** 从 stepTrace 中提取 nexus_finalize 工具调用的 summary 参数值。 */
+function extractFinalizeSummary(trace: StepTrace[]): string {
+  for (const step of trace) {
+    for (const tc of step.toolCalls) {
+      if (tc.toolName === "nexus_finalize" || tc.toolName === "nexus.finalize") {
+        const summary = (tc.args as { summary?: unknown })?.summary;
+        if (typeof summary === "string" && summary.trim()) return summary.trim();
+      }
+    }
+  }
+  return "";
+}
+
+/** 统计轨迹中的工具调用次数（排除被拒绝的）。 */
+function countToolCalls(trace: StepTrace[]): number {
+  let n = 0;
+  for (const step of trace) {
+    for (const tc of step.toolCalls) {
+      if (!tc.rejected) n++;
+    }
+  }
+  return n;
+}
+
+/** 把过长文本截到指定长度，超长加省略号。 */
+function truncate(s: string, max: number): string {
+  const t = s.trim();
+  return t.length > max ? t.slice(0, max) + "…" : t;
 }

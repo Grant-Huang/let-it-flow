@@ -16,6 +16,7 @@ import type { ToolRegistry } from "../tools/registry.js";
 import type { ToolResolver, ResolvedTool } from "./tool-resolver.js";
 import type { BizContext, SemanticNeed } from "./types.js";
 import type { CandidateTool } from "./embedding-router.js";
+import { ROUTING_CONFIDENCE } from "./catalog-search-resolver.js";
 
 /** LLM 客户端接口（最小契约，便于注入不同实现）。 */
 export interface LlmClient {
@@ -105,7 +106,7 @@ ${JSON.stringify(toolList, null, 2)}
         toolName: parsed.toolName,
         params: {},
         source: "llm",
-        confidence: 0.7,
+        confidence: ROUTING_CONFIDENCE.llmResolver,
       };
     } catch {
       return null;

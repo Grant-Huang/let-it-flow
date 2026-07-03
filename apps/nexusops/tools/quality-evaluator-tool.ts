@@ -29,6 +29,7 @@ export function createQualityEvaluatorTool(opts: QualityEvaluatorOptions = {}): 
     description:
       "对一次分析的最终产出做多维质量评分（主题一致性/证据充分性/根因合理性/建议可执行性/方法合规性），" +
       "输出可视化评估报告（HTML）。分析完成后调用，用于自检分析质量。",
+    uiLabel: "自检分析质量",
     whenToUse: {
       triggers: ["质量评估", "评估分析质量", "自检分析", "quality evaluate"],
       notFor: ["分析过程中调用（应在收尾后调用）", "取实时数据（走 domain.* 工具）"],

@@ -24,9 +24,10 @@ import {
   type IWechatPublisher,
   WechatApiException,
 } from "./types.js";
+import { SERVICE_URLS } from "../../../../src/core/config.js";
 
-/** 微信 API 基址。 */
-const API_BASE = "https://api.weixin.qq.com";
+/** 微信 API 基址（从集中配置读取，便于切代理/私有部署）。 */
+const API_BASE = SERVICE_URLS.wechatApi;
 
 /** token 提前刷新余量（毫秒）。避免边界过期。 */
 const TOKEN_REFRESH_LEAD_MS = 300_000;

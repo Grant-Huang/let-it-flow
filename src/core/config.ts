@@ -1,5 +1,6 @@
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
+import { CORE_PORT } from "./ports.js";
 
 /**
  * 全局配置：数据目录与运行时参数。
@@ -69,12 +70,35 @@ export const RUNTIME = {
   openaiApiKey: process.env.OPENAI_API_KEY ?? "",
   /** OpenAI 兼容 API 的 baseURL（如 DeepSeek: https://api.deepseek.com）。缺省走 OpenAI 官方。 */
   openaiBaseUrl: process.env.OPENAI_BASE_URL ?? "",
+  /** Embedding API Key（独立于 chat provider；缺省回退 openaiApiKey）。 */
+  embeddingApiKey: process.env.LIF_EMBEDDING_API_KEY ?? process.env.OPENAI_API_KEY ?? "",
+  /** Embedding baseURL（独立配置，如 Jina: https://api.jina.ai/v1）。缺省回退 openaiBaseUrl / OpenAI 官方。 */
+  embeddingBaseUrl: process.env.LIF_EMBEDDING_BASE_URL ?? "",
+  /** Embedding 模型 id（缺省 text-embedding-3-small；Jina 用 jina-embeddings-v3）。 */
+  embeddingModel: process.env.LIF_EMBEDDING_MODEL ?? "text-embedding-3-small",
   /** Tavily 搜索 API Key（web_search 用） */
   tavilyApiKey: process.env.TAVILY_API_KEY ?? "",
   /** 搜索 provider 选择：native=强制 DuckDuckGo / tavily=强制 Tavily / auto=有 key 用 Tavily（默认） */
   searchProvider: process.env.LIF_SEARCH_PROVIDER ?? "auto",
-  /** 端口 */
-  port: Number(process.env.PORT ?? 8787),
+  /** 端口（集中自 ports.ts，避免 8787 散落） */
+  port: CORE_PORT,
+} as const;
+
+/**
+ * 外部服务 base URL 集中配置（便于切换环境/代理/私有部署）。
+ *
+ * 所有第三方 API endpoint 在此声明，业务代码统一引用 SERVICE_URLS.* 而非散落字面量。
+ * 优先级：环境变量 > 默认值。新增外部依赖时在此追加字段。
+ */
+export const SERVICE_URLS = {
+  /** Tavily 搜索 API（web-search.ts 用）。env: TAVILY_BASE_URL。 */
+  tavilySearch: process.env.TAVILY_BASE_URL ?? "https://api.tavily.com/search",
+  /** DuckDuckGo HTML 检索端点（无 key 兜底）。env: DDG_HTML_BASE_URL。 */
+  duckduckgoHtml: process.env.DDG_HTML_BASE_URL ?? "https://html.duckduckgo.com/html/",
+  /** 微信公众号开放平台 API 基址。env: WECHAT_API_BASE。 */
+  wechatApi: process.env.WECHAT_API_BASE ?? "https://api.weixin.qq.com",
+  /** Ollama 本地推理服务基址（OpenAI 兼容路径）。env: OLLAMA_BASE_URL。 */
+  ollama: process.env.OLLAMA_BASE_URL ?? "http://localhost:11434/v1",
 } as const;
 
 /**

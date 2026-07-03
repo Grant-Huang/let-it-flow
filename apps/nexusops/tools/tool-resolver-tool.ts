@@ -21,6 +21,7 @@ export function createToolResolverTool(resolver: ToolResolver): FlowConnector {
     description:
       "按语义需求查找工具。输入 semantic（如 'process_capability'），返回匹配的工具名 + 参数建议 + 来源（index/llm）。" +
       "当不确定该用哪个工具时先调此工具按语义查找，而非硬记工具名。",
+    uiLabel: "按语义查找工具",
     whenToUse: {
       triggers: ["找工具", "哪个工具", "按语义查工具", "tool resolver"],
       notFor: ["已知工具名直接调用（无需先查）"],

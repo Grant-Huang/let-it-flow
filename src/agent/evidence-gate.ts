@@ -20,6 +20,7 @@ import { generateText } from "ai";
 import type { LanguageModel } from "ai";
 import type { StepTrace } from "./types.js";
 import { compressTrace, parseReviewReport } from "./review-pass.js";
+import { resolveCallSiteParams } from "../llm/llm-config.js";
 
 /** 证据评估执行选项。 */
 export interface EvidenceGateOptions {
@@ -90,7 +91,7 @@ export async function evaluateEvidenceGate(
     const { text } = await generateText({
       model,
       ...callArgs,
-      temperature: 0.1,
+      temperature: resolveCallSiteParams("nexus_review").temperature,
       abortSignal,
     });
 

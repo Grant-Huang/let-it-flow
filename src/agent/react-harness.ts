@@ -22,8 +22,7 @@ import { streamText } from "ai";
 import { buildStopWhen } from "./stop-policy.js";
 import { adaptToolSet, toolNameToKey } from "./tool-adapter.js";
 import { TraceAccumulator, emitStepPhase } from "./step-emitter.js";
-import { narrateStepResult } from "./narrate-pass.js";
-import { isEvidenceEnvelope } from "../core/evidence-envelope.js";
+import { narrateToolCall } from "./narrate-pass.js";
 import type {
   HarnessConfig,
   HarnessResult,
@@ -110,11 +109,9 @@ export async function runReactHarness(
 
   // 5. 发起 streamText（多步循环）
   try {
-    // 调试日志：检查 narrateModel 是否可用
-    if (!narrateModel) {
-      console.warn("[react-harness] narrateModel 未配置，工具结果解读将跳过");
-    } else {
-      console.debug("[react-harness] narrateModel 已配置，将生成工具结果实时解读");
+    // 调试日志：narrateModel 未配置时仅模板分支生效，不报警（混合策略默认行为）
+    if (narrateModel) {
+      console.debug("[react-harness] narrateModel 已配置，工具结果将走 LLM 解读");
     }
 
     // 构造 user 消息内容：多轮追问时前置历史摘要
@@ -154,23 +151,26 @@ export async function runReactHarness(
             payload: { delta: "\n" },
           });
         }
-        // O 层增强：对每个有 EvidenceEnvelope 结果的 toolCall 生成人类可读解读，
-        // emit 为 text 事件，让用户跟上分析节奏（narrateModel 缺省则跳过）
-        if (narrateModel && trace.toolCalls.length > 0) {
+        // O 层增强：为每个工具调用生成人类可读解读，emit 为 text 事件，让用户跟上分析节奏。
+        // 混合策略：失败/拒绝/阻断/空 → 模板（零延迟）；EvidenceEnvelope → narrateModel LLM 解读。
+        // narrateModel 缺省时仍走模板分支（不再整体静默），仅 LLM 解读路径被跳过。
+        if (trace.toolCalls.length > 0) {
           for (const tc of trace.toolCalls) {
-            if (tc.rejected) continue;
-            if (!isEvidenceEnvelope(tc.result)) continue;
-            const narration = await narrateStepResult(
-              tc.toolName,
-              tc.args,
-              tc.result,
+            const narration = await narrateToolCall(
+              {
+                toolName: tc.toolName,
+                args: tc.args,
+                result: tc.result,
+                rejected: tc.rejected,
+                error: tc.error,
+              },
               { model: narrateModel, compatMode: narrateCompatMode, abortSignal },
             );
             if (narration) {
               await emit?.({
                 type: "text",
                 channel: "content",
-                payload: { delta: `📊 ${narration}\n` },
+                payload: { delta: `${narration}\n` },
               });
             }
           }

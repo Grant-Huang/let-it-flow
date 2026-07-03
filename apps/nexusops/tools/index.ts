@@ -32,25 +32,41 @@ import { registerEconomicsTools } from "./domains/economics.js";
 const NEXUS_TOOL_PATTERN =
   /^(oee|equipment|quality|process|energy|schedule|material|personnel|lean|economics|core|skill|mcp)\./;
 
+/** buildNexusTools 选项。 */
+export interface BuildNexusToolsOptions {
+  /**
+   * 是否注册域取证工具（oee. / quality. / process. 等前缀）。
+   * - true（缺省）：注册全部域工具 + finalize + advise（现状，向后兼容）
+   * - false：只注册 finalize + advise，域工具由调用方（如 mestar MCP）兜底
+   *          用于 NEXUS_MOCK_TOOLS 关闭取证档位：mock 域工具不注册，
+   *          LLM 走 nexus_tool_resolver → mcp.mestar.call 三档降级链。
+   */
+  includeEvidence?: boolean;
+}
+
 /**
- * 注册全部 NexusOps 业务工具到 ToolRegistry。
- * @returns 工具总数（含 finalize + advise）
+ * 构造 NexusOps 业务工具集。
+ *
+ * @param opts.includeEvidence  是否注册域取证工具（缺省 true，向后兼容）
+ * @returns 工具连接器数组（始终含 finalize + advise；includeEvidence=true 时再加域工具）
  */
-export function buildNexusTools(): FlowConnector[] {
-  return [
-    ...registerOeeTools(),
-    ...registerEquipmentTools(),
-    ...registerQualityTools(),
-    ...registerProcessTools(),
-    ...registerEnergyTools(),
-    ...registerScheduleTools(),
-    ...registerMaterialTools(),
-    ...registerPersonnelTools(),
-    ...registerLeanTools(),
-    ...registerEconomicsTools(),
-    createFinalizeTool(),
-    createAdviseTool(),
-  ];
+export function buildNexusTools(opts: BuildNexusToolsOptions = {}): FlowConnector[] {
+  const includeEvidence = opts.includeEvidence ?? true;
+  const domainTools: FlowConnector[] = includeEvidence
+    ? [
+        ...registerOeeTools(),
+        ...registerEquipmentTools(),
+        ...registerQualityTools(),
+        ...registerProcessTools(),
+        ...registerEnergyTools(),
+        ...registerScheduleTools(),
+        ...registerMaterialTools(),
+        ...registerPersonnelTools(),
+        ...registerLeanTools(),
+        ...registerEconomicsTools(),
+      ]
+    : [];
+  return [...domainTools, createFinalizeTool(), createAdviseTool()];
 }
 
 /** nexus_finalize：收尾 sentinel 工具（harness stopWhen 检测）。 */

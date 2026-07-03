@@ -330,6 +330,91 @@ LLM 生成报告 → 报表系统组件化渲染（非 HTML 字符串）
 
 ---
 
+## Phase M：Mestar MCP 接入（catalog 模式，横切 Phase）
+
+**目标**：接入"目录驱动型"MCP server（首个实例 mestar-mcp-server，8 元工具 + 2850 catalog 候选），让数千工具按需定位而非全量灌入 LLM。
+
+**relos 依赖**：无（与 relos 正交：relos 提供"该用什么方法论/需要什么语义数据"，mestar 提供"该语义数据用哪个具体工具获取"）
+
+**完整规范**：详见 [07-mestar-integration-spec.md](07-mestar-integration-spec.md)
+
+### M.1 任务清单
+
+| # | 任务 | 产出文件 | 状态 |
+|---|---|---|---|
+| M0.1 | 写 07-mestar-integration-spec.md 接入规范文档（含 mermaid 时序图 + 决策追溯表） | `apps/nexusops/docs/architecture/07-mestar-integration-spec.md`（新增） | ✅ |
+| M0.2 | 扩展 McpServerConfig 加 `catalog?` 可选字段（向后兼容） | `src/tools/mcp/mcp-client.ts`（修改） | ✅ |
+| M0.3 | .env.example 补充 mestar catalog 配置示例 | `.env.example`（修改） | ✅ |
+| M1.1 | 实现 McpCatalogCache（分页拉取 + 规则派生 + 分桶持久化 + 在线回写） | `src/tools/mcp/mcp-catalog-cache.ts`（新增） | ✅ |
+| M1.2 | boot.ts MCP 装配块改造（catalog 模式走预热而非全量注册） | `apps/nexusops/server/boot.ts`（修改） | ✅ |
+| M1.3 | McpCatalogCache 单元测试（mock catalog.search） | `tests/unit/tools/test-mcp-catalog-cache.ts`（新增，10 用例） | ✅ |
+| M2.1 | 确认 Embedding 实现方案（ai SDK 内置 embedMany + cosineSimilarity，零新依赖） | — | ✅ |
+| M2.2 | 实现 EmbeddingToolRouter（向量构建 + top-K 检索 + 持久化） | `src/orchestrator/embedding-router.ts`（新增） | ✅ |
+| M2.3 | 改造 LlmToolResolver 支持域内小集合选择（candidateProvider） | `src/orchestrator/llm-resolver.ts`（修改） | ✅ |
+| M2.4 | resolver-factory 装配 EmbeddingRouter（Index→Embedding→LLM 链） | `src/orchestrator/resolver-factory.ts`（修改） | ✅ |
+| M2.5 | EmbeddingRouter 单元测试 + 降级测试 | `tests/unit/orchestrator/test-embedding-router.ts`（新增，8 用例） | ✅ |
+| M3.1 | 实现 CatalogSearchResolver（在线兜底 + 回写本地索引） | `src/orchestrator/catalog-search-resolver.ts`（新增） | ✅ |
+| M3.2 | 实现 LazyMcpActionTool（按需激活 FlowConnector） | `src/tools/mcp/lazy-mcp-action-tool.ts`（新增） | ✅ |
+| M3.3 | boot.ts systemPrompt 注入模块目录地图 | `apps/nexusops/server/boot.ts`（修改） | ✅ |
+| M3.4 | E2E 测试（查设备BOM 全链路：预热→解析→lazy 调用→EvidenceEnvelope） | `tests/unit/tools/test-mestar-e2e.ts`（新增，4 用例） | ✅ |
+
+### M.2 受影响文件
+
+**新增文件**（4 个源文件 + 3 个测试 + 1 个文档）：
+- `src/tools/mcp/mcp-catalog-cache.ts`（McpCatalogCache 预热层）
+- `src/orchestrator/embedding-router.ts`（EmbeddingToolRouter 向量路由）
+- `src/orchestrator/catalog-search-resolver.ts`（CatalogSearchResolver 在线兜底）
+- `src/tools/mcp/lazy-mcp-action-tool.ts`（LazyMcpActionTool 按需激活）
+- `apps/nexusops/docs/architecture/07-mestar-integration-spec.md`（接入规范）
+
+**修改文件**（5 个）：
+- `src/tools/mcp/mcp-client.ts`（McpServerConfig 加 catalog 字段）
+- `src/orchestrator/llm-resolver.ts`（加 candidateProvider 域内选择）
+- `src/orchestrator/resolver-factory.ts`（装配链扩展）
+- `src/services/llm-service.ts`（加 embeddingModel() 复用 OpenAI provider）
+- `apps/nexusops/server/boot.ts`（catalog 装配分流 + EmbeddingRouter 注入 + systemPrompt 模块地图）
+
+### M.3 测试覆盖
+
+| 测试文件 | 用例数 | 验证点 |
+|---|---|---|
+| `test-mcp-catalog-cache.ts` | 10 | 分页拉取、规则派生、分桶持久化、executable=false 不进索引、mestar 不可达降级 |
+| `test-embedding-router.ts` | 8 | 向量构建、retrieve top-K、resolve 高/低相似度、loadIndex 持久化、Embedder 失败降级 |
+| `test-mestar-e2e.ts` | 4 | 预热→解析命中→lazy 调用→EvidenceEnvelope 全链路；在线兜底回写；执行失败不崩溃 |
+
+### M.4 风险与降级
+
+| 风险 | 缓解 |
+|---|---|
+| mestar 服务启动时不可达 | McpCatalogCache 失败不阻塞 boot：有缓存用过期缓存，无缓存跳过该 server |
+| Embedding 服务不可达 | EmbeddingRouter 降级跳过，直接走 LlmToolResolver（全量，慢但不崩） |
+| 规则派生 semanticTags 覆盖率低 | unknown 标记的工具走 Embedding/LLM 兜底，后台 LLM 派生补全 |
+| catalog 全量拉取慢（2850 项） | 分页 + 进度日志；首次启动慢但后续走缓存 |
+
+---
+
+## Phase K：Mock 统一开关 + 三档降级链（已落地，横切）
+
+**目标**：把分散的 mock 控制点（域取证 mock + mock MCP 动作）收敛为单一环境变量 `NEXUS_MOCK_TOOLS`；mock 关闭时通过 `systemPrompt` 纪律 + `precondition` 双模式判定，让 LLM 走 mestar MCP 三档降级链而非静默失败。
+
+**relos 依赖**：无（与 Phase M 同属横切，可独立交付）
+
+**完整规范**：详见 [07-mestar-integration-spec.md §9.2](07-mestar-integration-spec.md)
+
+**任务清单**（全部 ✅ 完成）：
+
+| # | 任务 | 产出文件 |
+|---|---|---|
+| K.1 | boot.ts 实现 `NEXUS_MOCK_TOOLS` 多档解析 + `NEXUS_MOCK_ACTIONS` 向后兼容 | `apps/nexusops/server/boot.ts`（修改） |
+| K.2 | `buildNexusTools` 加 `includeEvidence` 参数（false 时跳过域工具，仅注册 finalize+advise） | `apps/nexusops/tools/index.ts`（修改） |
+| K.3 | `buildMockModePrompt` 注入降级纪律段到 `systemPrompt`（全开返回空，向后兼容） | `apps/nexusops/server/boot.ts`（修改） |
+| K.4 | `preconditions.ts` `ALL_GATES` 扩展到 10 域 + `isEvidenceToolsOff` / `hasAttemptedMcpEvidence` 双模式判定 | `apps/nexusops/server/preconditions.ts`（修改） |
+| K.5 | `.env` / `.env.example` 变量替换 + 文档 | `.env.example`（修改） |
+
+**验收**：`NEXUS_MOCK_TOOLS=0` 时启动日志输出 "mock 域取证工具已关闭"，systemPrompt 含三档降级纪律段；单元测试在 `beforeEach` 显式 `delete process.env.NEXUS_MOCK_TOOLS` / `NEXUS_MOCK_ACTIONS` 隔离 `.env` 污染。
+
+---
+
 ## 里程碑总览
 
 | 里程碑 | 内容 | 预估工时 | 前置条件 |
@@ -339,8 +424,10 @@ LLM 生成报告 → 报表系统组件化渲染（非 HTML 字符串）
 | **M2**（Phase 2） | 报表固化闭环 | ~2-3 天 | M1 |
 | **M3**（Phase 3） | 接入 relos | ~3-4 天 | relos 可用 |
 | **M4**（Phase 4） | skill 退化 + LLM 主导 | ~3-5 天 | M3 |
+| **M5**（Phase M） | Mestar MCP 接入（catalog 模式 + 五层解析管道） | ~5.5 天 | 无（横切，可独立交付） |
+| **M6**（Phase K） | Mock 统一开关 + 三档降级链 | ~1.5 天 | 无（横切，纯配置层收敛） |
 
-**总计**：约 13-19 个工作日。
+**总计**：约 13-19 个工作日（Phase 0-4 + Phase M）；Phase K 约 1.5 天。
 
 **可并行项**：Phase 1 和 Phase 2 可与 Phase 3 并行（Phase 3 等 relos 就绪期间，前端/报表工作可推进）。
 
@@ -352,25 +439,34 @@ LLM 生成报告 → 报表系统组件化渲染（非 HTML 字符串）
 Phase 0 ──→ Phase 1 ──→ Phase 2 ──────────────→ Phase 4
    │                                         ↑
    └──→ Phase 3（relos 可用时启动）──────────┘
+
+Phase M（Mestar MCP，横切）── 可在任何 Phase 后独立交付
+Phase K（Mock 统一开关，横切）── 纯配置层收敛，可在 Phase 0 后任意时点启用
 ```
 
 - Phase 0 是所有后续的基础
 - Phase 1-2 不依赖 relos，可与 Phase 3 并行
 - Phase 4 依赖 Phase 3（需要 Orchestrator 在线）+ Phase 1（需要组件化报表）
+- **Phase M（Mestar MCP）与 relos 正交**：可在 Phase 0 后任何时点独立交付。relos 提供"该用什么方法论/需要什么语义数据"，mestar 提供"该语义数据用哪个具体工具获取"，两者协同工作。
+- **Phase K（统一开关）**：纯配置层收敛，不依赖任何其他 Phase。与 Phase M 协同（关 mock 后默认走 mestar 三档降级链），但本身可在 Phase 0 后任意时点启用。
 
 ---
 
 ## 附录 A：跨 Phase 的全局测试矩阵
 
-| 测试类型 | Phase 0 | Phase 1 | Phase 2 | Phase 3 | Phase 4 |
-|---|---|---|---|---|---|
-| 单元测试（MockOrchestrator） | ✅ 新增 | 维护 | 维护 | 维护 | 维护 |
-| 单元测试（ReportComponents） | — | ✅ 新增 | 维护 | 维护 | 维护 |
-| 单元测试（SkillRegistry） | ✅ 扩展 | — | ✅ 扩展 | 维护 | 维护 |
-| 集成测试（FallbackChain） | — | — | — | ✅ 新增 | 维护 |
-| E2E（固化闭环） | — | — | ✅ 新增 | 维护 | 维护 |
-| 回归测试（现有 172 测试） | ✅ 全过 | ✅ 全过 | ✅ 全过 | ✅ 全过 | ✅ 全过 |
-| E2E（LLM 主导分析） | — | — | — | — | ✅ 新增 |
+| 测试类型 | Phase 0 | Phase 1 | Phase 2 | Phase 3 | Phase 4 | Phase M | Phase K |
+|---|---|---|---|---|---|---|---|
+| 单元测试（MockOrchestrator） | ✅ 新增 | 维护 | 维护 | 维护 | 维护 | — | — |
+| 单元测试（ReportComponents） | — | ✅ 新增 | 维护 | 维护 | 维护 | — | — |
+| 单元测试（SkillRegistry） | ✅ 扩展 | — | ✅ 扩展 | 维护 | 维护 | — | — |
+| 集成测试（FallbackChain） | — | — | — | ✅ 新增 | 维护 | — | — |
+| E2E（固化闭环） | — | — | ✅ 新增 | 维护 | 维护 | — | — |
+| 回归测试（现有 172 测试） | ✅ 全过 | ✅ 全过 | ✅ 全过 | ✅ 全过 | ✅ 全过 | ✅ 全过 | ✅ 全过（含 env 隔离） |
+| E2E（LLM 主导分析） | — | — | — | — | ✅ 新增 | — | — |
+| 单元测试（McpCatalogCache） | — | — | — | — | — | ✅ 新增（10 用例） | — |
+| 单元测试（EmbeddingToolRouter） | — | — | — | — | — | ✅ 新增（8 用例） | — |
+| E2E（Mestar 全链路） | — | — | — | — | — | ✅ 新增（4 用例） | — |
+| 回归（三档降级链 env 隔离） | — | — | — | — | — | — | ✅ before-delete env |
 
 ---
 
@@ -391,3 +487,10 @@ Phase 0 ──→ Phase 1 ──→ Phase 2 ────────────
 | D9 固化入口在右栏 | 用户确认 | 00 §2；03 §7.3 |
 | D10 语义标注在工具侧 | 用户确认 | 00 §2；02 §2 |
 | D11 方法论 C 混合粒度 | 用户确认 | 00 §2；01 §2.3；04 §4 |
+| D12 大目录 MCP 用 catalog 模式 | 用户确认（Phase M） | 00 §2；07 §1 |
+| D13 工具路由用 Embedding 而非关键词 | 用户确认（Phase M） | 00 §2；07 §6 |
+| D14 semanticTags 规则派生 + 后台 LLM 派生 | 用户确认（Phase M） | 00 §2；07 §5 |
+| D15 catalog 三份缓存分离 | 架构推导（Phase M） | 00 §2；07 §3 |
+| D16 catalog 执行用 LazyMcpActionTool 单代理 | 架构推导（Phase M） | 00 §2；07 §7 |
+| D17 Embedding 用 ai SDK 内置能力（零新依赖） | 架构推导（Phase M） | 00 §2；07 §6 |
+| D18 Mock 统一开关 + 三档降级链（NEXUS_MOCK_TOOLS 4 档） | 用户确认（Phase K） | 00 §2；07 §9.2；本文 Phase K |

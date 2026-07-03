@@ -111,9 +111,20 @@ export interface ConversationSummary {
   lastStatus: string;
 }
 
+/** 会话详情（GET /api/conversations/:id 返回，含完整 task 链） */
+export interface ConversationDetail extends ConversationSummary {
+  /** 会话内全部 task（升序：首轮在前，追问轮在后）。 */
+  tasks: TaskSummary[];
+}
+
 /** 查询会话列表（按最近活跃降序） */
 export function listConversations(): Promise<ConversationSummary[]> {
   return api.get<ConversationSummary[]>("/api/conversations");
+}
+
+/** 查询会话详情（含完整 task 链，点击历史会话时用） */
+export function getConversation(conversationId: string): Promise<ConversationDetail> {
+  return api.get<ConversationDetail>(`/api/conversations/${conversationId}`);
 }
 
 /** HITL 确认门 */

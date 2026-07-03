@@ -11,6 +11,7 @@
  */
 import type { EvidenceEnvelope, Freshness, Confidence } from "../../../../src/core/evidence-envelope.js";
 import { actionStore } from "./action-store.js";
+import { DEFAULT_LINE } from "../../config/defaults.js";
 
 export type ScenarioId = "normal" | "anomaly" | "crisis";
 
@@ -1411,7 +1412,7 @@ function emptyChain(reason: string): CausalChainData {
 // ── accessor helpers ──
 
 export function resolveLine(ctx: ScenarioContext): LineId {
-  return ctx.line ?? "L01";
+  return ctx.line ?? (DEFAULT_LINE as LineId);
 }
 
 export function getOEE(ctx: ScenarioContext) {

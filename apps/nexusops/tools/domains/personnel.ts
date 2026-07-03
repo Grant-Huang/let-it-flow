@@ -13,6 +13,8 @@ import {
   getFatigue,
   type ScenarioId,
 } from "../mock-data/scenarios.js";
+import { SKILL_ADEQUATE_RATIO, SKILL_MARGINAL_RATIO, FATIGUE_ALARM_THRESHOLD } from "../../config/business-thresholds.js";
+import { DEFAULT_LINE } from "../../config/defaults.js";
 
 export function registerPersonnelTools(): import("../../../../src/tools/base.js").FlowConnector[] {
   return [
@@ -29,11 +31,11 @@ export function registerPersonnelTools(): import("../../../../src/tools/base.js"
         return {
           keyPositions: p.keyPositions,
           l3PlusRatio: p.l3PlusRatio,
-          qualificationStatus: p.l3PlusRatio >= 0.8 ? "adequate" : p.l3PlusRatio >= 0.6 ? "marginal" : "inadequate",
+          qualificationStatus: p.l3PlusRatio >= SKILL_ADEQUATE_RATIO ? "adequate" : p.l3PlusRatio >= SKILL_MARGINAL_RATIO ? "marginal" : "inadequate",
         };
       },
       system: "HR",
-      provenance: (a) => `/hr/personnel/skill_matrix?line=${(a.line as string) ?? "L01"}`,
+      provenance: (a) => `/hr/personnel/skill_matrix?line=${(a.line as string) ?? DEFAULT_LINE}`,
       freshness: "weekly",
       confidence: "measured",
       semanticTags: ["personnel_skill"],
@@ -58,7 +60,7 @@ export function registerPersonnelTools(): import("../../../../src/tools/base.js"
         };
       },
       system: "HR",
-      provenance: (a) => `/hr/personnel/by_shift?line=${(a.line as string) ?? "L01"}`,
+      provenance: (a) => `/hr/personnel/by_shift?line=${(a.line as string) ?? DEFAULT_LINE}`,
       freshness: "weekly",
       semanticTags: ["personnel_skill", "shift_deviation"],
     }),
@@ -95,7 +97,7 @@ export function registerPersonnelTools(): import("../../../../src/tools/base.js"
         };
       },
       system: "HR",
-      provenance: (a) => `/hr/personnel/attendance?line=${(a.line as string) ?? "L01"}&today=true`,
+      provenance: (a) => `/hr/personnel/attendance?line=${(a.line as string) ?? DEFAULT_LINE}&today=true`,
       freshness: "daily",
       confidence: "measured",
       semanticTags: ["personnel_skill", "shift_deviation"],
@@ -119,7 +121,7 @@ export function registerPersonnelTools(): import("../../../../src/tools/base.js"
           return {
             shift,
             ...d,
-            threshold: 0.7,
+            threshold: FATIGUE_ALARM_THRESHOLD,
             recommendation:
               d.level === "critical" ? "立即增援/换班，当前疲劳极高，质量风险严峻"
               : d.level === "high" ? "增加休息频次，评估是否可调整排班"
@@ -142,7 +144,7 @@ export function registerPersonnelTools(): import("../../../../src/tools/base.js"
         };
       },
       system: "HR",
-      provenance: (a) => `/hr/personnel/fatigue?line=${(a.line as string) ?? "L01"}&today=true`,
+      provenance: (a) => `/hr/personnel/fatigue?line=${(a.line as string) ?? DEFAULT_LINE}&today=true`,
       freshness: "shift",
       confidence: "inferred",
       semanticTags: ["personnel_skill", "shift_deviation"],

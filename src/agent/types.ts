@@ -204,7 +204,10 @@ export interface HarnessConfig {
    *
    * 配置后，harness 在每步 onStepFinish 时把 EvidenceEnvelope 结果喂给此模型，
    * 生成一段人类可读解读并 emit 为 text 事件，让用户跟上分析节奏。
-   * 缺省则跳过解读（向后兼容，不改变既有行为）。
+   *
+   * 缺省时仍会走"模板分支"：失败/HITL 拒绝/governance 阻断/空结果等确定性结果
+   * 由 narrate-pass 内置模板直接生成文本（零延迟、零 token），仅成功业务数据的
+   * LLM 解读路径被跳过。
    */
   narrateModel?: LanguageModel;
   /** 解读模型的兼容模式（DeepSeek 等折叠 system 进 user）。 */

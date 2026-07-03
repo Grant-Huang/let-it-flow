@@ -45,7 +45,9 @@ interface Orchestrator {
   /** 按业务主题取方法论骨架（带置信度）。LLM 据此编排工具调用序列。 */
   getMethodology(topic: string, context: BizContext): Promise<Methodology | null>;
 
-  /** 取"某结论需要什么证据"的业务契约（驱动动态 precondition）。 */
+  /** 取"某结论需要什么证据"的业务契约（驱动动态 precondition）。
+   *  注：precondition 证据门（EvidenceGate）按 mock 模式切换判定逻辑，
+   *      详见 07 §9.2 双模式实现（mock 全开 vs MCP 关闭取证）。 */
   getEvidenceContract(conclusion: string, context: BizContext): Promise<EvidenceContract | null>;
 
   /** 取因果链知识（替代 mock 的 CAUSAL_CHAIN）。 */
@@ -472,14 +474,38 @@ async function prepareStep(state: ReActState) {
 }
 ```
 
+### 7.1 Phase 4 实现差异（实际落地版本）
+
+上述伪代码在 Phase 4 已落地为 `apps/nexusops/server/prepare-step.ts`，与设计版的差异如下：
+
+| 方面 | 设计版（伪代码） | 实现版 | 原因 |
+|---|---|---|---|
+| topic 识别 | `state.inferredTopic`（隐含外部推断） | `inferMethodologyTopic(intent)` 用正则匹配用户首条消息关键词 | Phase 4 无外部意图推断器，用关键词正则简化；未来可换 LLM 推断 |
+| 方法论缓存 | 未提 | `buildMethodologyGuidance` 接受 `cached` 参数，同会话内 topic 不变避免重复查 | 性能优化（对齐 Q3 倾向） |
+| blocking 校验 | `getEvidenceContract` 软提示 | Phase 4 暂未启用硬契约校验，仅注入方法论骨架 | 契约校验是 governance 层职责，Phase 4 聚焦 LLM 主导编排，governance 留到后续迭代 |
+| 方法论 topic 覆盖 | dmaic / oee 等少数 | 8 个 topic：dmaic / oee_diagnose / downtime_root_cause / waste_audit / energy_analysis / **qs16949_audit** / cost_summary / multi_perspective_rca / general_analysis（兜底） | 实际需求覆盖更广 |
+
+### 7.2 诊断类 vs 评估类方法论的区分（QS16949）
+
+Phase 4 引入 QS16949 内审场景后，发现分析方法论天然分两类，prepare-step 对其做差异化 prompt 注入：
+
+| 类型 | 代表 topic | 方法论结构 | prompt 引导差异 |
+|---|---|---|---|
+| **诊断类**（Diagnose） | dmaic / oee_diagnose / downtime_root_cause | 围绕"找根因"组织阶段（D-M-A-I-C） | 引导 LLM 聚焦 5Why + 鱼骨图 + 根因验证 |
+| **评估类**（Assess） | qs16949_audit | 围绕"符合性判定"组织阶段（scope→evidence→gap_analysis→improve） | 引导 LLM 聚焦条款匹配 + 不符合项判定 + 纠正措施，**不强调根因** |
+
+**实现位置**：`inferMethodologyTopic` 用 `/16949\|内审\|符合性\|审核\|audit/` 正则识别 QS16949 类问题，路由到 `qs16949_audit` 方法论（mock 数据中 phases 为四阶段评估结构）。
+
+**为何重要**：避免评估类问题被错误地套用诊断类方法论（如让 QS16949 审核去"找根因"导致主题漂移）。这一区分也同步传导给质量评估器（见 [03-report-system-design.md](03-report-system-design.md) §10.5）。
+
 ---
 
-## 8. 开放问题（待确认）
+## 8. 开放问题（Phase 4 后状态）
 
-| # | 问题 | 当前倾向 | 影响 |
+| # | 问题 | 当前倾向 | 状态 |
 |---|---|---|---|
-| Q1 | `getMethodology` 的 topic 如何识别？由 LLM 推断还是显式传入？ | 倾向：prepare-step 根据用户首条消息 + 已调工具推断；LLM 也可显式 `orchestrator.get_methodology(topic=...)` 调用 | 影响 prepare-step 实现复杂度 |
-| Q2 | EvidenceContract 校验失败时，是硬阻塞（拒绝进下一阶段）还是软提示（警告但允许）？ | 倾向：软提示（保持 LLM 主导），但在报告里标注"证据不充分" | 影响 governance 严格度 |
-| Q3 | Orchestrator 的查询结果是否缓存到本次会话的内存？ | 倾向：是（同会话内 topic 不变，避免重复查） | 影响性能 |
+| Q1 | `getMethodology` 的 topic 如何识别？由 LLM 推断还是显式传入？ | 倾向：prepare-step 根据用户首条消息 + 已调工具推断；LLM 也可显式 `orchestrator.get_methodology(topic=...)` 调用 | **已实现**（简化版）：prepare-step 用 `inferMethodologyTopic` 正则匹配关键词；显式工具调用待后续 |
+| Q2 | EvidenceContract 校验失败时，是硬阻塞还是软提示？ | 倾向：软提示（保持 LLM 主导），但在报告里标注"证据不充分" | **未启用**：Phase 4 聚焦 LLM 主导编排，governance 契约校验留到后续迭代 |
+| Q3 | Orchestrator 的查询结果是否缓存到本次会话的内存？ | 倾向：是（同会话内 topic 不变，避免重复查） | **已实现**：`buildMethodologyGuidance` 的 `cached` 参数做会话级缓存 |
 
-这些问题在 Phase 0 实现时可定，不阻塞设计推进。
+这些问题在 Phase 0 实现时可定，不阻塞设计推进。Phase 4 已落地 Q1/Q3，Q2 随 governance 层后续补齐。

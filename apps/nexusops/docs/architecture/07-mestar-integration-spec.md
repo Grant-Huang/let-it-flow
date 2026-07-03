@@ -531,6 +531,8 @@ LLM 看到的不是 2850 个工具描述，而是约 30 个模块的目录（<2K
 
 ## 9. 错误处理与降级链
 
+### 9.1 被动降级（mestar/embedding 不可达时自动降级）
+
 ```mermaid
 flowchart TD
     A["boot 阶段 McpCatalogCache.warmup"] --> B{"mestar 可达?"}
@@ -550,7 +552,55 @@ flowchart TD
     N -->|否| P["返回 null<br/>分析继续不崩溃"]
 ```
 
-**核心原则**（对齐现有架构）：所有 MCP 相关失败都不阻塞主流程，降级到下一层。mestar server 不可达时，NexusOps 仍可用本地 60 个 domain 工具正常分析。
+**核心原则**（对齐现有架构）：所有 MCP 相关失败都不阻塞主流程，降级到下一层。
+
+### 9.2 主动降级（`NEXUS_MOCK_TOOLS=0` 关闭本地 mock，强制走 mestar）
+
+与"mestar 不可达时被动降级"对应，这里是**主动配置**让全链路走真实 MCP，跳过本地 mock 工具注册。
+
+| 配置组合 | 路径 A（取证） | 路径 B（动作） | 适用场景 |
+|---|---|---|---|
+| `NEXUS_MOCK_TOOLS` 未设 + 无 mestar | mock 域工具 | mock MCP 动作 | 纯本地 demo |
+| `NEXUS_MOCK_TOOLS` 未设 + 有 mestar | mock 域工具 | mock MCP 动作（mestar 动作工具因命名冲突不生效） | 旧配置，**不推荐** |
+| `NEXUS_MOCK_TOOLS=0` + 有 mestar | 走 mestar 三档降级链 | 走 mestar 三档降级链 | **生产推荐** |
+
+**三档降级链**（`NEXUS_MOCK_TOOLS=0` 且 mestar 已接入）：
+
+1. **nexus_tool_resolver 查等价工具** → `mcp.mestar.call(toolName, args)` 执行真实 MCP
+2. **找不到等价工具** → LLM 反问用户索取数据（如手工输入 OEE 数值）
+3. **用户也给不出** → `nexus_advise` 标注证据缺失，给有限结论（不强答）
+
+> 设计意图：mestar 未覆盖的能力不静默失败，而是显式暴露数据缺口，让用户感知"这块数据系统还没接入"。这与"mestar 不可达"的被动降级不同——被动降级是临时故障，主动降级是明确的生产配置。
+
+#### 9.2.1 三档降级链运行时流程
+
+```mermaid
+flowchart TD
+    Need["LLM 需要某项数据<br/>(如 OEE)"] --> R1{"调 nexus_tool_resolver<br/>查 MCP 等价工具"}
+    R1 -->|命中| E1["调 mcp.<server>.call<br/>执行真实 MCP 取证"]
+    R1 -->|null 或低置信| R2{"反问用户<br/>索取数据"}
+    R2 -->|用户提供| E2["LLM 采用用户数据<br/>标注 source=user"]
+    R2 -->|用户也给不出| E3["nexus_advise 标注<br/>证据缺失, 给有限结论"]
+    E1 --> Done["继续分析"]
+    E2 --> Done
+    E3 --> Done
+```
+
+#### 9.2.2 实现落地点（与代码对齐）
+
+| 环节 | 实现位置 | 关键函数/字段 |
+|---|---|---|
+| 开关解析 | `apps/nexusops/server/boot.ts` `resolveMockMode()` | 优先级 NEXUS_MOCK_TOOLS > NEXUS_MOCK_ACTIONS（向后兼容）> 缺省 "all"；返回 `"all" \| "off" \| "actions" \| "evidence"` |
+| 工具注册分流 | `apps/nexusops/server/boot.ts`（includeEvidence / includeMockActions） | `buildNexusTools({includeEvidence:false})` 跳过域工具；`registerMcpActionTools()` 在 `includeMockActions=false` 时跳过 |
+| 降级纪律注入 | `apps/nexusops/server/boot.ts` `buildMockModePrompt()` | 非 all 模式时把三档降级纪律写入 `systemPromptParts`，全开模式返回空（向后兼容） |
+| 证据门双模式 | `apps/nexusops/server/preconditions.ts` `checkEvidenceGate()` | mock 全开 → `gate.mockHasEvidence(called)`（要求域前缀）；关闭取证 → `hasAttemptedMcpEvidence(called)`（`mcp.*.call` 或 `nexus_tool_resolver` 任一即算"已尝试"） |
+| 缺证提示文案 | `apps/nexusops/server/preconditions.ts` `checkEvidenceGate` 224-228 行 | 关闭模式追加："调 `nexus_tool_resolver(semantic=...)` 查 MCP 等价工具，再调 `mcp.<server>.call` 取证；找不到则反问用户或标注证据缺失" |
+
+**EvidenceGate 覆盖 10 个业务域**：OEE / 设备停机 / 质量 / 工艺 / 能耗 / 排产 / 物料 / 人员 / 成本 / 精益。每个域在 `ALL_GATES`（`preconditions.ts`）里声明 `keywords` + `mockHasEvidence` 判定，`on_finalize` 与 `every_step` 各注册一份（提前拦截，prepare-step 注入提示）。
+
+**多 MCP server 兼容**：开关逻辑与 mestar 解耦——降级链中的 `mcp.<server>.call` 是泛化代理（LazyMcpActionTool 每 server 一个），未来接 erp/plm 等 MCP 时无需改开关代码，自动走同一套三档降级链。
+
+**测试隔离**：单元测试的 `beforeEach` 需显式 `delete process.env.NEXUS_MOCK_TOOLS` 与 `NEXUS_MOCK_ACTIONS`，避免 `.env` 加载污染导致测试默认行为漂移（mock-on 是测试缺省）。
 
 ---
 
@@ -564,6 +614,7 @@ flowchart TD
 | **D15** | 三份缓存分离：LLM/本地查表/域内选择三个消费场景对数据粒度需求不同，一份缓存喂不全 | 本文 §3；架构推导 |
 | **D16** | LazyMcpActionTool 单代理：每个 catalog server 注册一个代理工具，而非按需动态注册 N 个 FlowConnector（避免 registry 状态频繁变更） | 本文 §7；架构推导 |
 | **D17** | Embedding 实现延后选型：通过 Embedder 接口抽象，OpenAI/transformers.js/DeepSeek 任一可选，不阻塞架构落地 | 本文 §6.4；待用户确认 |
+| **D18** | Mock 统一开关 + 三档降级链：用 `NEXUS_MOCK_TOOLS` 单变量 4 档（all/off/actions/evidence）管理两类 mock（取证 + 动作）；关闭后走 resolver→mcp.call→反问用户→标缺失的运行时降级链，不静默失败 | 用户确认（Phase K）；本文 §9.2 |
 
 ---
 

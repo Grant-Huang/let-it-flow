@@ -4,6 +4,8 @@
 
 **目标**：mock 规则的**输出格式严格对齐 relos 的 `RelationObject` schema**，让未来切到真实 relos 时是"换数据源"而非"换结构"。
 
+> **运行时开关**：mock 工具（域取证 + mock MCP 动作）的运行时启用/关闭由环境变量 `NEXUS_MOCK_TOOLS` 统一管理（4 档：all/off/actions/evidence）。关闭后走 mestar MCP 三档降级链。详见 [07 §9.2](07-mestar-integration-spec.md)。本文档定义的是 mock 数据本身的内容规范，与开关正交。
+
 ---
 
 ## 1. 数据存储结构

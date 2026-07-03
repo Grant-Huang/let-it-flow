@@ -13,6 +13,7 @@ import {
   lookupActionOverride,
   type ScenarioId,
 } from "../mock-data/scenarios.js";
+import { DEFAULT_LINE } from "../../config/defaults.js";
 
 const SYSTEM = "MES";
 
@@ -32,12 +33,12 @@ export function registerEquipmentTools(): import("../../../../src/tools/base.js"
         return {
           status: lineStopped ? "down" : rt.status,
           healthScore: h.healthScore,
-          line: ctx.line ?? "L01",
+          line: ctx.line ?? DEFAULT_LINE,
           ...(lineStopped ? { note: "产线已被停线动作（mcp.eam.stop_line）置为 down" } : {}),
         };
       },
       system: SYSTEM,
-      provenance: (a) => `/mes/equipment/status?line=${(a.line as string) ?? "L01"}`,
+      provenance: (a) => `/mes/equipment/status?line=${(a.line as string) ?? DEFAULT_LINE}`,
       semanticTags: ["equipment_health", "oee_availability"],
     }),
 
@@ -60,7 +61,7 @@ export function registerEquipmentTools(): import("../../../../src/tools/base.js"
         };
       },
       system: SYSTEM,
-      provenance: (a) => `/mes/equipment/downtime?line=${(a.line as string) ?? "L01"}&today=true`,
+      provenance: (a) => `/mes/equipment/downtime?line=${(a.line as string) ?? DEFAULT_LINE}&today=true`,
       semanticTags: ["oee_availability", "downtime_events"],
     }),
 
@@ -76,7 +77,7 @@ export function registerEquipmentTools(): import("../../../../src/tools/base.js"
         return { mtbfHours: rel.mtbfHours, baselineHours: 450, ratio: rel.mtbfHours / 450 };
       },
       system: "PLM",
-      provenance: (a) => `/plm/equipment/mtbf?line=${(a.line as string) ?? "L01"}&window=30d`,
+      provenance: (a) => `/plm/equipment/mtbf?line=${(a.line as string) ?? DEFAULT_LINE}&window=30d`,
       freshness: "weekly",
       semanticTags: ["equipment_reliability"],
     }),
@@ -93,7 +94,7 @@ export function registerEquipmentTools(): import("../../../../src/tools/base.js"
         return { mttrMinutes: rel.mttrMinutes, baselineMinutes: 45, ratio: rel.mttrMinutes / 45 };
       },
       system: "PLM",
-      provenance: (a) => `/plm/equipment/mttr?line=${(a.line as string) ?? "L01"}&window=30d`,
+      provenance: (a) => `/plm/equipment/mttr?line=${(a.line as string) ?? DEFAULT_LINE}&window=30d`,
       freshness: "weekly",
       semanticTags: ["equipment_reliability"],
     }),
@@ -119,7 +120,7 @@ export function registerEquipmentTools(): import("../../../../src/tools/base.js"
         };
       },
       system: "PLM",
-      provenance: (a) => `/plm/equipment/maintenance?line=${(a.line as string) ?? "L01"}&days=${(a.days as number) ?? 30}`,
+      provenance: (a) => `/plm/equipment/maintenance?line=${(a.line as string) ?? DEFAULT_LINE}&days=${(a.days as number) ?? 30}`,
       freshness: "weekly",
       semanticTags: ["equipment_reliability"],
     }),
@@ -141,7 +142,7 @@ export function registerEquipmentTools(): import("../../../../src/tools/base.js"
         };
       },
       system: "IoT",
-      provenance: (a) => `/iot/equipment/health?line=${(a.line as string) ?? "L01"}`,
+      provenance: (a) => `/iot/equipment/health?line=${(a.line as string) ?? DEFAULT_LINE}`,
       caveat: "健康分基于 IoT 信号融合，采样率 1/min",
       semanticTags: ["equipment_health"],
     }),
@@ -165,7 +166,7 @@ export function registerEquipmentTools(): import("../../../../src/tools/base.js"
         };
       },
       system: "ML",
-      provenance: (a) => `/ml/equipment/predict?line=${(a.line as string) ?? "L01"}&horizon=30d`,
+      provenance: (a) => `/ml/equipment/predict?line=${(a.line as string) ?? DEFAULT_LINE}&horizon=30d`,
       freshness: "daily",
       confidence: "estimated",
       semanticTags: ["equipment_reliability"],
@@ -188,7 +189,7 @@ export function registerEquipmentTools(): import("../../../../src/tools/base.js"
         };
       },
       system: "ERP",
-      provenance: (a) => `/erp/spare_parts?line=${(a.line as string) ?? "L01"}`,
+      provenance: (a) => `/erp/spare_parts?line=${(a.line as string) ?? DEFAULT_LINE}`,
       freshness: "daily",
       semanticTags: ["equipment_reliability"],
     }),
@@ -211,7 +212,7 @@ export function registerEquipmentTools(): import("../../../../src/tools/base.js"
         };
       },
       system: SYSTEM,
-      provenance: (a) => `/mes/equipment/alarms?line=${(a.line as string) ?? "L01"}&hours=${(a.hours as number) ?? 24}`,
+      provenance: (a) => `/mes/equipment/alarms?line=${(a.line as string) ?? DEFAULT_LINE}&hours=${(a.hours as number) ?? 24}`,
       semanticTags: ["equipment_health"],
     }),
   ];

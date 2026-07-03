@@ -10,9 +10,10 @@ import {
 import { getHeavyIoTimeoutMs } from "../../core/system-settings.js";
 import type { RewriteRuntime } from "./runtime-interfaces.js";
 import type { LlmService } from "../../services/llm-service.js";
-import { DEFAULT_OLLAMA_REWRITE_MODEL } from "./provider.js";
+import { getDefaultOllamaRewriteModel } from "./provider.js";
 import { tracedGenerateText } from "../../llm/call-tracer.js";
 import type { LlmCallEvent } from "../../llm/call-log.js";
+import { resolveCallSiteParams } from "../../llm/llm-config.js";
 
 /**
  * Rewrite 工具（step3，见 09 P5）。
@@ -50,7 +51,7 @@ export interface RewriteToolDeps {
 
 export function createRewriteTool(deps: RewriteToolDeps): FlowConnector<RewriteOutput> {
   const backend = deps.backend ?? "ollama";
-  const ollamaModel = deps.ollamaModel ?? DEFAULT_OLLAMA_REWRITE_MODEL;
+  const ollamaModel = deps.ollamaModel ?? getDefaultOllamaRewriteModel();
   return {
     name: "domain.rewrite",
     tier: "domain",
@@ -155,11 +156,12 @@ async function runOpenaiRewrite(
   try {
     // P8.5：compatMode + provider + pricing 全部从 endpoint 读（per-callSite）
     const ep = llm.resolveEndpoint("rewrite");
+    const rewriteTemp = resolveCallSiteParams("rewrite").temperature;
     const { text } = await tracedGenerateText(
       model,
       llm.compatModeFor("rewrite")
-        ? { prompt: `${system}\n\n---\n${args.translatedText}`, temperature: 0.7 }
-        : { system, prompt: args.translatedText, temperature: 0.7 },
+        ? { prompt: `${system}\n\n---\n${args.translatedText}`, temperature: rewriteTemp }
+        : { system, prompt: args.translatedText, temperature: rewriteTemp },
       {
         callSite: "rewrite",
         modelAlias: openaiModel ?? ep?.alias ?? "rewrite",
@@ -167,7 +169,7 @@ async function runOpenaiRewrite(
         ...(ep?.pricing ? { pricing: ep.pricing } : {}),
         taskId: ctx.taskId,
         nodeId: ctx.nodeId,
-        params: { temperature: 0.7 },
+        params: { temperature: rewriteTemp },
       },
       onLlmCall ?? (() => {}),
     );

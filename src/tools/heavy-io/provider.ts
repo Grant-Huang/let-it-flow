@@ -40,7 +40,7 @@ export interface HeavyIoConfig {
   artifactsDir: string;
   /** rewrite 用的 LLM 后端：ollama（默认 35b）/ openai。 */
   rewriteBackend?: "ollama" | "openai";
-  /** ollama rewrite 模型名（缺省 huihui-qwen3.6-35b-a3b-abliterated:latest）。 */
+  /** ollama rewrite 模型名（缺省读 LIF_OLLAMA_MODEL env）。 */
   ollamaRewriteModel?: string;
   /** openai rewrite 模型 id（如 deepseek-v4-flash）；不指定则用 writer 角色。 */
   rewriteOpenaiModel?: string;
@@ -48,4 +48,17 @@ export interface HeavyIoConfig {
   imagePromptsBackend?: "ts" | "python";
 }
 
-export const DEFAULT_OLLAMA_REWRITE_MODEL = "huihui-qwen3.6-35b-a3b-abliterated:latest";
+/**
+ * 解析 Ollama rewrite 默认模型。
+ *
+ * 优先级链（与 heavy-io-settings.ts 对齐）：
+ *   1. LIF_OLLAMA_MODEL 环境变量（运行时切换 + 测试隔离）
+ *   2. 空串占位 —— 真正的默认值由 heavy-io-settings.ts 的 JSON 配置层提供，
+ *      避免在此硬编码特定 provider 的模型 id（如 huihui/qwen3.6 等私有偏好）
+ *
+ * 注：heavy-io-settings.ts 的 loadHeavyIoSettings 会进一步用 JSON 覆盖，
+ * 此处只作 createRewriteTool 直接调用 deps.ollamaModel 缺省时的兜底。
+ */
+export function getDefaultOllamaRewriteModel(): string {
+  return process.env.LIF_OLLAMA_MODEL ?? "";
+}

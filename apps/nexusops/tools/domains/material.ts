@@ -12,6 +12,7 @@ import {
   type ScenarioContext,
   type ScenarioId,
 } from "../mock-data/scenarios.js";
+import { DEFAULT_LINE } from "../../config/defaults.js";
 
 /**
  * 应用动作副作用覆盖到物料数据。
@@ -64,7 +65,7 @@ export function registerMaterialTools(): import("../../../../src/tools/base.js")
         };
       },
       system: "MES",
-      provenance: (a) => `/mes/material/wip?line=${(a.line as string) ?? "L01"}&realtime=true`,
+      provenance: (a) => `/mes/material/wip?line=${(a.line as string) ?? DEFAULT_LINE}&realtime=true`,
       semanticTags: ["wip_level"],
     }),
 
@@ -84,7 +85,7 @@ export function registerMaterialTools(): import("../../../../src/tools/base.js")
         };
       },
       system: "ERP",
-      provenance: (a) => `/erp/material/inventory?line=${(a.line as string) ?? "L01"}`,
+      provenance: (a) => `/erp/material/inventory?line=${(a.line as string) ?? DEFAULT_LINE}`,
       semanticTags: ["wip_level", "supply_risk"],
     }),
 
@@ -105,7 +106,7 @@ export function registerMaterialTools(): import("../../../../src/tools/base.js")
         };
       },
       system: "ERP",
-      provenance: (a) => `/erp/material/shortage_risk?line=${(a.line as string) ?? "L01"}&window=48h`,
+      provenance: (a) => `/erp/material/shortage_risk?line=${(a.line as string) ?? DEFAULT_LINE}&window=48h`,
       freshness: "daily",
       semanticTags: ["wip_level", "supply_risk"],
     }),
@@ -127,7 +128,7 @@ export function registerMaterialTools(): import("../../../../src/tools/base.js")
         };
       },
       system: "MES",
-      provenance: (a) => `/mes/material/flow?line=${(a.line as string) ?? "L01"}`,
+      provenance: (a) => `/mes/material/flow?line=${(a.line as string) ?? DEFAULT_LINE}`,
       freshness: "daily",
       semanticTags: ["wip_level"],
     }),
@@ -148,7 +149,7 @@ export function registerMaterialTools(): import("../../../../src/tools/base.js")
         };
       },
       system: "MES",
-      provenance: (a) => `/mes/material/kanban?line=${(a.line as string) ?? "L01"}`,
+      provenance: (a) => `/mes/material/kanban?line=${(a.line as string) ?? DEFAULT_LINE}`,
       semanticTags: ["wip_level"],
     }),
 
@@ -169,7 +170,7 @@ export function registerMaterialTools(): import("../../../../src/tools/base.js")
         };
       },
       system: "ERP",
-      provenance: (a) => `/erp/material/supply_risk?line=${(a.line as string) ?? "L01"}`,
+      provenance: (a) => `/erp/material/supply_risk?line=${(a.line as string) ?? DEFAULT_LINE}`,
       freshness: "weekly",
       semanticTags: ["supply_risk"],
     }),
@@ -188,7 +189,7 @@ export function registerMaterialTools(): import("../../../../src/tools/base.js")
         stabilityScore: 0.88,
       }),
       system: "MES",
-      provenance: (a) => `/mes/material/consumption?line=${(a.line as string) ?? "L01"}&realtime=true`,
+      provenance: (a) => `/mes/material/consumption?line=${(a.line as string) ?? DEFAULT_LINE}&realtime=true`,
       semanticTags: ["wip_level"],
     }),
 
@@ -212,7 +213,7 @@ export function registerMaterialTools(): import("../../../../src/tools/base.js")
         };
       },
       system: "ERP",
-      provenance: (a) => `/erp/material/suggest?line=${(a.line as string) ?? "L01"}`,
+      provenance: (a) => `/erp/material/suggest?line=${(a.line as string) ?? DEFAULT_LINE}`,
       confidence: "inferred",
       semanticTags: ["wip_level", "supply_risk"],
     }),
@@ -232,7 +233,7 @@ export function registerMaterialTools(): import("../../../../src/tools/base.js")
         const totalWait = r.routes.reduce((s, x) => s + x.waitMin, 0);
         const totalDist = r.routes.reduce((s, x) => s + x.distanceM, 0);
         return {
-          line: ctx.line ?? "L01",
+          line: ctx.line ?? DEFAULT_LINE,
           processes: r.processes,
           routes: r.routes,
           totalDistanceM: totalDist,
@@ -243,7 +244,7 @@ export function registerMaterialTools(): import("../../../../src/tools/base.js")
         };
       },
       system: "MES",
-      provenance: (a) => `/mes/material/routing?line=${(a.line as string) ?? "L01"}`,
+      provenance: (a) => `/mes/material/routing?line=${(a.line as string) ?? DEFAULT_LINE}`,
       freshness: "historical",
       confidence: "measured",
       semanticTags: ["wip_level"],

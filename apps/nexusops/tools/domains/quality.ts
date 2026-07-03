@@ -13,6 +13,8 @@ import {
   type ScenarioContext,
   type ScenarioId,
 } from "../mock-data/scenarios.js";
+import { DEFECT_RATE_THRESHOLD } from "../../config/business-thresholds.js";
+import { DEFAULT_LINE } from "../../config/defaults.js";
 
 const SYSTEM = "MOM";
 
@@ -71,10 +73,10 @@ export function registerQualityTools(): import("../../../../src/tools/base.js").
       getData: (ctx) => {
         const q = applyQualityOverrides(ctx, getQuality(ctx));
         const { defectRate, fpy, scrapRate, actionApplied } = q as typeof q & { actionApplied?: string };
-        return { defectRate, fpy, scrapRate, threshold: 0.03, ...(actionApplied ? { actionApplied } : {}) };
+        return { defectRate, fpy, scrapRate, threshold: DEFECT_RATE_THRESHOLD, ...(actionApplied ? { actionApplied } : {}) };
       },
       system: SYSTEM,
-      provenance: (a) => `/mom/quality/defect_rate?line=${(a.line as string) ?? "L01"}&today=true`,
+      provenance: (a) => `/mom/quality/defect_rate?line=${(a.line as string) ?? DEFAULT_LINE}&today=true`,
       semanticTags: ["defect_rate"],
     }),
 
@@ -90,7 +92,7 @@ export function registerQualityTools(): import("../../../../src/tools/base.js").
         return { topDefects: q.topDefects, paretoPrinciple: "前 20% 缺陷类型贡献约 80% 不良" };
       },
       system: SYSTEM,
-      provenance: (a) => `/mom/quality/pareto?line=${(a.line as string) ?? "L01"}&window=7d`,
+      provenance: (a) => `/mom/quality/pareto?line=${(a.line as string) ?? DEFAULT_LINE}&window=7d`,
       freshness: "daily",
       semanticTags: ["defect_rate"],
     }),
@@ -143,7 +145,7 @@ export function registerQualityTools(): import("../../../../src/tools/base.js").
         };
       },
       system: SYSTEM,
-      provenance: (a) => `/mom/quality/spc?line=${(a.line as string) ?? "L01"}&dim=${(a.dimensionIndex as number) ?? 0}`,
+      provenance: (a) => `/mom/quality/spc?line=${(a.line as string) ?? DEFAULT_LINE}&dim=${(a.dimensionIndex as number) ?? 0}`,
       semanticTags: ["spc_samples"],
     }),
 
@@ -163,7 +165,7 @@ export function registerQualityTools(): import("../../../../src/tools/base.js").
         };
       },
       system: SYSTEM,
-      provenance: (a) => `/mom/quality/capability?line=${(a.line as string) ?? "L01"}`,
+      provenance: (a) => `/mom/quality/capability?line=${(a.line as string) ?? DEFAULT_LINE}`,
       semanticTags: ["process_capability"],
     }),
 
@@ -179,7 +181,7 @@ export function registerQualityTools(): import("../../../../src/tools/base.js").
         return { fpy: q.fpy, target: 0.95, gap: 0.95 - q.fpy };
       },
       system: SYSTEM,
-      provenance: (a) => `/mom/quality/fpy?line=${(a.line as string) ?? "L01"}&today=true`,
+      provenance: (a) => `/mom/quality/fpy?line=${(a.line as string) ?? DEFAULT_LINE}&today=true`,
       semanticTags: ["defect_rate"],
     }),
 
@@ -200,7 +202,7 @@ export function registerQualityTools(): import("../../../../src/tools/base.js").
         };
       },
       system: "ERP",
-      provenance: (a) => `/erp/quality/scrap?line=${(a.line as string) ?? "L01"}&today=true`,
+      provenance: (a) => `/erp/quality/scrap?line=${(a.line as string) ?? DEFAULT_LINE}&today=true`,
       semanticTags: ["defect_rate", "cost_summary"],
     }),
 
@@ -222,7 +224,7 @@ export function registerQualityTools(): import("../../../../src/tools/base.js").
         };
       },
       system: "MOM",
-      provenance: (a) => `/mom/quality/rework?line=${(a.line as string) ?? "L01"}&today=true`,
+      provenance: (a) => `/mom/quality/rework?line=${(a.line as string) ?? DEFAULT_LINE}&today=true`,
       semanticTags: ["defect_rate", "cost_summary"],
     }),
 
@@ -242,7 +244,7 @@ export function registerQualityTools(): import("../../../../src/tools/base.js").
         };
       },
       system: "MOM",
-      provenance: (a) => `/mom/quality/inspection?line=${(a.line as string) ?? "L01"}`,
+      provenance: (a) => `/mom/quality/inspection?line=${(a.line as string) ?? DEFAULT_LINE}`,
       semanticTags: ["defect_rate"],
     }),
 
@@ -267,7 +269,7 @@ export function registerQualityTools(): import("../../../../src/tools/base.js").
         };
       },
       system: "MOM",
-      provenance: (a) => `/mom/quality/5m1e?line=${(a.line as string) ?? "L01"}`,
+      provenance: (a) => `/mom/quality/5m1e?line=${(a.line as string) ?? DEFAULT_LINE}`,
       confidence: "inferred",
       semanticTags: ["causal_chain"],
     }),
@@ -299,7 +301,7 @@ export function registerQualityTools(): import("../../../../src/tools/base.js").
         };
       },
       system: "MOM",
-      provenance: (a) => `/mom/quality/5why?line=${(a.line as string) ?? "L01"}`,
+      provenance: (a) => `/mom/quality/5why?line=${(a.line as string) ?? DEFAULT_LINE}`,
       confidence: "inferred",
       semanticTags: ["causal_chain"],
     }),
@@ -335,7 +337,7 @@ export function registerQualityTools(): import("../../../../src/tools/base.js").
         };
       },
       system: "MOM",
-      provenance: (a) => `/mom/quality/fishbone?line=${(a.line as string) ?? "L01"}`,
+      provenance: (a) => `/mom/quality/fishbone?line=${(a.line as string) ?? DEFAULT_LINE}`,
       confidence: "inferred",
       semanticTags: ["causal_chain"],
     }),
@@ -375,7 +377,7 @@ export function registerQualityTools(): import("../../../../src/tools/base.js").
         };
       },
       system: "MOM",
-      provenance: (a) => `/mom/quality/sigma_level?line=${(a.line as string) ?? "L01"}`,
+      provenance: (a) => `/mom/quality/sigma_level?line=${(a.line as string) ?? DEFAULT_LINE}`,
       freshness: "daily",
       confidence: "inferred",
       semanticTags: ["process_capability", "six_sigma_level"],
@@ -423,7 +425,7 @@ export function registerQualityTools(): import("../../../../src/tools/base.js").
         };
       },
       system: "MOM",
-      provenance: (a) => `/mom/quality/dpmo?line=${(a.line as string) ?? "L01"}&window=7d`,
+      provenance: (a) => `/mom/quality/dpmo?line=${(a.line as string) ?? DEFAULT_LINE}&window=7d`,
       freshness: "daily",
       confidence: "inferred",
       semanticTags: ["defect_rate", "six_sigma_level"],
@@ -438,7 +440,7 @@ export function registerQualityTools(): import("../../../../src/tools/base.js").
       notFor: ["过程能力 Cpk（走 quality.cp_cpk）", "缺陷率（走 quality.defect_rate）"],
       inputSchema: { type: "object", properties: { line: { type: "string" } } },
       getData: (ctx) => {
-        const line = (ctx.line as string) ?? "L01";
+        const line = (ctx.line as string) ?? DEFAULT_LINE;
         return {
           gages: [
             { id: `${line}-G01`, name: "数显卡尺 0-150mm", calibrationDue: "2026-09-15", status: "valid", msaGrr: 7.2, msaVerdict: "acceptable" },
@@ -449,7 +451,7 @@ export function registerQualityTools(): import("../../../../src/tools/base.js").
         };
       },
       system: "EAM",
-      provenance: (a) => `/eam/quality/calibration?line=${(a.line as string) ?? "L01"}`,
+      provenance: (a) => `/eam/quality/calibration?line=${(a.line as string) ?? DEFAULT_LINE}`,
       freshness: "daily",
       confidence: "inferred",
       semanticTags: ["calibration_status"],

@@ -14,6 +14,7 @@ import { serve } from "@hono/node-server";
 import { createApp } from "../../../src/api/app.js";
 import { TaskRegistry } from "../../../src/tasks/registry.js";
 import { getDataDir, resolveAppDataDir } from "../../../src/core/config.js";
+import { AICF_PORT } from "../../../src/core/ports.js";
 import { bootAiContentFactory } from "./boot.js";
 
 async function main(): Promise<void> {
@@ -27,7 +28,7 @@ async function main(): Promise<void> {
   // 复用平台 createApp，挂载全部 /api/* 路由
   const app = createApp(registry);
 
-  const port = Number(process.env.AICF_PORT ?? process.env.PORT ?? "8789");
+  const port = AICF_PORT;
   const toolCount = runtime.toolRegistry.list().length;
 
   serve({ fetch: app.fetch, port }, (info) => {

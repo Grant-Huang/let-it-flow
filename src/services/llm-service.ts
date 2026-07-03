@@ -3,7 +3,7 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createAzure } from "@ai-sdk/azure";
 import type { EmbeddingModel } from "ai";
 import type { LanguageModel } from "ai";
-import { RUNTIME } from "../core/config.js";
+import { RUNTIME, SERVICE_URLS } from "../core/config.js";
 import type { CallSite } from "../llm/call-sites.js";
 import { CALL_SITES } from "../llm/call-sites.js";
 import { loadConfig, type RuntimeConfig } from "../llm/config-loader.js";
@@ -31,12 +31,45 @@ export interface LlmServiceOptions {
   runtimeConfig?: RuntimeConfig;
 }
 
-const DEFAULT_MODELS: Record<LlmRole, string> = {
-  planner: "gpt-4o",
-  writer: "gpt-4o-mini",
-  summarizer: "gpt-4o-mini",
-  default: "gpt-4o",
+/**
+ * 角色 → 默认模型的环境变量映射。
+ * 优先级链：角色专用 env → RUNTIME.defaultModel → 兜底占位。
+ * 这样非 OpenAI provider（DeepSeek/Ollama）只需设 LIF_MODEL 即可统一覆盖全部角色，
+ * 也可按角色精细化配置（如 LIF_PLANNER_MODEL 区分强/弱任务）。
+ */
+const ROLE_ENV: Record<LlmRole, string> = {
+  planner: "LIF_PLANNER_MODEL",
+  writer: "LIF_WRITER_MODEL",
+  summarizer: "LIF_SUMMARIZER_MODEL",
+  default: "LIF_MODEL",
 };
+
+/**
+ * 解析角色默认模型（惰性读取环境变量，便于运行时切换 + 测试隔离）。
+ * 缺省 fallback 到 RUNTIME.defaultModel（全局默认模型）。
+ */
+function resolveRoleModel(role: LlmRole): string {
+  const envVal = process.env[ROLE_ENV[role]];
+  if (envVal) return envVal;
+  if (role === "default") return RUNTIME.defaultModel;
+  // 非 default 角色回退到 default 角色，避免硬编码特定模型 id
+  const defaultEnv = process.env.LIF_MODEL;
+  if (defaultEnv) return defaultEnv;
+  return RUNTIME.defaultModel;
+}
+
+/** 兜底占位（仅在 env 与 RUNTIME 均无配置时使用，不绑定特定 provider）。 */
+const DEFAULT_MODEL_PLACEHOLDER = "default";
+
+/** 构造角色 → 模型映射（惰性，每次构造 LlmService 时按当前 env 解析）。 */
+function buildDefaultModels(): Record<LlmRole, string> {
+  return {
+    planner: resolveRoleModel("planner"),
+    writer: resolveRoleModel("writer"),
+    summarizer: resolveRoleModel("summarizer"),
+    default: resolveRoleModel("default") || DEFAULT_MODEL_PLACEHOLDER,
+  };
+}
 
 /** callSite → LlmRole 映射（向后兼容旧 role 体系）。 */
 const CALLSITE_TO_ROLE: Record<CallSite, LlmRole> = {
@@ -77,14 +110,20 @@ export class LlmService {
     }
     // 支持 OpenAI 兼容 API（DeepSeek 等）：显式 baseURL 透传给 createOpenAI
     const baseURL = opts.baseURL ?? (RUNTIME.openaiBaseUrl || undefined);
-    this.openai = createOpenAI({ apiKey: apiKey || "missing", ...(baseURL ? { baseURL } : {}) });
+    // 兼容 DeepSeek 等 OpenAI 兼容 API：强制 system role，
+    // 避免 SDK 默认把 system 转成 developer role（OpenAI o 系列专用）导致 400 错误
+    this.openai = createOpenAI({
+      apiKey: apiKey || "missing",
+      systemMessageMode: "system",
+      ...(baseURL ? { baseURL } : {}),
+    });
     // 非 OpenAI 官方 API（如 DeepSeek）不支持 Responses API，强制走 Chat Completions
     this.useChat = !!baseURL;
     // 配置了自定义 baseURL/model 时（如 DeepSeek），所有角色统一用该 model
     const customModel = RUNTIME.openaiBaseUrl ? RUNTIME.defaultModel : undefined;
     const base: Record<LlmRole, string> = customModel
       ? { planner: customModel, writer: customModel, summarizer: customModel, default: customModel }
-      : DEFAULT_MODELS;
+      : buildDefaultModels();
     this.models = { ...base, ...opts.models };
     // P8.1：尝试加载运行时配置（配置文件不存在时降级，不抛错）
     // 延迟加载：仅当调用 model(callSite) 时才解析
@@ -166,13 +205,14 @@ export class LlmService {
       case "ollama":
         return createOpenAI({
           apiKey,
-          baseURL: ep.baseURL ?? "http://localhost:11434/v1",
+          baseURL: ep.baseURL ?? SERVICE_URLS.ollama,
+          systemMessageMode: "system",
         });
       case "openai-compatible":
-        return createOpenAI({ apiKey, baseURL: ep.baseURL! });
+        return createOpenAI({ apiKey, baseURL: ep.baseURL!, systemMessageMode: "system" });
       case "openai":
       default:
-        return createOpenAI({ apiKey });
+        return createOpenAI({ apiKey, systemMessageMode: "system" });
     }
   }
 
@@ -210,15 +250,31 @@ export class LlmService {
   /**
    * 取 Embedding 模型（07-mestar-integration-spec.md §6 EmbeddingToolRouter 用）。
    *
-   * 复用现有 openai provider 实例（共享 baseURL / apiKey 配置）。
-   * 默认 text-embedding-3-small（性价比最高）。
+   * provider 解析优先级：
+   *   1. 配置了独立 embedding baseURL（LIF_EMBEDDING_BASE_URL，如 Ollama/Jina）→
+   *      创建独立 provider 实例（与 chat provider 解耦）
+   *   2. 否则复用 chat provider 实例（向后兼容）
    *
-   * 注意：DeepSeek 等 OpenAI 兼容服务可能不提供 embedding 端点，
-   * 调用失败时 EmbeddingToolRouter 会降级跳过（不阻塞主流程）。
+   * 注意：直接读 process.env 而非 RUNTIME 静态字段——避免 dotenv 加载顺序
+   * 导致 RUNTIME 顶层求值时拿到空 env（config.ts 可能先于 dotenv/config 被 import）
    *
-   * @param modelId 模型 id（缺省 text-embedding-3-small）
+   * @param modelId 模型 id（缺省取 LIF_EMBEDDING_MODEL，再缺省 text-embedding-3-small）
    */
-  embeddingModel(modelId: "text-embedding-3-small" | "text-embedding-3-large" | "text-embedding-ada-002" = "text-embedding-3-small"): EmbeddingModel {
+  embeddingModel(
+    modelId: string = process.env.LIF_EMBEDDING_MODEL ?? "text-embedding-3-small",
+  ): EmbeddingModel {
+    const embedBaseURL = process.env.LIF_EMBEDDING_BASE_URL ?? "";
+    // 独立 embedding provider（Ollama/Jina 等 OpenAI 兼容服务）
+    if (embedBaseURL) {
+      const embedProvider = createOpenAI({
+        apiKey: process.env.LIF_EMBEDDING_API_KEY ?? process.env.OPENAI_API_KEY ?? "missing",
+        baseURL: embedBaseURL,
+        // 兼容第三方 embedding 服务：强制 system role，避免 SDK 默认 developer
+        systemMessageMode: "system",
+      });
+      return embedProvider.embedding(modelId);
+    }
+    // 回退：复用 chat provider 实例（如 OpenAI 官方一站式）
     return this.openai.embedding(modelId);
   }
 
