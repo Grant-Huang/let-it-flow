@@ -303,6 +303,8 @@ async function* runDynamicSteps(
   selfCallId: string,
 ): AsyncGenerator<ToolEvent, void> {
   const startedAt = Date.now();
+  /** step() 产出的 workflow_node 事件队列；dynamicSteps 执行完毕后统一 yield。 */
+  const stepEvents: ToolEvent[] = [];
 
   const stepCtx: StepCtx = {
     call: async <T = unknown>(toolName: string, callParams: Record<string, unknown>): Promise<T> => {
@@ -347,7 +349,7 @@ async function* runDynamicSteps(
       try {
         const r = await fn(stepCtx);
         results.push(r);
-        await ctx.emit({
+        const nodeEv: ToolEvent = {
           type: "workflow_node",
           channel: "status",
           payload: {
@@ -358,7 +360,11 @@ async function* runDynamicSteps(
             started_at: startedAt,
             duration_ms: Date.now() - startedAt,
           },
-        } as never);
+        };
+        // 同时通过 emit（生产 SSE 总线）和 stepEvents（供 generator 流向消费者）下发，
+        // 让 skill execute 的消费者（harness / 测试）能在 generator 流里收到步骤进度。
+        stepEvents.push(nodeEv);
+        await ctx.emit(nodeEv as never);
         return r;
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -388,6 +394,13 @@ async function* runDynamicSteps(
       configurable: true,
       writable: true,
     });
+  }
+
+  // 统一 yield 步骤事件：dynamicSteps 是整体 await，step() 在其内部顺序执行，
+  // 每个 step 完成后事件入 stepEvents 队列；此处集中 yield，让 skill execute
+  // 的消费者能在 generator 流里收到全部 workflow_node 事件（顺序与 step 调用一致）。
+  for (const ev of stepEvents) {
+    yield ev;
   }
 
 }
