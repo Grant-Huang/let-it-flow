@@ -215,16 +215,37 @@ describe("S5 Layer 2 跨域组合 skill 执行（ctx.call 串联）", () => {
     expect(data.overallAssessment.priority.length).toBeGreaterThan(0);
   });
 
-  it("skill.report_html 生成自包含 HTML 报告", async () => {
+  it("skill.report_html 生成自包含 HTML 报告（默认 OEE 模板）", async () => {
     const skill = skills.find((s) => s.name === "skill.report_html") as SkillConnector;
     expect(skill).toBeDefined();
     const result = await runSkill(skill, { scenarioId: "anomaly", line: "L01" });
     expect(isEvidenceEnvelope(result.output)).toBe(true);
-    const data = skillData(result) as { html: string; _isHtmlReport: boolean };
+    const data = skillData(result) as { html: string; _isHtmlReport: boolean; reportType?: string };
     expect(data._isHtmlReport).toBe(true);
     expect(data.html).toContain("<!DOCTYPE html>");
     expect(data.html).toContain("OEE 综合诊断报告");
     expect(data.html).toContain("证据链");
+    expect(data.reportType).toBe("oee");
+  });
+
+  it("skill.report_html 按 reportType=dmaic 生成 DMAIC 路线图报告", async () => {
+    const skill = skills.find((s) => s.name === "skill.report_html") as SkillConnector;
+    expect(skill).toBeDefined();
+    const result = await runSkill(skill, { reportType: "dmaic", scenarioId: "anomaly", line: "L01" });
+    expect(isEvidenceEnvelope(result.output)).toBe(true);
+    const data = skillData(result) as { html: string; _isHtmlReport: boolean; reportType?: string; diagnosis: string };
+    expect(data._isHtmlReport).toBe(true);
+    expect(data.reportType).toBe("dmaic");
+    expect(data.html).toContain("<!DOCTYPE html>");
+    // DMAIC 报告标题应为路线图，而非 OEE 综合诊断报告
+    expect(data.html).toContain("DMAIC 改善路线图");
+    expect(data.html).not.toContain("OEE 综合诊断报告");
+    // 含 σ/DPMO/Cpk 目标 + 五阶段
+    expect(data.html).toContain("长期 σ 水平");
+    expect(data.html).toContain("DPMO");
+    expect(data.html).toContain("Define（定义）");
+    expect(data.html).toContain("Control（控制）");
+    expect(data.diagnosis).toContain("σ=");
   });
 
   it("新 skill 通过 ctx.call 嵌套：waste_audit 调 cost_summary", async () => {

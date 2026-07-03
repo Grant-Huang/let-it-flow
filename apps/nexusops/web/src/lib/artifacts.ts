@@ -157,13 +157,14 @@ function parseHtmlReportOutput(tc: ToolCallLike): NexusArtifact | null {
   }
   try {
     const obj = JSON.parse(tc.result.output ?? "{}") as {
-      data?: { html?: string; _isHtmlReport?: boolean };
+      data?: { html?: string; _isHtmlReport?: boolean; reportType?: string };
     };
     const html = obj.data?.html ?? tc.result.output ?? "";
+    const title = reportTitleByType(obj.data?.reportType);
     return {
       id: tc.call.id,
       type: "html_report",
-      title: "OEE 诊断报告",
+      title,
       content: html,
       ready: true,
     };
@@ -176,6 +177,12 @@ function parseHtmlReportOutput(tc: ToolCallLike): NexusArtifact | null {
       ready: true,
     };
   }
+}
+
+/** 按 reportType 映射报告 tab 标题（与 skill.report_html 的 reportType 入参对齐）。 */
+function reportTitleByType(reportType: string | undefined): string {
+  if (reportType === "dmaic") return "DMAIC 改善路线图";
+  return "OEE 诊断报告";
 }
 
 /** 推断展示标签 */
