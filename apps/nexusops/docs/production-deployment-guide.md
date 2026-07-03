@@ -510,3 +510,104 @@ data/nexus-vault/
 *本文档随实现迭代更新，以 `apps/nexusops/tools/mock-data/scenarios.ts` 和 `apps/nexusops/tools/domains/*.ts` 中的实际代码为唯一参考基准。*
 
 **本次扩展记录**：新增 `material.routing`、`personnel.attendance`/`personnel.fatigue`、`quality.sigma_level`/`quality.dpmo`、`lean.waste_audit`/`lean.dmaic`（精益域），升级 `quality.spc` 为 30 样本 + Nelson 规则。工具域从 8 → 9（新增 lean 域），`buildNexusTools()` 返回的工具从 70 → 77（净增 7 个域工具 + 2 个 lean 元分析工具），含 MCP 动作工具系统总计 89 个。
+
+---
+
+## 八、RelOS 知识层接入
+
+> 本章节描述 NexusOps 编排知识层（Orchestrator）的接入路径。
+>
+> **当前状态**：使用 `MockOrchestrator`（本地 JSON 规则，`source=mock`）。relos 尚未就绪。
+>
+> 详细迁移规范见 [06-relos-integration-spec.md](architecture/06-relos-integration-spec.md)。
+
+### 8.1 当前 Mock 现状
+
+NexusOps 当前通过 `MockOrchestrator` 提供编排知识：
+
+- **数据源**：`data/relos-mock/*.json`（relations / methodologies / evidence-contracts）
+- **装配位置**：`boot.ts` → `createOrchestrator({ dataDir: "data/relos-mock" })`
+- **`source` 字段**：恒为 `"mock"`，LLM 知道当前是模拟知识（可参考但允许自主判断）
+- **工具索引回写**：boot 启动时调用 `syncToolIndex()`，把当前 registry 工具清单（含 `semanticTags`）写入 `data/relos-mock/tool-index.json`
+
+**Mock 数据来源**：从已验证的 `scenarios.ts` CAUSAL_CHAIN 翻译而来，覆盖 9 个场景 + 8 个方法论 + 5 个证据契约。
+
+### 8.2 RelOS 部署要求
+
+relos 是独立的编排知识服务，需独立部署：
+
+| 组件 | 用途 | 部署要求 |
+|---|---|---|
+| Neo4j | 因果知识图谱存储 | ≥ 4.x，内存 ≥ 4GB |
+| Redis | 查询缓存 | ≥ 6.x，内存 ≥ 1GB |
+| relos API 服务 | HTTP API（方法论/因果链/契约查询） | Node.js ≥ 18，端口 8790 |
+
+**环境变量**：
+
+```bash
+RELOS_BASE_URL=https://relos.internal.corp/api/v1   # relos API 地址
+RELOS_API_KEY=<your-api-key>                         # 鉴权密钥
+RELOS_CACHE_TTL=300                                  # 缓存过期时间（秒，缺省 300）
+RELOS_REFRESH_INTERVAL=300000                        # 后台刷新间隔（毫秒，缺省 5 分钟）
+```
+
+### 8.3 接入步骤（OrchestratorFactory 替换）
+
+relos 就绪后，按以下步骤完成零改动迁移（调用方代码不变）：
+
+1. **部署 relos + seed 种子数据**：把 `data/relos-mock/*.json` 的规则作为种子数据导入 relos
+2. **新增三个实现文件**：
+   - `src/orchestrator/relos-orchestrator.ts`（HTTP 调 relos API）
+   - `src/orchestrator/cache-layer.ts`（本地缓存 + 过期判定）
+   - `src/orchestrator/fallback-chain.ts`（降级链：Cache → Relos → Mock）
+3. **`OrchestratorFactory` 内部替换**：把单层 Mock 改为 `FallbackChain([cache, relos, mock])`
+4. **boot.ts 开启后台刷新**：配置 `RELOS_REFRESH_INTERVAL` 定时刷新缓存
+
+详见 [06-relos-integration-spec.md §5](architecture/06-relos-integration-spec.md)。
+
+### 8.4 环境变量配置
+
+| 环境变量 | 说明 | 缺省值 | 何时配置 |
+|---|---|---|---|
+| `RELOS_BASE_URL` | relos API 地址 | （未设则用 Mock） | relos 部署后 |
+| `RELOS_API_KEY` | 鉴权密钥 | （未设则用 Mock） | relos 部署后 |
+| `RELOS_CACHE_TTL` | 缓存过期时间（秒） | `300` | 接入后调优 |
+| `RELOS_REFRESH_INTERVAL` | 后台刷新间隔（毫秒） | `300000` | 接入后调优 |
+
+**未配置 `RELOS_BASE_URL` 时**：系统继续使用 MockOrchestrator（降级运行，不影响功能）。
+
+### 8.5 syncToolIndex 配置
+
+boot 启动时自动调用 `orchestrator.syncToolIndex(manifest)`：
+
+- **Mock 模式**：写入 `data/relos-mock/tool-index.json`（本地文件）
+- **Relos 模式**：POST 到 relos `/v1/tools/sync`（回写企业工具索引）
+
+**回写内容**：工具名 + description + whenToUse + `semanticTags`（Phase 0.6 标注的语义标签）。
+
+**频率**：当前为 boot 启动时同步一次。未来可扩展为定时同步（环境变量 `RELOS_SYNC_INTERVAL` 控制）。
+
+### 8.6 检查清单
+
+relos 接入后验证：
+
+**relos 健康检查**
+- [ ] `GET {RELOS_BASE_URL}/health` 返回 200
+- [ ] `GET {RELOS_BASE_URL}/v1/methodologies/dmaic` 返回正确方法论
+- [ ] 种子数据已导入（relations / methodologies / contracts）
+
+**缓存命中率**
+- [ ] 启用后 `source` 字段出现 `"relos"` 或 `"cache"`（非恒 `"mock"`）
+- [ ] 缓存命中率监控（relos 侧或应用日志）
+
+**降级验证**
+- [ ] relos 不可用时，自动降级到 MockOrchestrator（`source` 回退为 `"mock"`）
+- [ ] 降级期间功能不中断（LLM 知道是降级知识）
+
+**Shadow Mode（可选）**
+- [ ] relos 的 ActionBundle 在 Shadow Mode 下只记录不执行
+- [ ] 审计日志对比"relos 建议 vs 实际执行"差异
+
+---
+
+*本章节随 relos 接入进度更新。当前（MockOrchestrator 阶段）的编排知识来自已验证的 scenarios.ts，`source=mock`。*

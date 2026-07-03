@@ -36,6 +36,7 @@ export function registerEconomicsTools(): import("../../../../src/tools/base.js"
       },
       system: "ERP",
       provenance: (args) => `economics.unit?line=${args.line ?? "L01"}`,
+      semanticTags: ["cost_summary"],
     }),
   ];
 }

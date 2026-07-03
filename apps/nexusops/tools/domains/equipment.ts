@@ -38,6 +38,7 @@ export function registerEquipmentTools(): import("../../../../src/tools/base.js"
       },
       system: SYSTEM,
       provenance: (a) => `/mes/equipment/status?line=${(a.line as string) ?? "L01"}`,
+      semanticTags: ["equipment_health", "oee_availability"],
     }),
 
     // 2. 停机事件 + 原因
@@ -60,6 +61,7 @@ export function registerEquipmentTools(): import("../../../../src/tools/base.js"
       },
       system: SYSTEM,
       provenance: (a) => `/mes/equipment/downtime?line=${(a.line as string) ?? "L01"}&today=true`,
+      semanticTags: ["oee_availability", "downtime_events"],
     }),
 
     // 3. MTBF（平均故障间隔）
@@ -76,6 +78,7 @@ export function registerEquipmentTools(): import("../../../../src/tools/base.js"
       system: "PLM",
       provenance: (a) => `/plm/equipment/mtbf?line=${(a.line as string) ?? "L01"}&window=30d`,
       freshness: "weekly",
+      semanticTags: ["equipment_reliability"],
     }),
 
     // 4. MTTR（平均修复时间）
@@ -92,6 +95,7 @@ export function registerEquipmentTools(): import("../../../../src/tools/base.js"
       system: "PLM",
       provenance: (a) => `/plm/equipment/mttr?line=${(a.line as string) ?? "L01"}&window=30d`,
       freshness: "weekly",
+      semanticTags: ["equipment_reliability"],
     }),
 
     // 5. 维护日志
@@ -117,6 +121,7 @@ export function registerEquipmentTools(): import("../../../../src/tools/base.js"
       system: "PLM",
       provenance: (a) => `/plm/equipment/maintenance?line=${(a.line as string) ?? "L01"}&days=${(a.days as number) ?? 30}`,
       freshness: "weekly",
+      semanticTags: ["equipment_reliability"],
     }),
 
     // 6. 设备健康分
@@ -138,6 +143,7 @@ export function registerEquipmentTools(): import("../../../../src/tools/base.js"
       system: "IoT",
       provenance: (a) => `/iot/equipment/health?line=${(a.line as string) ?? "L01"}`,
       caveat: "健康分基于 IoT 信号融合，采样率 1/min",
+      semanticTags: ["equipment_health"],
     }),
 
     // 7. 故障预测（30 天风险）
@@ -162,6 +168,7 @@ export function registerEquipmentTools(): import("../../../../src/tools/base.js"
       provenance: (a) => `/ml/equipment/predict?line=${(a.line as string) ?? "L01"}&horizon=30d`,
       freshness: "daily",
       confidence: "estimated",
+      semanticTags: ["equipment_reliability"],
     }),
 
     // 8. 备件库存
@@ -183,6 +190,7 @@ export function registerEquipmentTools(): import("../../../../src/tools/base.js"
       system: "ERP",
       provenance: (a) => `/erp/spare_parts?line=${(a.line as string) ?? "L01"}`,
       freshness: "daily",
+      semanticTags: ["equipment_reliability"],
     }),
 
     // 9. 报警历史
@@ -204,6 +212,7 @@ export function registerEquipmentTools(): import("../../../../src/tools/base.js"
       },
       system: SYSTEM,
       provenance: (a) => `/mes/equipment/alarms?line=${(a.line as string) ?? "L01"}&hours=${(a.hours as number) ?? 24}`,
+      semanticTags: ["equipment_health"],
     }),
   ];
 }

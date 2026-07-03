@@ -1,0 +1,248 @@
+{
+  "_comment": "因果知识规则（RelationObject 列表），从 scenarios.ts 的 CAUSAL_CHAIN 翻译。对齐 relos §7.1 RelationObject schema。MockOrchestrator.getCausalChain 消费此文件。",
+  "relations": [
+    {
+      "id": "rel-anomaly-l01-bearing",
+      "relation_type": "DEVICE__INDICATES__COMPONENT_FAILURE",
+      "source_node_id": "device-注塑机-L01",
+      "source_node_type": "Device",
+      "target_node_id": "component-主轴轴承-L01",
+      "target_node_type": "Component",
+      "confidence": 0.90,
+      "knowledge_phase": "interview",
+      "provenance": "manual_engineer",
+      "half_life_days": 90,
+      "status": "active",
+      "properties": {
+        "appliesScenario": ["anomaly"],
+        "appliesLine": ["L01"],
+        "symptom": "L01 尺寸超差率 5.8%，Cpk 0.85 < 1.0（能力不足）",
+        "evidenceRefs": [
+          "QUALITY.anomaly.L01.defectRate",
+          "QUALITY.anomaly.L01.cpk",
+          "EQUIPMENT_HEALTH.anomaly.L01.healthScore",
+          "EQUIPMENT_RELIABILITY.anomaly.L01.mtbfHours",
+          "PROCESS.anomaly.L01.parameters.温度",
+          "PROCESS.anomaly.L01.parameters.压力",
+          "ENVIRONMENT.anomaly.L01.tempC",
+          "GAGE_RNR.anomaly.L01.rrPct"
+        ],
+        "causalLayers": [
+          "现象：尺寸超差率 5.8%，主缺陷类型为'尺寸超差'（占 42%）",
+          "为何尺寸超差？主轴径向跳动 0.03mm 超规（标准 ≤0.02mm）",
+          "为何主轴跳动超规？主轴前轴承磨损（间隙增大）",
+          "为何轴承磨损加速？自动润滑系统供油不足",
+          "根本原因：自动润滑泵滤网堵塞，导致供油不足 → 轴承异常磨损 → 主轴跳动 → 尺寸超差"
+        ],
+        "rootCause": "自动润滑泵滤网堵塞（设备保养类）",
+        "fishbone": {
+          "man": [
+            "C 班夜班缺陷率比 A 班高 0.012（见 SHIFT_DEVIATION.L01.C）",
+            "C 班含新员工未独立（见 PERSONNEL 班长B 郑师傅 level）"
+          ],
+          "machine": [
+            "主轴健康分 0.62 < 0.7 阈值（见 EQUIPMENT.L01.healthScore）",
+            "MTBF 降至 180h（正常 480h，见 EQUIPMENT.L01.mtbfHours）",
+            "停机事件 3 起：模具卡死/传感器漂移/换模超时（见 EQUIPMENT.L01.downtimeEvents）"
+          ],
+          "material": ["近期来料批次切换，但单独不致超差（辅助因素）"],
+          "method": [
+            "温度 197℃ 超标准 185℃（见 PROCESS.L01.parameters.温度）",
+            "压力 4.8MPa 超标准 4.2MPa（见 PROCESS.L01.parameters.压力）"
+          ],
+          "environment": [
+            "车间温度 31℃ 超标准 25±3℃（见 ENVIRONMENT.L01.tempC），空调降级运行",
+            "湿度 74% 超注塑宜 ≤60%（见 ENVIRONMENT.L01.humidityPct），塑料颗粒吸潮致气泡缺陷"
+          ],
+          "measurement": [
+            "CMM 三坐标超校准周期 8 个月（标准 6，见 GAGE_RNR.L01.monthsSinceLastCal）",
+            "测量系统 R&R=18.5% > 10% 不可接受（见 GAGE_RNR.L01.rrPct），可能误判合格/不合格"
+          ]
+        }
+      }
+    },
+    {
+      "id": "rel-anomaly-l02-pid-drift",
+      "relation_type": "PARAMETER__CAUSES__DEFECT",
+      "source_node_id": "process-温控PID-L02",
+      "source_node_type": "Process",
+      "target_node_id": "defect-尺寸超差-L02",
+      "target_node_type": "Defect",
+      "confidence": 0.85,
+      "knowledge_phase": "interview",
+      "provenance": "manual_engineer",
+      "half_life_days": 90,
+      "status": "active",
+      "properties": {
+        "appliesScenario": ["anomaly"],
+        "appliesLine": ["L02"],
+        "symptom": "L02 尺寸超差率 2.5%，工艺温度轻微漂移",
+        "evidenceRefs": [
+          "QUALITY.anomaly.L02.defectRate",
+          "PROCESS.anomaly.L02.parameters.温度",
+          "PROCESS.anomaly.L02.parameters.压力",
+          "ENVIRONMENT.anomaly.L02.tempC",
+          "GAGE_RNR.anomaly.L02.gages[0].status"
+        ],
+        "causalLayers": [
+          "现象：尺寸超差率 2.5%（略高于阈值 2%）",
+          "为何尺寸超差？温度 189℃ 略超标准 180℃（工艺漂移）",
+          "为何温度漂移？温控 PID 参数未随模具老化调整",
+          "为何未调整？模具寿命管理缺定期校准触发点",
+          "根本原因：模具寿命管理缺乏基于实际磨损的动态校准机制"
+        ],
+        "rootCause": "模具寿命校准机制缺失（方法类）",
+        "fishbone": {
+          "man": ["人员稳定，L3+ 占比 68%（见 PERSONNEL.L02.l3PlusRatio）"],
+          "machine": ["设备健康 0.85（尚可，见 EQUIPMENT.L02.healthScore）"],
+          "material": [],
+          "method": [
+            "温度 189℃ > 标准 180℃（见 PROCESS.L02.parameters.温度）",
+            "压力 4.1MPa > 标准 3.8MPa（见 PROCESS.L02.parameters.压力）"
+          ],
+          "environment": ["车间温度 26℃ 略超标准（见 ENVIRONMENT.L02.tempC），影响轻微"],
+          "measurement": ["AOI 检测仪即将到校准周期（见 GAGE_RNR.L02 gages[0].status=due）"]
+        }
+      }
+    },
+    {
+      "id": "rel-crisis-l01-bearing-fracture",
+      "relation_type": "DEVICE__INDICATES__COMPONENT_FAILURE",
+      "source_node_id": "device-注塑机-L01",
+      "source_node_type": "Device",
+      "target_node_id": "component-主轴轴承-L01",
+      "target_node_type": "Component",
+      "confidence": 0.95,
+      "knowledge_phase": "interview",
+      "provenance": "manual_engineer",
+      "half_life_days": 90,
+      "status": "active",
+      "properties": {
+        "appliesScenario": ["crisis"],
+        "appliesLine": ["L01"],
+        "symptom": "L01 批量报废率 9.5%，主轴轴承断裂致停机 240min",
+        "evidenceRefs": [
+          "QUALITY.crisis.L01.defectRate",
+          "EQUIPMENT_RUNTIME.crisis.L01.downtimeEvents[0]",
+          "EQUIPMENT_HEALTH.crisis.L01.healthScore",
+          "PROCESS.crisis.L01.parameters.温度",
+          "PROCESS.crisis.L01.parameters.压力",
+          "PROCESS.crisis.L01.parameters.速度"
+        ],
+        "causalLayers": [
+          "现象：批量报废率 9.5%（180 件），主轴轴承断裂停机 240min",
+          "为何轴承断裂？轴承长期超负荷运行未及时更换",
+          "为何未及时更换？预防性维护周期基于时间而非基于状态",
+          "为何基于时间？缺乏振动/温度状态监测的预测性维护体系",
+          "根本原因：未建立基于状态的预测性维护（CBM），轴承磨损未被早期发现"
+        ],
+        "rootCause": "预测性维护体系缺失（设备管理体系类）",
+        "fishbone": {
+          "man": ["停机响应滞后，操作员未识别早期振动征兆"],
+          "machine": [
+            "主轴轴承断裂（见 EQUIPMENT.L01.downtimeEvents[0]）",
+            "健康分 0.25 严重恶化（见 EQUIPMENT.L01.healthScore）",
+            "电气控制柜故障 120min（见 EQUIPMENT.L01.downtimeEvents[1]）"
+          ],
+          "material": ["来料批次切换（辅助因素）"],
+          "method": [
+            "温度 215℃ 严重超标准 185℃（见 PROCESS.L01.parameters.温度）",
+            "压力 5.6MPa 严重超标准 4.2MPa（见 PROCESS.L01.parameters.压力）",
+            "速度 950rpm < 标准 1200rpm（见 PROCESS.L01.parameters.速度）"
+          ],
+          "environment": [
+            "车间温度 34℃ 严重超标（见 ENVIRONMENT.L01.tempC），空调故障加剧设备热负荷",
+            "湿度 82% 致塑料严重吸潮（见 ENVIRONMENT.L01.humidityPct），是表面气泡缺陷主因之一",
+            "洁净度 ISO 8 不达标（见 ENVIRONMENT.L01.cleanlinessIso）"
+          ],
+          "measurement": [
+            "CMM 三坐标超校准 10 个月（见 GAGE_RNR.L01.monthsSinceLastCal），测量数据可信度存疑",
+            "R&R=32% 远超 30% 红线（见 GAGE_RNR.L01.rrPct），报废判定本身可能失准"
+          ]
+        }
+      }
+    },
+    {
+      "id": "rel-crisis-l01-energy-spike",
+      "relation_type": "DEVICE__INDICATES__COMPONENT_FAILURE",
+      "source_node_id": "device-注塑机-L01",
+      "source_node_type": "Device",
+      "target_node_id": "component-主轴轴承-L01",
+      "target_node_type": "Component",
+      "confidence": 0.88,
+      "knowledge_phase": "interview",
+      "provenance": "manual_engineer",
+      "half_life_days": 90,
+      "status": "active",
+      "properties": {
+        "appliesScenario": ["crisis"],
+        "appliesLine": ["L01"],
+        "symptom": "能耗飙升 195kW（基线 88kW，+122%），与轴承断裂同根因",
+        "evidenceRefs": [
+          "ENERGY.crisis.L01.realtimeKw",
+          "EQUIPMENT_HEALTH.crisis.L01.healthScore"
+        ],
+        "causalLayers": [
+          "现象：能耗飙升 195kW（基线 88kW，+122%）",
+          "为何能耗飙升？设备超负荷运转补偿机械损耗",
+          "为何超负荷？主轴轴承磨损增加摩擦阻力",
+          "为何磨损未被发现？无振动监测（同上一链）",
+          "根本原因：与停机同一根因——预测性维护缺失（强关联）"
+        ],
+        "rootCause": "预测性维护体系缺失（与停机同根因）",
+        "fishbone": {
+          "man": [],
+          "machine": ["主轴轴承磨损增加摩擦阻力（见 EQUIPMENT.L01.healthScore 0.25）"],
+          "material": [],
+          "method": ["设备超负荷运转补偿机械损耗"],
+          "environment": [],
+          "measurement": []
+        }
+      }
+    },
+    {
+      "id": "rel-crisis-l02-material-shortage",
+      "relation_type": "PARAMETER__CAUSES__DEFECT",
+      "source_node_id": "process-物料管理-L02",
+      "source_node_type": "Process",
+      "target_node_id": "defect-缺料停机-L02",
+      "target_node_type": "Defect",
+      "confidence": 0.85,
+      "knowledge_phase": "interview",
+      "provenance": "manual_engineer",
+      "half_life_days": 90,
+      "status": "active",
+      "properties": {
+        "appliesScenario": ["crisis"],
+        "appliesLine": ["L02"],
+        "symptom": "L02 缺料停机 180min，inventoryHours=12h 低于安全线",
+        "evidenceRefs": [
+          "MATERIAL.crisis.L02.inventoryHours",
+          "MATERIAL.crisis.L02.shortageRisk",
+          "EQUIPMENT_RUNTIME.crisis.L02.downtimeEvents",
+          "ENVIRONMENT.crisis.L02.tempC",
+          "GAGE_RNR.crisis.L02.gages[0].status"
+        ],
+        "causalLayers": [
+          "现象：缺料停机 180min（见 EQUIPMENT.L02.downtimeEvents）",
+          "为何缺料？库存 12h 低于 24h 安全线（见 MATERIAL.L02.inventoryHours）",
+          "为何库存低？采购订单未按实际消耗速率提前下单",
+          "为何未提前？安全库存公式未考虑供应商交期波动",
+          "根本原因：安全库存公式未纳入供应商交期波动参数（物料管理类）"
+        ],
+        "rootCause": "安全库存公式缺供应商交期波动参数（物料管理类）",
+        "fishbone": {
+          "man": ["物料计划员单点依赖，无替补（见 PERSONNEL.L02）"],
+          "machine": ["设备健康 0.55 偏低（见 EQUIPMENT.L02.healthScore）"],
+          "material": [
+            "inventoryHours=12h < 24h 安全线（见 MATERIAL.L02.inventoryHours）",
+            "shortageRisk=0.45（见 MATERIAL.L02.shortageRisk）"
+          ],
+          "method": ["安全库存公式未含交期波动参数"],
+          "environment": ["车间温度 28℃ 偏高（见 ENVIRONMENT.L02.tempC），空调降级"],
+          "measurement": ["AOI 检测仪超校准周期（见 GAGE_RNR.L02 gages[0].status=overdue）"]
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,101 @@
+{
+  "_comment": "最小骨架方法论（granularity=minimal）。开放场景用，phases 只有阶段名 + 关键语义需求。包含 QS16949 内审评估（Phase 4.5 新增）。",
+  "methodologies": [
+    {
+      "topic": "general_analysis",
+      "confidence": 0.60,
+      "source": "mock",
+      "granularity": "minimal",
+      "guidance": "通用分析兜底。无固定阶段，LLM 根据用户问题自主编排工具。",
+      "phases": [
+        {
+          "id": "understand",
+          "requiredData": [
+            { "semantic": "oee", "required": false, "fallbackHints": ["若无 OEE 工具，先问用户具体关注什么"] }
+          ],
+          "guidance": "先理解用户意图，确定分析范围。"
+        },
+        {
+          "id": "investigate",
+          "requiredData": [
+            { "semantic": "defect_rate", "required": false },
+            { "semantic": "equipment_health", "required": false },
+            { "semantic": "process_deviation", "required": false }
+          ],
+          "guidance": "根据意图取相关域数据。LLM 自主决定查哪些域。"
+        },
+        {
+          "id": "conclude",
+          "requiredData": [],
+          "guidance": "综合证据给出结论。若证据不足，明确说明。"
+        }
+      ]
+    },
+    {
+      "topic": "energy_analysis",
+      "confidence": 0.65,
+      "source": "mock",
+      "granularity": "minimal",
+      "guidance": "能耗专项分析。关注实时功率、峰谷比、单位能耗。不诊断根因，聚焦能耗趋势 + 节能建议。",
+      "phases": [
+        {
+          "id": "baseline",
+          "requiredData": [
+            { "semantic": "energy_consumption", "required": true, "description": "实时功率基线" }
+          ],
+          "guidance": "取实时功率和基线对比。"
+        },
+        {
+          "id": "compare",
+          "requiredData": [],
+          "guidance": "与基线对比，识别异常时段。峰谷比、单位能耗分析。"
+        },
+        {
+          "id": "advise",
+          "requiredData": [],
+          "guidance": "给出节能建议。注意：这是分析类问题，不输出根因树。"
+        }
+      ]
+    },
+    {
+      "topic": "qs16949_audit",
+      "confidence": 0.70,
+      "source": "mock",
+      "granularity": "minimal",
+      "guidance": "IATF 16949 内审符合性评估。按过程方法（turtle diagram）逐过程评估，关注 PFMEA/控制计划/SPC/MSA/CPD 五大核心工具的落地情况。注意：这是符合性评估类问题，不是诊断根因——getCausalChain 返回 null 是正常的，不需要 5Why。",
+      "phases": [
+        {
+          "id": "scope",
+          "goal": "确定审核范围（哪些过程/产线/产品族）",
+          "requiredData": [
+            { "semantic": "scope_definition", "required": true, "description": "审核范围定义（产线/产品族/过程）" }
+          ],
+          "guidance": "明确审核覆盖哪些过程和产线。"
+        },
+        {
+          "id": "evidence",
+          "goal": "收集过程证据（文件 + 执行记录）",
+          "requiredData": [
+            { "semantic": "fmea", "required": true, "description": "PFMEA 是否更新、SOD 评分是否合理、AP 是否闭环" },
+            { "semantic": "process_capability", "required": true, "description": "Cpk ≥ 1.33 的证据（特殊特性）" },
+            { "semantic": "spc_samples", "required": true, "description": "SPC 控制图是否在线、是否判异" },
+            { "semantic": "calibration_status", "required": true, "description": "量具校准是否在有效期内、MSA 是否合格" }
+          ],
+          "guidance": "逐项检查四大核心工具（PFMEA/Cpk/SPC/MSA）的齐备度。"
+        },
+        {
+          "id": "gap_analysis",
+          "goal": "对照标准找差距，输出不符合项（NC）",
+          "requiredData": [],
+          "guidance": "对每项证据做符合性判定，输出 NC（Non-Conformity）清单。"
+        },
+        {
+          "id": "improve",
+          "goal": "针对 NC 提出纠正措施 + 验证计划",
+          "requiredData": [],
+          "guidance": "针对每个 NC 提出纠正措施和验证计划。注意：这是改善建议，不是根因分析。"
+        }
+      ]
+    }
+  ]
+}

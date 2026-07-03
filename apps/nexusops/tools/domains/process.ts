@@ -33,6 +33,7 @@ export function registerProcessTools(): import("../../../../src/tools/base.js").
       },
       system: "MES",
       provenance: (a) => `/mes/process/parameters?line=${(a.line as string) ?? "L01"}&realtime=true`,
+      semanticTags: ["process_deviation"],
     }),
 
     // 2. 参数偏差分析
@@ -61,6 +62,7 @@ export function registerProcessTools(): import("../../../../src/tools/base.js").
       },
       system: "MES",
       provenance: (a) => `/mes/process/deviation?line=${(a.line as string) ?? "L01"}`,
+      semanticTags: ["process_deviation"],
     }),
 
     // 3. 工艺配方（标准）
@@ -81,6 +83,7 @@ export function registerProcessTools(): import("../../../../src/tools/base.js").
       system: "PLM",
       provenance: (a) => `/plm/process/recipe?line=${(a.line as string) ?? "L01"}&product=P-2026-A`,
       freshness: "historical",
+      semanticTags: ["process_recipe"],
     }),
 
     // 4. 标准 vs 实测对照
@@ -100,6 +103,7 @@ export function registerProcessTools(): import("../../../../src/tools/base.js").
       },
       system: "MES",
       provenance: (a) => `/mes/process/compare?line=${(a.line as string) ?? "L01"}`,
+      semanticTags: ["process_deviation"],
     }),
 
     // 5. 工艺能力
@@ -119,6 +123,7 @@ export function registerProcessTools(): import("../../../../src/tools/base.js").
       system: "MES",
       provenance: (a) => `/mes/process/capability?line=${(a.line as string) ?? "L01"}`,
       freshness: "daily",
+      semanticTags: ["process_capability"],
     }),
 
     // 6. 参数调整建议
@@ -147,6 +152,7 @@ export function registerProcessTools(): import("../../../../src/tools/base.js").
       system: "MES",
       provenance: (a) => `/mes/process/adjustment_suggest?line=${(a.line as string) ?? "L01"}`,
       confidence: "inferred",
+      semanticTags: ["process_deviation"],
     }),
 
     // 7. PFMEA（AIAG-VDA 第五版，S/O/D + AP 行动优先级）
@@ -162,6 +168,7 @@ export function registerProcessTools(): import("../../../../src/tools/base.js").
       system: "PLM",
       provenance: (a) => `/plm/process/fmea?line=${(a.line as string) ?? "L01"}&standard=AIAG-VDA-v5`,
       freshness: "historical",
+      semanticTags: ["fmea"],
     }),
 
     // 8. 控制计划
@@ -185,6 +192,7 @@ export function registerProcessTools(): import("../../../../src/tools/base.js").
       system: "PLM",
       provenance: (a) => `/plm/process/control_plan?line=${(a.line as string) ?? "L01"}`,
       freshness: "historical",
+      semanticTags: ["fmea", "process_recipe"],
     }),
 
     // 9. 工艺偏差→质量影响映射（物理机制链，补缺 197°C→尺寸超差 的推理闭环）
@@ -277,6 +285,7 @@ export function registerProcessTools(): import("../../../../src/tools/base.js").
       },
       system: "MES",
       provenance: (a) => `/mes/process/quality_impact?line=${(a.line as string) ?? "L01"}&mode=mechanism`,
+      semanticTags: ["process_deviation", "causal_chain"],
     }),
   ];
 }

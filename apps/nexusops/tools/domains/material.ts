@@ -65,6 +65,7 @@ export function registerMaterialTools(): import("../../../../src/tools/base.js")
       },
       system: "MES",
       provenance: (a) => `/mes/material/wip?line=${(a.line as string) ?? "L01"}&realtime=true`,
+      semanticTags: ["wip_level"],
     }),
 
     // 2. 原材料库存
@@ -84,6 +85,7 @@ export function registerMaterialTools(): import("../../../../src/tools/base.js")
       },
       system: "ERP",
       provenance: (a) => `/erp/material/inventory?line=${(a.line as string) ?? "L01"}`,
+      semanticTags: ["wip_level", "supply_risk"],
     }),
 
     // 3. 缺料风险
@@ -105,6 +107,7 @@ export function registerMaterialTools(): import("../../../../src/tools/base.js")
       system: "ERP",
       provenance: (a) => `/erp/material/shortage_risk?line=${(a.line as string) ?? "L01"}&window=48h`,
       freshness: "daily",
+      semanticTags: ["wip_level", "supply_risk"],
     }),
 
     // 4. 物料流分析
@@ -126,6 +129,7 @@ export function registerMaterialTools(): import("../../../../src/tools/base.js")
       system: "MES",
       provenance: (a) => `/mes/material/flow?line=${(a.line as string) ?? "L01"}`,
       freshness: "daily",
+      semanticTags: ["wip_level"],
     }),
 
     // 5. 看板状态
@@ -145,6 +149,7 @@ export function registerMaterialTools(): import("../../../../src/tools/base.js")
       },
       system: "MES",
       provenance: (a) => `/mes/material/kanban?line=${(a.line as string) ?? "L01"}`,
+      semanticTags: ["wip_level"],
     }),
 
     // 6. 供应风险
@@ -166,6 +171,7 @@ export function registerMaterialTools(): import("../../../../src/tools/base.js")
       system: "ERP",
       provenance: (a) => `/erp/material/supply_risk?line=${(a.line as string) ?? "L01"}`,
       freshness: "weekly",
+      semanticTags: ["supply_risk"],
     }),
 
     // 7. 物料消耗速率
@@ -183,6 +189,7 @@ export function registerMaterialTools(): import("../../../../src/tools/base.js")
       }),
       system: "MES",
       provenance: (a) => `/mes/material/consumption?line=${(a.line as string) ?? "L01"}&realtime=true`,
+      semanticTags: ["wip_level"],
     }),
 
     // 8. 物料建议
@@ -207,6 +214,7 @@ export function registerMaterialTools(): import("../../../../src/tools/base.js")
       system: "ERP",
       provenance: (a) => `/erp/material/suggest?line=${(a.line as string) ?? "L01"}`,
       confidence: "inferred",
+      semanticTags: ["wip_level", "supply_risk"],
     }),
 
     // 9. 工序路线与 VSM 数据
@@ -238,6 +246,7 @@ export function registerMaterialTools(): import("../../../../src/tools/base.js")
       provenance: (a) => `/mes/material/routing?line=${(a.line as string) ?? "L01"}`,
       freshness: "historical",
       confidence: "measured",
+      semanticTags: ["wip_level"],
     }),
   ];
 }

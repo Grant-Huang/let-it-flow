@@ -13,6 +13,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { SkillCandidate } from "./skill-miner.js";
 import type { SkillConnector } from "./skill-bridge.js";
+import type { ReportTemplateRecord } from "../orchestrator/report-types.js";
 
 /** draft 转正所需连续成功次数。 */
 const PROMOTE_SUCCESS_THRESHOLD = 3;
@@ -51,6 +52,8 @@ export interface SkillRecord {
 interface RegistryFile {
   candidates: CandidateRecord[];
   skills: SkillRecord[];
+  /** 固化报表模板表（D8 落地，Phase 2 报表固化闭环）。 */
+  reportTemplates?: ReportTemplateRecord[];
 }
 
 /**
@@ -62,6 +65,7 @@ interface RegistryFile {
 export class SkillRegistry {
   private candidates = new Map<string, CandidateRecord>();
   private skills = new Map<string, SkillRecord>();
+  private reportTemplates = new Map<string, ReportTemplateRecord>();
   private readonly filePath: string;
 
   constructor(filePath?: string) {
@@ -183,6 +187,46 @@ export class SkillRegistry {
     return [...this.skills.values()].filter((s) => s.status === "draft");
   }
 
+  // ── 报表模板管理（D8 落地） ──
+
+  /**
+   * 登记一个固化的报表模板（来自前端"固化"按钮）。
+   * 同 reportType 会覆盖（最新覆盖旧的）。
+   */
+  registerReportTemplate(record: Omit<ReportTemplateRecord, "createdAt" | "updatedAt">): void {
+    const now = new Date().toISOString();
+    const existing = this.reportTemplates.get(record.reportType);
+    this.reportTemplates.set(record.reportType, {
+      ...record,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    });
+    this.save();
+  }
+
+  /** 按 reportType 查找 active 模板（用于报表生成时的模板匹配）。 */
+  getReportTemplate(reportType: string): ReportTemplateRecord | undefined {
+    const rec = this.reportTemplates.get(reportType);
+    return rec && rec.status === "active" ? rec : undefined;
+  }
+
+  /** 列出所有 active 报表模板。 */
+  activeReportTemplates(): ReportTemplateRecord[] {
+    return [...this.reportTemplates.values()].filter((t) => t.status === "active");
+  }
+
+  /** 列出所有报表模板（含 draft，供管理界面用）。 */
+  allReportTemplates(): ReportTemplateRecord[] {
+    return [...this.reportTemplates.values()];
+  }
+
+  /** 删除一个报表模板。 */
+  deleteReportTemplate(reportType: string): void {
+    if (this.reportTemplates.delete(reportType)) {
+      this.save();
+    }
+  }
+
   // ── 持久化 ──
 
   /** 加载持久化文件（失败降级为空内存态）。 */
@@ -193,6 +237,7 @@ export class SkillRegistry {
       const data = JSON.parse(raw) as RegistryFile;
       for (const c of data.candidates ?? []) this.candidates.set(c.signature, c);
       for (const s of data.skills ?? []) this.skills.set(s.name, s);
+      for (const t of data.reportTemplates ?? []) this.reportTemplates.set(t.reportType, t);
     } catch {
       // 持久化失败降级为空内存态
     }
@@ -205,6 +250,7 @@ export class SkillRegistry {
       const data: RegistryFile = {
         candidates: [...this.candidates.values()],
         skills: [...this.skills.values()],
+        reportTemplates: [...this.reportTemplates.values()],
       };
       writeFileSync(this.filePath, JSON.stringify(data, null, 2), "utf8");
     } catch {

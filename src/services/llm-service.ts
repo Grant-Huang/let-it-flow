@@ -1,6 +1,7 @@
 import { createOpenAI } from "@ai-sdk/openai";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createAzure } from "@ai-sdk/azure";
+import type { EmbeddingModel } from "ai";
 import type { LanguageModel } from "ai";
 import { RUNTIME } from "../core/config.js";
 import type { CallSite } from "../llm/call-sites.js";
@@ -204,6 +205,21 @@ export class LlmService {
       return this.legacyModel(cs);
     }
     return this.legacyModel(callSiteOrRole as LlmRole);
+  }
+
+  /**
+   * 取 Embedding 模型（07-mestar-integration-spec.md §6 EmbeddingToolRouter 用）。
+   *
+   * 复用现有 openai provider 实例（共享 baseURL / apiKey 配置）。
+   * 默认 text-embedding-3-small（性价比最高）。
+   *
+   * 注意：DeepSeek 等 OpenAI 兼容服务可能不提供 embedding 端点，
+   * 调用失败时 EmbeddingToolRouter 会降级跳过（不阻塞主流程）。
+   *
+   * @param modelId 模型 id（缺省 text-embedding-3-small）
+   */
+  embeddingModel(modelId: "text-embedding-3-small" | "text-embedding-3-large" | "text-embedding-ada-002" = "text-embedding-3-small"): EmbeddingModel {
+    return this.openai.embedding(modelId);
   }
 
   /** 旧 role 体系兜底：alias 作 modelId 直接给单 openai 实例（向后兼容）。 */

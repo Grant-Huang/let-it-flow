@@ -29,6 +29,7 @@ export function registerScheduleTools(): import("../../../../src/tools/base.js")
       },
       system: "ERP",
       provenance: (a) => `/erp/schedule/current?line=${(a.line as string) ?? "L01"}`,
+      semanticTags: ["schedule_attainment"],
     }),
 
     // 2. 达成率
@@ -52,6 +53,7 @@ export function registerScheduleTools(): import("../../../../src/tools/base.js")
       },
       system: "MES",
       provenance: (a) => `/mes/schedule/attainment?line=${(a.line as string) ?? "L01"}&today=true`,
+      semanticTags: ["schedule_attainment"],
     }),
 
     // 3. 换模时间
@@ -73,6 +75,7 @@ export function registerScheduleTools(): import("../../../../src/tools/base.js")
       },
       system: "MES",
       provenance: (a) => `/mes/schedule/changeover?line=${(a.line as string) ?? "L01"}&today=true`,
+      semanticTags: ["schedule_attainment", "oee_availability"],
     }),
 
     // 4. 瓶颈资源
@@ -94,6 +97,7 @@ export function registerScheduleTools(): import("../../../../src/tools/base.js")
       },
       system: "MES",
       provenance: (a) => `/mes/schedule/bottleneck?line=${(a.line as string) ?? "L01"}`,
+      semanticTags: ["schedule_attainment"],
     }),
 
     // 5. 产能利用率
@@ -113,6 +117,7 @@ export function registerScheduleTools(): import("../../../../src/tools/base.js")
       system: "ERP",
       provenance: (a) => `/erp/schedule/capacity?line=${(a.line as string) ?? "L01"}&week=current`,
       freshness: "weekly",
+      semanticTags: ["schedule_attainment"],
     }),
 
     // 6. CT vs Takt
@@ -134,6 +139,7 @@ export function registerScheduleTools(): import("../../../../src/tools/base.js")
       },
       system: "MES",
       provenance: (a) => `/mes/schedule/ct_vs_takt?line=${(a.line as string) ?? "L01"}`,
+      semanticTags: ["schedule_attainment"],
     }),
 
     // 7. 工单队列
@@ -156,6 +162,7 @@ export function registerScheduleTools(): import("../../../../src/tools/base.js")
       },
       system: "ERP",
       provenance: (a) => `/erp/schedule/queue?line=${(a.line as string) ?? "L01"}`,
+      semanticTags: ["schedule_attainment"],
     }),
 
     // 8. 排产建议
@@ -180,6 +187,7 @@ export function registerScheduleTools(): import("../../../../src/tools/base.js")
       system: "ERP",
       provenance: (a) => `/erp/schedule/suggest?line=${(a.line as string) ?? "L01"}`,
       confidence: "inferred",
+      semanticTags: ["schedule_attainment"],
     }),
   ];
 }

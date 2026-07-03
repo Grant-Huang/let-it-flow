@@ -36,6 +36,7 @@ export function registerPersonnelTools(): import("../../../../src/tools/base.js"
       provenance: (a) => `/hr/personnel/skill_matrix?line=${(a.line as string) ?? "L01"}`,
       freshness: "weekly",
       confidence: "measured",
+      semanticTags: ["personnel_skill"],
     }),
 
     // 2. 班次人员配置
@@ -59,6 +60,7 @@ export function registerPersonnelTools(): import("../../../../src/tools/base.js"
       system: "HR",
       provenance: (a) => `/hr/personnel/by_shift?line=${(a.line as string) ?? "L01"}`,
       freshness: "weekly",
+      semanticTags: ["personnel_skill", "shift_deviation"],
     }),
 
     // 3. 考勤数据
@@ -96,6 +98,7 @@ export function registerPersonnelTools(): import("../../../../src/tools/base.js"
       provenance: (a) => `/hr/personnel/attendance?line=${(a.line as string) ?? "L01"}&today=true`,
       freshness: "daily",
       confidence: "measured",
+      semanticTags: ["personnel_skill", "shift_deviation"],
     }),
 
     // 4. 疲劳评分
@@ -142,6 +145,7 @@ export function registerPersonnelTools(): import("../../../../src/tools/base.js"
       provenance: (a) => `/hr/personnel/fatigue?line=${(a.line as string) ?? "L01"}&today=true`,
       freshness: "shift",
       confidence: "inferred",
+      semanticTags: ["personnel_skill", "shift_deviation"],
     }),
   ];
 }

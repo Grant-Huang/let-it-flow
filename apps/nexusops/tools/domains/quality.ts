@@ -75,6 +75,7 @@ export function registerQualityTools(): import("../../../../src/tools/base.js").
       },
       system: SYSTEM,
       provenance: (a) => `/mom/quality/defect_rate?line=${(a.line as string) ?? "L01"}&today=true`,
+      semanticTags: ["defect_rate"],
     }),
 
     // 2. 缺陷帕累托
@@ -91,6 +92,7 @@ export function registerQualityTools(): import("../../../../src/tools/base.js").
       system: SYSTEM,
       provenance: (a) => `/mom/quality/pareto?line=${(a.line as string) ?? "L01"}&window=7d`,
       freshness: "daily",
+      semanticTags: ["defect_rate"],
     }),
 
     // 3. SPC 统计过程控制（30 样本 + Nelson 判异规则）
@@ -142,6 +144,7 @@ export function registerQualityTools(): import("../../../../src/tools/base.js").
       },
       system: SYSTEM,
       provenance: (a) => `/mom/quality/spc?line=${(a.line as string) ?? "L01"}&dim=${(a.dimensionIndex as number) ?? 0}`,
+      semanticTags: ["spc_samples"],
     }),
 
     // 4. 过程能力（Cp/Cpk）
@@ -161,6 +164,7 @@ export function registerQualityTools(): import("../../../../src/tools/base.js").
       },
       system: SYSTEM,
       provenance: (a) => `/mom/quality/capability?line=${(a.line as string) ?? "L01"}`,
+      semanticTags: ["process_capability"],
     }),
 
     // 5. 首次合格率 FPY
@@ -176,6 +180,7 @@ export function registerQualityTools(): import("../../../../src/tools/base.js").
       },
       system: SYSTEM,
       provenance: (a) => `/mom/quality/fpy?line=${(a.line as string) ?? "L01"}&today=true`,
+      semanticTags: ["defect_rate"],
     }),
 
     // 6. 报废分析
@@ -196,6 +201,7 @@ export function registerQualityTools(): import("../../../../src/tools/base.js").
       },
       system: "ERP",
       provenance: (a) => `/erp/quality/scrap?line=${(a.line as string) ?? "L01"}&today=true`,
+      semanticTags: ["defect_rate", "cost_summary"],
     }),
 
     // 7. 返工分析
@@ -217,6 +223,7 @@ export function registerQualityTools(): import("../../../../src/tools/base.js").
       },
       system: "MOM",
       provenance: (a) => `/mom/quality/rework?line=${(a.line as string) ?? "L01"}&today=true`,
+      semanticTags: ["defect_rate", "cost_summary"],
     }),
 
     // 8. 检验记录
@@ -236,6 +243,7 @@ export function registerQualityTools(): import("../../../../src/tools/base.js").
       },
       system: "MOM",
       provenance: (a) => `/mom/quality/inspection?line=${(a.line as string) ?? "L01"}`,
+      semanticTags: ["defect_rate"],
     }),
 
     // 9. 5M1E 根因框架（布尔标签版，轻量快速判定）
@@ -261,6 +269,7 @@ export function registerQualityTools(): import("../../../../src/tools/base.js").
       system: "MOM",
       provenance: (a) => `/mom/quality/5m1e?line=${(a.line as string) ?? "L01"}`,
       confidence: "inferred",
+      semanticTags: ["causal_chain"],
     }),
 
     // 10. 5Why 根因追问
@@ -292,6 +301,7 @@ export function registerQualityTools(): import("../../../../src/tools/base.js").
       system: "MOM",
       provenance: (a) => `/mom/quality/5why?line=${(a.line as string) ?? "L01"}`,
       confidence: "inferred",
+      semanticTags: ["causal_chain"],
     }),
 
     // 11. 鱼骨图（5M1E 带证据完整版）
@@ -327,6 +337,7 @@ export function registerQualityTools(): import("../../../../src/tools/base.js").
       system: "MOM",
       provenance: (a) => `/mom/quality/fishbone?line=${(a.line as string) ?? "L01"}`,
       confidence: "inferred",
+      semanticTags: ["causal_chain"],
     }),
 
     // 12. Sigma 水平（6Sigma DMAIC M 阶段核心指标）
@@ -367,6 +378,7 @@ export function registerQualityTools(): import("../../../../src/tools/base.js").
       provenance: (a) => `/mom/quality/sigma_level?line=${(a.line as string) ?? "L01"}`,
       freshness: "daily",
       confidence: "inferred",
+      semanticTags: ["process_capability", "six_sigma_level"],
     }),
 
     // 13. DPMO 趋势（按缺陷类型分解的百万机会缺陷数）
@@ -414,6 +426,33 @@ export function registerQualityTools(): import("../../../../src/tools/base.js").
       provenance: (a) => `/mom/quality/dpmo?line=${(a.line as string) ?? "L01"}&window=7d`,
       freshness: "daily",
       confidence: "inferred",
+      semanticTags: ["defect_rate", "six_sigma_level"],
+    }),
+
+    // 13. 量具校准状态 + MSA（QS16949 五大核心工具之一，符合性评估用）
+    createQueryTool({
+      name: "quality.calibration",
+      description:
+        "查量具校准状态 + MSA（测量系统分析）。返回各量具的校准有效期、MSA 合格判定（GR&R ≤ 10% 合格 / 10-30% 条件接受 / >30% 不合格）。QS16949 内审符合性评估时调用。",
+      triggers: ["校准", "量具", "MSA", "GR&R", "gage R&R", "测量系统分析", "calibration"],
+      notFor: ["过程能力 Cpk（走 quality.cp_cpk）", "缺陷率（走 quality.defect_rate）"],
+      inputSchema: { type: "object", properties: { line: { type: "string" } } },
+      getData: (ctx) => {
+        const line = (ctx.line as string) ?? "L01";
+        return {
+          gages: [
+            { id: `${line}-G01`, name: "数显卡尺 0-150mm", calibrationDue: "2026-09-15", status: "valid", msaGrr: 7.2, msaVerdict: "acceptable" },
+            { id: `${line}-G02`, name: "千分尺 0-25mm", calibrationDue: "2026-06-30", status: "expiring_soon", msaGrr: 12.5, msaVerdict: "conditional" },
+            { id: `${line}-G03`, name: "高度尺", calibrationDue: "2026-03-01", status: "expired", msaGrr: 34.1, msaVerdict: "unacceptable" },
+          ],
+          summary: { total: 3, valid: 1, expiringSoon: 1, expired: 1, msaPassRate: 0.33 },
+        };
+      },
+      system: "EAM",
+      provenance: (a) => `/eam/quality/calibration?line=${(a.line as string) ?? "L01"}`,
+      freshness: "daily",
+      confidence: "inferred",
+      semanticTags: ["calibration_status"],
     }),
   ];
 }

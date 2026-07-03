@@ -26,6 +26,29 @@ export interface McpServerConfig {
   url?: string;
   /** 启动后等待就绪的超时 ms（缺省 10000）。 */
   timeoutMs?: number;
+  /**
+   * catalog 模式配置（大目录型 server 启用预热缓存）。
+   *
+   * 对 07-mestar-integration-spec.md：当 server 暴露的是"目录检索型"工具
+   * （如 mestar.catalog.search + 几千个候选），启用本字段后 boot 时走
+   * McpCatalogCache 预热（分页拉取 + 派生 semanticTags + 分桶缓存），
+   * 而非全量注册为 FlowConnector（避免 context 爆炸）。
+   *
+   * 缺省（不填或 enabled=false）走现有 registerMcpServerTools 全量注册路径。
+   */
+  catalog?: {
+    /** 是否启用 catalog 模式。 */
+    enabled: boolean;
+    /** 预热时每次 catalog.search 的 pageSize（缺省 200）。 */
+    pageSize?: number;
+    /** 缓存刷新间隔 ms（缺省 24 小时）。 */
+    refreshMs?: number;
+    /**
+     * Embedding 模型标识（供 EmbeddingToolRouter 使用）。
+     * 缺省走 nexus_review 调用点；可指定 "openai:text-embedding-3-small" 等。
+     */
+    embeddingModel?: string;
+  };
 }
 
 /** MCP 工具清单项。 */

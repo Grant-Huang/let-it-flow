@@ -1,8 +1,9 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { StreamState } from "@meso.ai/types";
 import { ArtifactPaneShell, ArtifactPanel } from "@meso.ai/ui";
 import { extractArtifacts, inferLabel, isHtmlArtifact } from "../lib/artifacts.js";
 import { DiagnosisPanel } from "./DiagnosisPanel.js";
+import { ReportSolidifyEditor } from "./ReportSolidifyEditor.js";
 
 /**
  * NexusOps 产物面板插槽。
@@ -35,7 +36,13 @@ export function ArtifactSlot({ stream, onMcpAction, activeArtifactId, onArtifact
       art.type === "diagnosis" ? (
         <DiagnosisPanel artifact={art} />
       ) : isHtmlArtifact(art.type) ? (
-        <HtmlReportFrame html={art.content} onMcpAction={onMcpAction} />
+        <HtmlReportFrame
+          html={art.content}
+          onMcpAction={onMcpAction}
+          layout={art.layout}
+          reportType={art.reportType}
+          title={art.title}
+        />
       ) : (
         <ArtifactPanel type="code" content={art.content} streaming={!art.ready} />
       )
@@ -59,10 +66,17 @@ export function ArtifactSlot({ stream, onMcpAction, activeArtifactId, onArtifact
 interface HtmlReportFrameProps {
   html: string;
   onMcpAction?: (tool: string, args: Record<string, unknown>) => void;
+  /** 组件布局（来自 skill 输出，固化时回传编辑器）。 */
+  layout?: import("../lib/api.js").ComponentLayout;
+  /** 报告类型标识（固化模板 key）。 */
+  reportType?: string;
+  /** 报告标题。 */
+  title?: string;
 }
 
-function HtmlReportFrame({ html, onMcpAction }: HtmlReportFrameProps) {
+function HtmlReportFrame({ html, onMcpAction, layout, reportType, title }: HtmlReportFrameProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [showEditor, setShowEditor] = useState(false);
 
   useEffect(() => {
     if (!onMcpAction) return;
@@ -77,15 +91,47 @@ function HtmlReportFrame({ html, onMcpAction }: HtmlReportFrameProps) {
   }, [onMcpAction]);
 
   return (
-    <iframe
-      ref={iframeRef}
-      srcDoc={html}
-      style={{ width: "100%", height: "100%", border: "none", borderRadius: 8 }}
-      sandbox="allow-scripts allow-same-origin"
-      title="OEE 诊断报告"
-    />
+    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      {layout && (
+        <div style={{ padding: "6px 10px", borderBottom: "1px solid var(--color-border-light, #334155)", display: "flex", justifyContent: "flex-end" }}>
+          <button style={solidifyBtnStyle} onClick={() => setShowEditor(true)}>
+            固化为模板
+          </button>
+        </div>
+      )}
+      <iframe
+        ref={iframeRef}
+        srcDoc={html}
+        style={{ width: "100%", flex: 1, border: "none", borderRadius: 8 }}
+        sandbox="allow-scripts allow-same-origin"
+        title="OEE 诊断报告"
+      />
+      {showEditor && layout && (
+        <ReportSolidifyEditor
+          layout={layout}
+          reportType={reportType ?? "custom"}
+          title={title ?? "自定义报告"}
+          onClose={() => setShowEditor(false)}
+          onSaved={(rt) => {
+            setShowEditor(false);
+            console.log(`[nexusops] 报表模板已固化：${rt}`);
+          }}
+        />
+      )}
+    </div>
   );
 }
+
+const solidifyBtnStyle: React.CSSProperties = {
+  padding: "4px 12px",
+  borderRadius: 6,
+  border: "1px solid var(--color-border-light, #334155)",
+  background: "transparent",
+  color: "var(--color-accent, #3b82f6)",
+  fontSize: 12,
+  fontWeight: 500,
+  cursor: "pointer",
+};
 
 function EmptyPanel() {
   return (

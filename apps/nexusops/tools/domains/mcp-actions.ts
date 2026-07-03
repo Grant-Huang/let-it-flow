@@ -62,6 +62,7 @@ export function registerMcpActionTools(): FlowConnector[] {
         };
       },
       provenance: (a) => `/mes/schedule/work_order?order=${a.orderId ?? ""}`,
+      semanticTags: ["schedule_attainment"],
     }),
 
     createActionTool({
@@ -90,6 +91,7 @@ export function registerMcpActionTools(): FlowConnector[] {
         sideEffects: { "schedule.changeoverPlanned": true },
       }),
       provenance: (a) => `/mes/changeover?to=${a.toProduct ?? ""}`,
+      semanticTags: ["schedule_attainment", "oee_availability"],
     }),
 
     createActionTool({
@@ -121,6 +123,7 @@ export function registerMcpActionTools(): FlowConnector[] {
         };
       },
       provenance: (a) => `/mes/reallocate?from=${a.fromLine ?? ""}&to=${a.toLine ?? ""}`,
+      semanticTags: ["schedule_attainment"],
     }),
 
     // ── ERP：企业资源计划（物料/采购）──────────────────────────────
@@ -150,6 +153,7 @@ export function registerMcpActionTools(): FlowConnector[] {
         sideEffects: { "material.purchasePending": true },
       }),
       provenance: (a) => `/erp/purchase?mat=${a.materialCode ?? ""}&qty=${a.qty ?? ""}`,
+      semanticTags: ["supply_risk", "wip_level"],
     }),
 
     createActionTool({
@@ -178,6 +182,7 @@ export function registerMcpActionTools(): FlowConnector[] {
         sideEffects: { "material.issued": true },
       }),
       provenance: (a) => `/erp/material/issue?mat=${a.materialCode ?? ""}&qty=${a.qty ?? ""}`,
+      semanticTags: ["wip_level"],
     }),
 
     // ── QMS：质量管理系统 ──────────────────────────────────────────
@@ -207,6 +212,7 @@ export function registerMcpActionTools(): FlowConnector[] {
         sideEffects: { "quality.quarantined": true },
       }),
       provenance: (a) => `/qms/quarantine?batch=${a.batchId ?? ""}`,
+      semanticTags: ["defect_rate"],
     }),
 
     createActionTool({
@@ -235,6 +241,7 @@ export function registerMcpActionTools(): FlowConnector[] {
         sideEffects: { "quality.reworkScheduled": true },
       }),
       provenance: (a) => `/qms/rework?batch=${a.batchId ?? ""}&qty=${a.qty ?? ""}`,
+      semanticTags: ["defect_rate"],
     }),
 
     createActionTool({
@@ -263,6 +270,7 @@ export function registerMcpActionTools(): FlowConnector[] {
         sideEffects: { "quality.scrapped": true, "quality.scrapQty": args.qty },
       }),
       provenance: (a) => `/qms/scrap?batch=${a.batchId ?? ""}&qty=${a.qty ?? ""}`,
+      semanticTags: ["defect_rate"],
     }),
 
     // ── EAM：设备资产管理（维护/停线）──────────────────────────────
@@ -292,6 +300,7 @@ export function registerMcpActionTools(): FlowConnector[] {
         sideEffects: { "equipment.maintenanceScheduled": true },
       }),
       provenance: (a) => `/eam/maintenance?equip=${a.equipmentId ?? ""}&type=${a.type ?? ""}`,
+      semanticTags: ["equipment_reliability"],
     }),
 
     createActionTool({
@@ -320,6 +329,7 @@ export function registerMcpActionTools(): FlowConnector[] {
         sideEffects: { "equipment.spareOrdered": true },
       }),
       provenance: (a) => `/eam/spare?part=${a.partCode ?? ""}&qty=${a.qty ?? ""}`,
+      semanticTags: ["equipment_reliability"],
     }),
 
     createActionTool({
@@ -347,6 +357,7 @@ export function registerMcpActionTools(): FlowConnector[] {
         sideEffects: { "equipment.lineStopped": true, "schedule.attainment": 0 },
       }),
       provenance: (a) => `/eam/stop_line?reason=${encodeURIComponent(String(a.reason ?? ""))}`,
+      semanticTags: ["oee_availability"],
     }),
 
     // ── process：工艺参数执行 ─────────────────────────────────────
@@ -385,6 +396,7 @@ export function registerMcpActionTools(): FlowConnector[] {
         };
       },
       provenance: (a) => `/mom/process/adjust?params=${JSON.stringify(a.parameters ?? {})}`,
+      semanticTags: ["process_deviation"],
     }),
   ];
 }

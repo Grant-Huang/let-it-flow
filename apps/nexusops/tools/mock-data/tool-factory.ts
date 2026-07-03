@@ -45,6 +45,8 @@ export interface DomainToolSpec<TData> {
   caveat?: string;
   /** 风险评级（查询工具缺省 safe，操作工具显式 write/destructive）。 */
   risk?: "safe" | "write" | "destructive";
+  /** 语义标签（D10：描述工具能提供的业务语义，供 ToolResolver 索引查询）。 */
+  semanticTags?: string[];
 }
 
 /**
@@ -96,6 +98,7 @@ export function createQueryTool<TData>(spec: DomainToolSpec<TData>): FlowConnect
       confidence: spec.confidence ?? "measured",
       freshness: spec.freshness ?? "realtime",
     },
+    ...(spec.semanticTags ? { semanticTags: spec.semanticTags } : {}),
 
     async *execute(
       args: Record<string, unknown>,
@@ -178,6 +181,8 @@ export interface ActionToolSpec {
   ticketPrefix: string;
   /** 数据时效性（缺省 realtime）。 */
   freshness?: EvidenceEnvelope["freshness"];
+  /** 语义标签（D10：描述工具能提供的业务语义）。 */
+  semanticTags?: string[];
 }
 
 /**
@@ -237,6 +242,7 @@ export function createActionTool(spec: ActionToolSpec): FlowConnector {
       confidence: "inferred",
       freshness: spec.freshness ?? "realtime",
     },
+    ...(spec.semanticTags ? { semanticTags: spec.semanticTags } : {}),
 
     async *execute(
       args: Record<string, unknown>,

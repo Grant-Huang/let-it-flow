@@ -1,4 +1,5 @@
 import type { StreamState } from "@meso.ai/types";
+import type { ComponentLayout } from "../../../../../src/orchestrator/report-types.js";
 
 /**
  * 从 StreamState 提取 NexusOps 产物。
@@ -29,6 +30,10 @@ export interface NexusArtifact {
   ruledOut?: string[];
   /** 置信度 0-1 */
   confidence?: number;
+  /** 报告类型标识（html_report 用，匹配固化模板 key） */
+  reportType?: string;
+  /** 组件布局序列（html_report 用，固化模板时回传给前端编辑器） */
+  layout?: ComponentLayout;
 }
 
 /**
@@ -157,16 +162,24 @@ function parseHtmlReportOutput(tc: ToolCallLike): NexusArtifact | null {
   }
   try {
     const obj = JSON.parse(tc.result.output ?? "{}") as {
-      data?: { html?: string; _isHtmlReport?: boolean; reportType?: string };
+      data?: {
+        html?: string;
+        _isHtmlReport?: boolean;
+        reportType?: string;
+        layout?: ComponentLayout;
+      };
     };
     const html = obj.data?.html ?? tc.result.output ?? "";
-    const title = reportTitleByType(obj.data?.reportType);
+    const reportType = obj.data?.reportType;
+    const title = reportTitleByType(reportType);
     return {
       id: tc.call.id,
       type: "html_report",
       title,
       content: html,
       ready: true,
+      reportType,
+      layout: obj.data?.layout,
     };
   } catch {
     return {

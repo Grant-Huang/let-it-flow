@@ -15,6 +15,7 @@ import { createApp } from "../../../src/api/app.js";
 import { TaskRegistry } from "../../../src/tasks/registry.js";
 import { getDataDir, resolveAppDataDir } from "../../../src/core/config.js";
 import { bootNexusOps } from "./boot.js";
+import { createReportTemplatesApp } from "./api-report-templates.js";
 
 async function main(): Promise<void> {
   // 每个 App 默认用独立 dataDir（./data/nexusops），实现 tasks/config 历史会话隔离；
@@ -26,6 +27,9 @@ async function main(): Promise<void> {
 
   // 复用平台 createApp，挂载全部 /api/* 路由
   const app = createApp(registry);
+
+  // 应用层路由：报表固化模板（依赖 NexusRuntime.skillRegistry）
+  app.route("/api/report-templates", createReportTemplatesApp(runtime.skillRegistry));
 
   const port = Number(process.env.NEXUS_PORT ?? process.env.PORT ?? "8788");
   const toolCount = runtime.toolRegistry.list().length;
@@ -46,6 +50,7 @@ async function main(): Promise<void> {
     console.log(`  POST /api/tasks/:id/clarify  (Guardrail 澄清)`);
     console.log(`  GET  /api/tools          （工具清单）`);
     console.log(`  *   /api/config/*        （模型/绑定/系统配置）`);
+    console.log(`  *   /api/report-templates/* （报表固化模板 CRUD）`);
   });
 }
 

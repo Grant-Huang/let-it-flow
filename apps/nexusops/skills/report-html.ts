@@ -11,20 +11,19 @@
  */
 import { createSkill } from "../../../src/agent/skill-bridge.js";
 import { wrapEvidence, type EvidenceEnvelope } from "../../../src/core/evidence-envelope.js";
+import {
+  escapeHtml,
+  pct,
+  colorByThreshold,
+  type PhaseCardData,
+} from "./report-components.js";
+import { renderReport } from "./report-renderer.js";
+import type { ComponentLayout, ComponentInstance } from "../../../src/orchestrator/report-types.js";
 
 /** 从工具返回结果（ToolResult.output）中解包 EvidenceEnvelope.data。 */
 function unpack<T>(env: unknown): T {
   const e = env as EvidenceEnvelope<T>;
   return e.data;
-}
-
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
 }
 
 /** 报告类型。 */
@@ -39,95 +38,6 @@ interface Recommendation {
   actionTool?: string;
   actionArgs?: Record<string, unknown>;
 }
-
-/** 共享 CSS（所有模板复用）。 */
-const SHARED_CSS = `
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f172a; color: #e2e8f0; font-size: 14px; line-height: 1.5; padding: 16px; }
-  h2 { font-size: 16px; font-weight: 600; color: #f1f5f9; margin-bottom: 12px; }
-  h3 { font-size: 13px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
-  .section { background: #1e293b; border-radius: 10px; padding: 16px; margin-bottom: 12px; border: 1px solid #334155; }
-  .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
-  .kpi-card { background: #0f172a; border-radius: 8px; padding: 12px; text-align: center; border: 1px solid #334155; }
-  .kpi-label { font-size: 11px; color: #64748b; margin-bottom: 4px; }
-  .kpi-value { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
-  .kpi-target { font-size: 10px; color: #475569; margin-top: 2px; }
-  .trend-svg { width: 100%; height: 90px; display: block; }
-  table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  th { text-align: left; color: #64748b; padding: 6px 8px; border-bottom: 1px solid #334155; font-weight: 500; }
-  td { padding: 7px 8px; border-bottom: 1px solid #1e293b; vertical-align: top; }
-  tr:last-child td { border-bottom: none; }
-  .badge { display: inline-block; font-size: 10px; padding: 2px 7px; border-radius: 99px; font-weight: 600; }
-  .badge-tool { background: #1e3a5f; color: #60a5fa; }
-  .badge-action { background: #14532d; color: #4ade80; margin-left: 6px; }
-  .badge-warn { background: #451a03; color: #fb923c; }
-  .badge-phase { background: #1e3a5f; color: #60a5fa; padding: 3px 9px; font-size: 11px; }
-  .badge-status-ready { background: #14532d; color: #4ade80; }
-  .badge-status-blocked { background: #451a03; color: #fb923c; }
-  .tree { font-size: 13px; line-height: 2; }
-  .tree-root { color: #f87171; font-weight: 600; padding-left: 0; }
-  .tree-layer { color: #94a3b8; padding-left: 20px; position: relative; }
-  .tree-layer::before { content: "└ "; color: #475569; position: absolute; left: 4px; }
-  .aux-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-  .aux-tag { background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 3px 10px; font-size: 12px; color: #94a3b8; }
-  .confidence-bar { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
-  .conf-label { font-size: 12px; color: #64748b; width: 60px; }
-  .bar-bg { flex: 1; height: 6px; background: #1e293b; border-radius: 3px; overflow: hidden; }
-  .bar-fill { height: 100%; border-radius: 3px; }
-  .conf-val { font-size: 12px; color: #94a3b8; width: 36px; text-align: right; font-variant-numeric: tabular-nums; }
-  .rec-card { background: #0f172a; border-radius: 8px; padding: 12px; margin-bottom: 8px; border: 1px solid #334155; }
-  .rec-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-  .rec-idx { font-size: 11px; color: #475569; font-weight: 600; }
-  .rec-title { font-size: 13px; font-weight: 600; color: #f1f5f9; flex: 1; }
-  .rec-rationale { font-size: 12px; color: #94a3b8; margin-bottom: 8px; }
-  .rec-metrics { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
-  .metric-bar { display: flex; align-items: center; gap: 6px; }
-  .metric-label { font-size: 11px; color: #64748b; width: 40px; }
-  .metric-val { font-size: 11px; color: #94a3b8; width: 32px; text-align: right; font-variant-numeric: tabular-nums; }
-  .action-btn { background: #1d4ed8; color: #fff; border: none; border-radius: 6px; padding: 7px 14px; font-size: 12px; cursor: pointer; font-weight: 500; transition: background 0.15s; }
-  .action-btn:hover { background: #2563eb; }
-  .header-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
-  .report-title { font-size: 18px; font-weight: 700; color: #f1f5f9; }
-  .report-meta { font-size: 11px; color: #475569; }
-  .phase-card { background: #0f172a; border-radius: 8px; padding: 14px; margin-bottom: 10px; border: 1px solid #334155; border-left: 3px solid #3b82f6; }
-  .phase-header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-  .phase-name { font-size: 14px; font-weight: 600; color: #f1f5f9; flex: 1; }
-  .phase-objective { font-size: 12px; color: #94a3b8; margin-bottom: 8px; font-style: italic; }
-  .phase-detail { font-size: 12px; color: #cbd5e1; line-height: 1.6; }
-  .phase-detail strong { color: #f1f5f9; }
-  .sigma-gap { background: #0f172a; border-radius: 8px; padding: 12px; border: 1px solid #334155; margin-top: 8px; }
-`;
-
-/** 构造完整的 HTML 外壳（共享）。 */
-function buildHtmlShell(title: string, bodyHtml: string, line: string, scenarioId: string): string {
-  const meta = `${line} · 场景：${scenarioId} · ${new Date().toLocaleString("zh-CN", { hour12: false })}`;
-  return `<!DOCTYPE html>
-<html lang="zh">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${escapeHtml(title)}</title>
-<style>${SHARED_CSS}</style>
-</head>
-<body>
-<div class="header-row">
-  <div class="report-title">${escapeHtml(title)}</div>
-  <div class="report-meta">${meta}</div>
-</div>
-${bodyHtml}
-<script>
-  window.addEventListener('message', function(e) {
-    if (e.data && e.data.type === 'nexus_mcp') {
-      window.parent.postMessage(e.data, '*');
-    }
-  });
-</script>
-</body>
-</html>`;
-}
-
-/** 颜色阈值辅助（OEE 模板用）。 */
-const color = (v: number, threshold = 0.8) => (v >= threshold ? "#22c55e" : v >= 0.65 ? "#f59e0b" : "#ef4444");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // OEE 模板（原有逻辑，保持测试契约：含 "OEE 综合诊断报告" + "证据链"）
@@ -150,18 +60,12 @@ interface OeeTemplateData {
   recs: Recommendation[];
 }
 
-function buildOeeBodyHtml(d: OeeTemplateData): string {
-  const pct = (v: number) => `${(v * 100).toFixed(1)}%`;
-
+function buildOeeLayout(d: OeeTemplateData): ComponentLayout {
   const trend7d = Array.from({ length: 7 }, (_, i) => {
     const t = i / 6;
     const v = d.target * (1 - t * (1 - d.oee / d.target));
-    return (v * 100).toFixed(1);
+    return Number((v * 100).toFixed(1));
   });
-
-  const svgPoints = trend7d
-    .map((v, i) => `${(i / 6) * 220},${80 - (parseFloat(v) / 100) * 70}`)
-    .join(" ");
 
   const evidenceRows = [
     { tool: "oee.realtime", data: `OEE=${pct(d.oee)}，目标=${pct(d.target)}`, step: "基础指标" },
@@ -173,130 +77,70 @@ function buildOeeBodyHtml(d: OeeTemplateData): string {
       : { tool: "quality.five_why", data: "无已识别因果链（normal 场景）", step: "因果链取证" },
   ];
 
-  const recsHtml = d.recs.length === 0
-    ? `<p style="color:#6b7280;font-size:13px;">暂无结构化建议（请先调用 nexus_advise 生成建议）</p>`
-    : d.recs.map((rec, i) => {
-        const hasAction = typeof rec.actionTool === "string" && rec.actionTool;
-        const argsJson = rec.actionArgs ? JSON.stringify(rec.actionArgs) : "{}";
-        const impactPct = Math.round((rec.impact ?? 0) * 100);
-        const execPct = Math.round((rec.executionScore ?? 0) * 100);
-        return `
-      <div class="rec-card">
-        <div class="rec-header">
-          <span class="rec-idx">#${i + 1}</span>
-          <span class="rec-title">${escapeHtml(rec.title ?? "建议")}</span>
-          ${hasAction ? `<span class="badge badge-action">可执行</span>` : ""}
-        </div>
-        <div class="rec-rationale">${escapeHtml(rec.rationale ?? "")}</div>
-        <div class="rec-metrics">
-          <div class="metric-bar">
-            <span class="metric-label">影响度</span>
-            <div class="bar-bg"><div class="bar-fill" style="width:${impactPct}%;background:#3b82f6"></div></div>
-            <span class="metric-val">${impactPct}%</span>
-          </div>
-          <div class="metric-bar">
-            <span class="metric-label">执行度</span>
-            <div class="bar-bg"><div class="bar-fill" style="width:${execPct}%;background:#8b5cf6"></div></div>
-            <span class="metric-val">${execPct}%</span>
-          </div>
-        </div>
-        ${hasAction
-          ? `
-        <button class="action-btn" onclick="window.parent.postMessage({type:'nexus_mcp',tool:'${rec.actionTool}',args:${argsJson}},'*')">
-          ▶ 执行：${escapeHtml(rec.actionTool ?? "")}
-        </button>`
-          : ""}
-      </div>`;
-      }).join("");
+  const fishboneBranches: Array<{ dimension: string; factors: string[] }> = [];
+  if (d.auxiliaryFactors.length > 0) {
+    fishboneBranches.push({ dimension: "辅助因素", factors: d.auxiliaryFactors });
+  }
 
-  return `
-<div class="section">
-  <h3>KPI 概览</h3>
-  <div class="kpi-grid">
-    <div class="kpi-card">
-      <div class="kpi-label">综合 OEE</div>
-      <div class="kpi-value" style="color:${color(d.oee, d.target * 0.95)}">${pct(d.oee)}</div>
-      <div class="kpi-target">目标 ${pct(d.target)}</div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-label">可用率</div>
-      <div class="kpi-value" style="color:${color(d.availability)}">${pct(d.availability)}</div>
-      <div class="kpi-target">停机 ${d.eq.downtimeCount} 起</div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-label">性能率</div>
-      <div class="kpi-value" style="color:${color(d.performance)}">${pct(d.performance)}</div>
-      <div class="kpi-target">MTBF ${d.eq.mtbfHours}h</div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-label">质量率</div>
-      <div class="kpi-value" style="color:${color(d.quality)}">${pct(d.quality)}</div>
-      <div class="kpi-target">不良率 ${pct(d.q.defectRate)}</div>
-    </div>
-  </div>
-</div>
+  const components: ComponentInstance[] = [
+    {
+      name: "kpi-grid",
+      data: {
+        cards: [
+          { label: "综合 OEE", value: pct(d.oee), target: `目标 ${pct(d.target)}`, color: colorByThreshold(d.oee, d.target * 0.95) },
+          { label: "可用率", value: pct(d.availability), target: `停机 ${d.eq.downtimeCount} 起`, color: colorByThreshold(d.availability) },
+          { label: "性能率", value: pct(d.performance), target: `MTBF ${d.eq.mtbfHours}h`, color: colorByThreshold(d.performance) },
+          { label: "质量率", value: pct(d.quality), target: `不良率 ${pct(d.q.defectRate)}`, color: colorByThreshold(d.quality) },
+        ],
+      },
+      wrapper: { type: "section", title: "KPI 概览" },
+    },
+    {
+      name: "trend-svg",
+      data: { points: trend7d, target: d.target * 100, label: "-6d  -5d  -4d  -3d  -2d  昨  今" },
+      wrapper: { type: "section", title: "OEE 7 日趋势" },
+    },
+    {
+      name: "evidence-table",
+      data: { rows: evidenceRows },
+      wrapper: { type: "section", title: "证据链" },
+    },
+    {
+      name: "root-cause-tree",
+      data: { rootCause: d.primaryRootCause, layers: d.cc.layers },
+      wrapper: { type: "section", title: "根因分析" },
+    },
+  ];
 
-<div class="section">
-  <h3>OEE 7 日趋势</h3>
-  <svg class="trend-svg" viewBox="0 0 240 90" preserveAspectRatio="none">
-    <defs>
-      <linearGradient id="tg" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.3"/>
-        <stop offset="100%" stop-color="#3b82f6" stop-opacity="0"/>
-      </linearGradient>
-    </defs>
-    <line x1="0" y1="${80 - (d.target * 100 / 100) * 70}" x2="240" y2="${80 - (d.target * 100 / 100) * 70}" stroke="#334155" stroke-width="1" stroke-dasharray="4 3"/>
-    <text x="2" y="${78 - (d.target * 100 / 100) * 70}" font-size="8" fill="#475569">目标 ${pct(d.target)}</text>
-    <polyline points="${svgPoints}" fill="none" stroke="#3b82f6" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-    <circle cx="220" cy="${80 - parseFloat(trend7d[6]!) * 0.7}" r="3" fill="#3b82f6"/>
-  </svg>
-  <div style="display:flex;justify-content:space-between;font-size:10px;color:#475569;margin-top:4px">
-    <span>-6d</span><span>-5d</span><span>-4d</span><span>-3d</span><span>-2d</span><span>昨</span><span>今</span>
-  </div>
-</div>
+  // 辅助因素（鱼骨图摘要），非空才追加
+  if (fishboneBranches.length > 0) {
+    components.push({ name: "fishbone-summary", data: { branches: fishboneBranches } });
+  }
 
-<div class="section">
-  <h3>证据链</h3>
-  <table>
-    <thead><tr><th>工具</th><th>关键数据</th><th>推理步骤</th></tr></thead>
-    <tbody>
-      ${evidenceRows.map((r) => `
-      <tr>
-        <td><span class="badge badge-tool">${r.tool}</span></td>
-        <td style="color:#cbd5e1">${r.data}</td>
-        <td style="color:#64748b">${r.step}</td>
-      </tr>`).join("")}
-    </tbody>
-  </table>
-</div>
+  components.push({
+    name: "confidence-bar",
+    data: { label: "置信度", value: d.confidence },
+  });
 
-<div class="section">
-  <h3>根因分析</h3>
-  <div class="tree">
-    <div class="tree-root">根因：${escapeHtml(d.primaryRootCause)}</div>
-    ${d.cc.layers.map((layer, i) => `<div class="tree-layer" style="padding-left:${(i + 1) * 18}px">${escapeHtml(layer)}</div>`).join("")}
-  </div>
-  ${d.auxiliaryFactors.length > 0
-    ? `
-  <div style="margin-top:12px">
-    <div style="font-size:12px;color:#64748b;margin-bottom:6px">辅助因素</div>
-    <div class="aux-list">
-      ${d.auxiliaryFactors.map((f) => `<span class="aux-tag">${escapeHtml(f)}</span>`).join("")}
-    </div>
-  </div>`
-    : ""}
-  <div class="confidence-bar">
-    <span class="conf-label">置信度</span>
-    <div class="bar-bg"><div class="bar-fill" style="width:${Math.round(d.confidence * 100)}%;background:${d.confidence > 0.7 ? "#22c55e" : d.confidence > 0.5 ? "#f59e0b" : "#ef4444"}"></div></div>
-    <span class="conf-val">${Math.round(d.confidence * 100)}%</span>
-  </div>
-  ${d.mechanismExplained ? `<div style="margin-top:10px;font-size:12px;color:#64748b;line-height:1.6">机制路径：<span style="color:#94a3b8">${escapeHtml(d.mechanismExplained)}</span></div>` : ""}
-</div>
+  // 机制路径（非空才追加为文本块）
+  if (d.mechanismExplained) {
+    components.push({
+      name: "text-block",
+      data: { text: `机制路径：${d.mechanismExplained}`, variant: "muted" },
+    });
+  }
 
-<div class="section">
-  <h3>改善建议</h3>
-  ${recsHtml}
-</div>`;
+  components.push({
+    name: "recommendation-list",
+    data: { recommendations: d.recs, emptyText: "暂无结构化建议（请先调用 nexus_advise 生成建议）" },
+    wrapper: { type: "section", title: "改善建议" },
+  });
+
+  return {
+    reportType: "oee",
+    title: "OEE 综合诊断报告",
+    components,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -311,140 +155,129 @@ interface DmaicTemplateData {
   reasoningChain: Array<{ step: number; action: string; tool: string; finding: string; inference: string }>;
 }
 
-function buildDmaicBodyHtml(d: DmaicTemplateData): string {
-  const pct = (v: number) => `${(v * 100).toFixed(1)}%`;
+function buildDmaicLayout(d: DmaicTemplateData): ComponentLayout {
   const zLt = d.measure.sigmaLt;
   const sigmaGap = Math.max(0, 4 - zLt);
   const priorityColor = zLt < 2 ? "#ef4444" : zLt < 3 ? "#f59e0b" : "#22c55e";
   const priorityLabel = zLt < 2 ? "critical" : zLt < 3 ? "high" : "medium";
   const duration = zLt < 2 ? "3-6 个月" : zLt < 3 ? "2-4 个月" : "1-3 个月";
-
   const sigmaBadgeColor = zLt >= 4 ? "#22c55e" : zLt >= 3 ? "#f59e0b" : "#ef4444";
 
-  const phaseStatusBadge = (status: string) =>
-    `<span class="badge badge-status-${status === "ready" ? "ready" : "blocked"}">${status === "ready" ? "就绪" : "阻塞（待数据）"}</span>`;
-
-  const phaseCard = (
-    phase: string,
-    name: string,
-    objective: string,
-    detailHtml: string,
-    status: string,
-  ) => `
-    <div class="phase-card">
-      <div class="phase-header">
-        <span class="badge badge-phase">${phase}</span>
-        <span class="phase-name">${escapeHtml(name)}</span>
-        ${phaseStatusBadge(status)}
-      </div>
-      <div class="phase-objective">${escapeHtml(objective)}</div>
-      <div class="phase-detail">${detailHtml}</div>
-    </div>`;
-
-  const D = phaseCard(
-    "D", "Define（定义）",
-    "明确改善课题的范围、目标、财务收益",
-    `<strong>课题陈述：</strong>${d.analyze.hasCausalChain ? escapeHtml(d.analyze.rootCause) : `OEE=${pct(d.define.oee)}，Cpk=${d.define.cpk.toFixed(2)}，存在改善空间`}<br>
+  const D: PhaseCardData = {
+    phase: "D", name: "Define（定义）",
+    objective: "明确改善课题的范围、目标、财务收益",
+    detailHtml: `<strong>课题陈述：</strong>${d.analyze.hasCausalChain ? escapeHtml(d.analyze.rootCause) : `OEE=${pct(d.define.oee)}，Cpk=${d.define.cpk.toFixed(2)}，存在改善空间`}<br>
      <strong>目标：</strong>OEE 从 ${pct(d.define.oee)} 提升至 ${pct(d.define.target)}，Cpk 从 ${d.define.cpk.toFixed(2)} 提升至 ≥1.33<br>
      <strong>财务收益：</strong>预计日节约 ${Math.round(d.define.totalLossCost * 0.3)} 元（假设改善 30% 损失）`,
-    "ready",
-  );
+    status: "ready",
+  };
 
-  const M = phaseCard(
-    "M", "Measure（测量）",
-    "量化当前过程的基线表现",
-    `<strong>基线指标：</strong>不良率 ${pct(d.measure.defectRate)}，FPY ${pct(d.measure.fpy)}，报废率 ${pct(d.measure.scrapRate)}<br>
+  const M: PhaseCardData = {
+    phase: "M", name: "Measure（测量）",
+    objective: "量化当前过程的基线表现",
+    detailHtml: `<strong>基线指标：</strong>不良率 ${pct(d.measure.defectRate)}，FPY ${pct(d.measure.fpy)}，报废率 ${pct(d.measure.scrapRate)}<br>
      <strong>过程能力：</strong>Cpk=${d.measure.cpk.toFixed(2)}，DPMO=${d.measure.dpmo}<br>
      <strong>长期 σ：</strong>${d.measure.sigmaLt}（目标 4）`,
-    "ready",
-  );
+    status: "ready",
+  };
 
-  const A = phaseCard(
-    "A", "Analyze（分析）",
-    "识别根本原因，建立缺陷与输入变量的因果关系",
-    d.analyze.hasCausalChain
+  const A: PhaseCardData = {
+    phase: "A", name: "Analyze（分析）",
+    objective: "识别根本原因，建立缺陷与输入变量的因果关系",
+    detailHtml: d.analyze.hasCausalChain
       ? `<strong>方法：</strong>5Why + 鱼骨图<br><strong>根因：</strong>${escapeHtml(d.analyze.rootCause)}<br><strong>机制路径：</strong>${escapeHtml(d.analyze.mechanismPath)}<br><strong>鱼骨首要嫌疑：</strong>${escapeHtml(d.analyze.fishboneTopSuspect)}`
       : `<strong>状态：</strong>当前证据不足以确定根因，需补充现场数据后分析<br><strong>鱼骨首要嫌疑：</strong>${escapeHtml(d.analyze.fishboneTopSuspect)}`,
-    d.analyze.hasCausalChain ? "ready" : "blocked_by_data",
-  );
+    status: d.analyze.hasCausalChain ? "ready" : "blocked_by_data",
+  };
 
-  const I = phaseCard(
-    "I", "Improve（改善）",
-    "实施改善方案，验证效果",
-    d.improve.proposedActions.length === 0
+  const I: PhaseCardData = {
+    phase: "I", name: "Improve（改善）",
+    objective: "实施改善方案，验证效果",
+    detailHtml: d.improve.proposedActions.length === 0
       ? "暂无结构化对策（需 Analyze 阶段完成后组合）"
       : d.improve.proposedActions.map((a) => `• ${escapeHtml(a.action)}（工具：<code>${escapeHtml(a.tool)}</code>，优先级：${escapeHtml(a.priority)}）`).join("<br>"),
-    "ready",
-  );
+    status: "ready",
+  };
 
-  const C = phaseCard(
-    "C", "Control（控制）",
-    "建立监控体系，固化改善成果",
-    `<strong>SPC 监控：</strong>对关键尺寸建立控制图（走 quality.spc）<br>
+  const C: PhaseCardData = {
+    phase: "C", name: "Control（控制）",
+    objective: "建立监控体系，固化改善成果",
+    detailHtml: `<strong>SPC 监控：</strong>对关键尺寸建立控制图（走 quality.spc）<br>
      <strong>标准作业：</strong>更新 SOP + 控制计划（走 process.control_plan）<br>
      <strong>审核频率：</strong>每周审核 Cpk 趋势 + 每月评审 OEE 是否达标<br>
      <strong>反应计划：</strong>Cpk <1.0 触发紧急复检 + 参数回调<br>
      <strong>目标指标：</strong>Cpk=1.33、OEE=${pct(d.define.target)}、FPY=95%、σ=4`,
-    "ready",
-  );
+    status: "ready",
+  };
 
-  const reasoningRows = d.reasoningChain.map((r) => `
-    <tr>
-      <td><span class="badge badge-tool">${escapeHtml(r.tool)}</span></td>
-      <td style="color:#cbd5e1">${escapeHtml(r.finding)}</td>
-      <td style="color:#94a3b8">${escapeHtml(r.inference)}</td>
-    </tr>`).join("");
+  const components: ComponentInstance[] = [
+    {
+      name: "kpi-grid",
+      data: {
+        cards: [
+          { label: "长期 σ 水平", value: d.measure.sigmaLt.toFixed(2), target: "目标 4.0", color: sigmaBadgeColor },
+          { label: "DPMO", value: String(d.measure.dpmo), target: "目标 ≤3.4", color: sigmaBadgeColor },
+          { label: "过程能力 Cpk", value: d.measure.cpk.toFixed(2), target: "目标 ≥1.33", color: colorByThreshold(d.measure.cpk, 1.33) },
+          { label: "距 6Sigma 差距", value: `${sigmaGap.toFixed(2)}σ`, target: `优先级 ${priorityLabel}`, color: priorityColor },
+        ],
+      },
+      wrapper: { type: "section", title: "6Sigma 水平概览" },
+    },
+    {
+      name: "text-block",
+      data: {
+        text: `项目评估：预计周期 ${duration} · 改善优先级 ${priorityLabel}`,
+        variant: "default",
+      },
+      wrapper: { type: "section" },
+    },
+    {
+      name: "phase-card",
+      data: { ...D },
+    },
+    {
+      name: "phase-card",
+      data: { ...M },
+    },
+    {
+      name: "phase-card",
+      data: { ...A },
+    },
+    {
+      name: "phase-card",
+      data: { ...I },
+    },
+    {
+      name: "phase-card",
+      data: { ...C },
+      wrapper: { type: "section", title: "DMAIC 五阶段路线图" },
+    },
+    {
+      name: "reasoning-table",
+      data: { steps: d.reasoningChain },
+      wrapper: { type: "section", title: "推理链" },
+    },
+  ];
 
-  return `
-<div class="section">
-  <h3>6Sigma 水平概览</h3>
-  <div class="kpi-grid">
-    <div class="kpi-card">
-      <div class="kpi-label">长期 σ 水平</div>
-      <div class="kpi-value" style="color:${sigmaBadgeColor}">${d.measure.sigmaLt.toFixed(2)}</div>
-      <div class="kpi-target">目标 4.0</div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-label">DPMO</div>
-      <div class="kpi-value" style="color:${sigmaBadgeColor}">${d.measure.dpmo}</div>
-      <div class="kpi-target">目标 ≤3.4</div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-label">过程能力 Cpk</div>
-      <div class="kpi-value" style="color:${color(d.measure.cpk, 1.33)}">${d.measure.cpk.toFixed(2)}</div>
-      <div class="kpi-target">目标 ≥1.33</div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-label">距 6Sigma 差距</div>
-      <div class="kpi-value" style="color:${priorityColor}">${sigmaGap.toFixed(2)}σ</div>
-      <div class="kpi-target">优先级 ${priorityLabel}</div>
-    </div>
-  </div>
-  <div class="sigma-gap">
-    <div style="font-size:12px;color:#64748b;margin-bottom:4px">项目评估</div>
-    <div style="font-size:13px;color:#cbd5e1">预计周期：<strong style="color:#f1f5f9">${duration}</strong> · 改善优先级：<strong style="color:${priorityColor}">${priorityLabel}</strong></div>
-  </div>
-</div>
-
-<div class="section">
-  <h3>DMAIC 五阶段路线图</h3>
-  ${D}${M}${A}${I}${C}
-</div>
-
-<div class="section">
-  <h3>推理链</h3>
-  <table>
-    <thead><tr><th>工具</th><th>关键发现</th><th>阶段推理</th></tr></thead>
-    <tbody>${reasoningRows}</tbody>
-  </table>
-</div>`;
+  return {
+    reportType: "dmaic",
+    title: "DMAIC 改善路线图",
+    components,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // skill 主体
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function createReportHtmlSkill() {
+/** skill 创建选项。 */
+export interface ReportHtmlSkillOptions {
+  /** 可选的 SkillRegistry（用于报表固化模板匹配：命中 active 模板时走模板路径，0 LLM 调用）。 */
+  skillRegistry?: import("../../../src/agent/skill-registry.js").SkillRegistry;
+}
+
+export function createReportHtmlSkill(opts: ReportHtmlSkillOptions = {}) {
+  const { skillRegistry } = opts;
   return createSkill({
     name: "skill.report_html",
     description:
@@ -501,15 +334,18 @@ export function createReportHtmlSkill() {
         recommendations?: Recommendation[];
       };
 
-      // ── 分派：按 reportType 走不同取数 + 模板分支 ──────────────────────
-      const finalStep = reportType === "dmaic"
-        ? await buildDmaicReport(step, baseParams, line, scenarioId)
-        : await buildOeeReport(step, baseParams, line, scenarioId, a);
+      // ── 模板匹配（Phase 2.2）：命中 active 固化模板时走模板路径（0 LLM 调用） ──
+      const template = skillRegistry?.getReportTemplate(reportType);
+      const finalStep = template
+        ? renderFromTemplate(template.layout, template.title, line, scenarioId, reportType)
+        : reportType === "dmaic"
+          ? await buildDmaicReport(step, baseParams, line, scenarioId)
+          : await buildOeeReport(step, baseParams, line, scenarioId, a);
 
       const html = (finalStep.data as { html: string }).html;
 
       await skillSummary(
-        `报告已生成：${line} ${reportType === "dmaic" ? "DMAIC 改善路线图" : "OEE 诊断"}（HTML ${reportType === "dmaic" ? "含 σ/DPMO 目标 + 五阶段路线图" : "含证据链 + 根因树 + 建议"}）。\n` +
+        `报告已生成：${line} ${reportType === "dmaic" ? "DMAIC 改善路线图" : "OEE 诊断"}（HTML ${reportType === "dmaic" ? "含 σ/DPMO 目标 + 五阶段路线图" : "含证据链 + 根因树 + 建议"}）${template ? "（使用固化模板）" : ""}。\n` +
         `详见 [${reportType === "dmaic" ? "DMAIC 改善路线图" : "OEE 诊断报告"}](#artifact:${selfCallId})。`,
       );
 
@@ -517,6 +353,42 @@ export function createReportHtmlSkill() {
       return finalStep;
     },
   });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 模板路径：渲染固化 ComponentLayout（0 LLM 调用，0 工具取数）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 从固化的 ComponentLayout 模板渲染报告。
+ *
+ * 模板里的 data 字段是占位符（固化时的快照），直接渲染即可。
+ * 未来可扩展为"用当前数据填充占位符"（substitute）。
+ */
+function renderFromTemplate(
+  layout: ComponentLayout,
+  title: string,
+  line: string,
+  scenarioId: string,
+  reportType: ReportType,
+): EvidenceEnvelope {
+  const filledLayout: ComponentLayout = {
+    ...layout,
+    title: title || layout.title,
+    meta: { line, scenarioId },
+  };
+  const html = renderReport(filledLayout);
+  const diagnosis = `${line} 报告（固化模板 ${reportType}）`;
+  return wrapEvidence(
+    { html, _isHtmlReport: true, diagnosis, line, scenarioId, reportType, confidence: 0.7, fromTemplate: true },
+    {
+      freshness: "daily",
+      confidence: "inferred",
+      system: "MOM",
+      provenance: `skill.report_html?line=${line}&reportType=${reportType}&source=template`,
+      caveat: "由固化模板渲染（非实时取数）",
+    },
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -634,11 +506,13 @@ async function buildOeeReport(
       recs,
     };
 
-    const html = buildHtmlShell("OEE 综合诊断报告", buildOeeBodyHtml(templateData), line, scenarioId);
+    const layout = buildOeeLayout(templateData);
+    layout.meta = { line, scenarioId };
+    const html = renderReport(layout);
     const diagnosis = `${line} OEE=${((step1.oee * 100)).toFixed(1)}%，主因：${primaryRootCause}（置信度 ${Math.round(confidence * 100)}%）`;
 
     return wrapEvidence(
-      { html, _isHtmlReport: true, diagnosis, line, scenarioId, confidence, reportType: "oee" },
+      { html, _isHtmlReport: true, diagnosis, line, scenarioId, confidence, reportType: "oee", layout },
       {
         freshness: "realtime",
         confidence: "inferred",
@@ -795,11 +669,13 @@ async function buildDmaicReport(
       reasoningChain,
     };
 
-    const html = buildHtmlShell("DMAIC 改善路线图", buildDmaicBodyHtml(templateData), line, scenarioId);
+    const layout = buildDmaicLayout(templateData);
+    layout.meta = { line, scenarioId };
+    const html = renderReport(layout);
     const diagnosis = `${line} DMAIC：当前 σ=${measurePhase.sigmaLt}（目标 4），${analyzePhase.hasCausalChain ? `根因=${analyzePhase.rootCause}` : "需补数据定位根因"}`;
 
     return wrapEvidence(
-      { html, _isHtmlReport: true, diagnosis, line, scenarioId, reportType: "dmaic", confidence: 0.75 },
+      { html, _isHtmlReport: true, diagnosis, line, scenarioId, reportType: "dmaic", confidence: 0.75, layout },
       {
         freshness: "daily",
         confidence: "inferred",

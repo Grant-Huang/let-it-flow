@@ -181,6 +181,7 @@ export function registerLeanTools(): import("../../../../src/tools/base.js").Flo
       provenance: (a) => `/mom/lean/waste_audit?line=${(a.line as string) ?? "L01"}`,
       freshness: "daily",
       confidence: "inferred",
+      semanticTags: ["waste_audit"],
     }),
 
     // 2. DMAIC 改善项目管理框架
@@ -306,6 +307,7 @@ export function registerLeanTools(): import("../../../../src/tools/base.js").Flo
       provenance: (a) => `/mom/lean/dmaic?line=${(a.line as string) ?? "L01"}`,
       freshness: "daily",
       confidence: "inferred",
+      semanticTags: ["dmaic", "six_sigma_level"],
     }),
   ];
 }

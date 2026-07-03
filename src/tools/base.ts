@@ -144,4 +144,14 @@ export interface FlowConnector<TOutput = unknown> {
     confidence?: Confidence;
     freshness?: Freshness;
   };
+
+  /**
+   * 语义标签（可选，D10 决策落地）。
+   * 描述此工具能提供哪些业务语义的数据，供 ToolResolver 索引查询。
+   * 如 quality.cp_cpk 标 ["process_capability", "quality_metrics"]。
+   *
+   * 实施时初始化：每家企业部署时，由实施人员根据企业工具集配置。
+   * 未标注的工具仍可被 LLM 兜底解析，只是慢（走 LLM 推理而非索引命中）。
+   */
+  readonly semanticTags?: string[];
 }

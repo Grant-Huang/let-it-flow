@@ -68,6 +68,7 @@ export function registerOeeTools(): import("../../../../src/tools/base.js").Flow
       getData: (ctx) => applyOeeOverrides(ctx, getOEE(ctx)),
       system: SYSTEM,
       provenance: (a) => `/mes/oee/realtime?line=${(a.line as string) ?? "L01"}`,
+      semanticTags: ["oee", "oee_availability", "oee_performance", "oee_quality"],
     }),
 
     // 2. 历史 OEE 趋势（7 天）
@@ -81,6 +82,7 @@ export function registerOeeTools(): import("../../../../src/tools/base.js").Flow
       system: SYSTEM,
       provenance: (a) => `/mes/oee/history?line=${(a.line as string) ?? "L01"}&days=7`,
       freshness: "daily",
+      semanticTags: ["oee"],
     }),
 
     // 3. OEE 分解（损失瀑布）
@@ -107,6 +109,7 @@ export function registerOeeTools(): import("../../../../src/tools/base.js").Flow
       },
       system: SYSTEM,
       provenance: (a) => `/mes/oee/decompose?line=${(a.line as string) ?? "L01"}`,
+      semanticTags: ["oee"],
     }),
 
     // 4. 瓶颈产线识别
@@ -126,6 +129,7 @@ export function registerOeeTools(): import("../../../../src/tools/base.js").Flow
       },
       system: "MOM",
       provenance: () => `/mom/oee/bottleneck`,
+      semanticTags: ["oee"],
     }),
 
     // 5. OEE 趋势（环比）
@@ -149,6 +153,7 @@ export function registerOeeTools(): import("../../../../src/tools/base.js").Flow
       system: SYSTEM,
       provenance: (a) => `/mes/oee/trend?line=${(a.line as string) ?? "L01"}`,
       freshness: "weekly",
+      semanticTags: ["oee"],
     }),
 
     // 6. 按班次分解 OEE
@@ -173,6 +178,7 @@ export function registerOeeTools(): import("../../../../src/tools/base.js").Flow
       system: SYSTEM,
       provenance: (a) => `/mes/oee/by_shift?line=${(a.line as string) ?? "L01"}`,
       freshness: "shift",
+      semanticTags: ["oee", "shift_deviation"],
     }),
 
     // 7. 按产线分解
@@ -185,6 +191,7 @@ export function registerOeeTools(): import("../../../../src/tools/base.js").Flow
       getData: (ctx) => ({ lines: getOEEAllLines(ctx.scenarioId) }),
       system: "MOM",
       provenance: () => `/mom/oee/by_line`,
+      semanticTags: ["oee"],
     }),
 
     // 8. 产线间对比
@@ -209,6 +216,7 @@ export function registerOeeTools(): import("../../../../src/tools/base.js").Flow
       },
       system: "MOM",
       provenance: (a) => `/mom/oee/compare?l1=${(a.line as string) ?? "L01"}&l2=${(a.line2 as string) ?? "L02"}`,
+      semanticTags: ["oee"],
     }),
 
     // 9. 可用率损失明细
@@ -231,6 +239,7 @@ export function registerOeeTools(): import("../../../../src/tools/base.js").Flow
       },
       system: SYSTEM,
       provenance: (a) => `/mes/oee/availability_loss?line=${(a.line as string) ?? "L01"}`,
+      semanticTags: ["oee_availability", "oee"],
     }),
 
     // 10. 性能损失明细
@@ -249,6 +258,7 @@ export function registerOeeTools(): import("../../../../src/tools/base.js").Flow
       },
       system: SYSTEM,
       provenance: (a) => `/mes/oee/performance_loss?line=${(a.line as string) ?? "L01"}`,
+      semanticTags: ["oee_performance", "oee"],
     }),
 
     // 11. 质量损失明细
@@ -267,6 +277,7 @@ export function registerOeeTools(): import("../../../../src/tools/base.js").Flow
       },
       system: SYSTEM,
       provenance: (a) => `/mes/oee/quality_loss?line=${(a.line as string) ?? "L01"}`,
+      semanticTags: ["oee_quality", "oee"],
     }),
 
     // oee.report_html 已迁移为 skill.report_html（见 skills/report-html.ts），

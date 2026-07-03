@@ -1,0 +1,286 @@
+{
+  "_comment": "完整结构化方法论（granularity=full）。从 skills/*.ts 的 steps 序列翻译。MockOrchestrator.getMethodology 消费此文件。每个 methodology 的 phases 含详细 goal/requiredData/guidance。",
+  "methodologies": [
+    {
+      "topic": "dmaic",
+      "confidence": 0.95,
+      "source": "mock",
+      "granularity": "full",
+      "guidance": "DMAIC 是 6Sigma 改善项目管理框架。按 Define→Measure→Analyze→Improve→Control 五阶段产出改善路线图。适用于已识别问题的端到端改善规划。目标：σ≥4、Cpk≥1.33、DPMO≤3.4。",
+      "phases": [
+        {
+          "id": "D",
+          "name": "Define（定义）",
+          "goal": "明确改善课题的范围、目标、财务收益",
+          "requiredData": [
+            { "semantic": "oee", "required": true, "description": "当前 OEE 水平，量化课题严重度" },
+            { "semantic": "process_capability", "required": true, "description": "Cpk 值，判断过程能力是否充足" },
+            { "semantic": "cost_summary", "required": true, "description": "损失成本，量化财务收益" }
+          ],
+          "guidance": "D 阶段需量化课题。若 OEE < 目标 或 Cpk < 1.33，课题成立。",
+          "confidence": 0.95,
+          "blocking": true
+        },
+        {
+          "id": "M",
+          "name": "Measure（测量）",
+          "goal": "量化当前过程的基线表现",
+          "requiredData": [
+            { "semantic": "defect_rate", "required": true, "description": "缺陷率基线" },
+            { "semantic": "process_capability", "required": true, "description": "Cpk 基线" },
+            { "semantic": "spc_samples", "required": false, "description": "SPC 样本用于计算 σ 水平" }
+          ],
+          "guidance": "M 阶段建立基线。计算长期 σ = 3×Cpk - 1.5，DPMO = defectRate×10^6。",
+          "confidence": 0.95,
+          "blocking": true
+        },
+        {
+          "id": "A",
+          "name": "Analyze（分析）",
+          "goal": "识别根本原因，建立缺陷与输入变量的因果关系",
+          "requiredData": [
+            { "semantic": "causal_chain", "required": true, "description": "5Why + 鱼骨图分析结果" },
+            { "semantic": "process_deviation", "required": false, "description": "工艺参数偏离（辅助）" }
+          ],
+          "guidance": "A 阶段定位根因。normal 场景无因果链时，phase 标 blocked_by_data。",
+          "confidence": 0.85,
+          "blocking": true
+        },
+        {
+          "id": "I",
+          "name": "Improve（改善）",
+          "goal": "实施改善方案，验证效果",
+          "requiredData": [
+            { "semantic": "causal_chain", "required": true, "description": "基于根因组合对策" }
+          ],
+          "guidance": "I 阶段基于 A 的根因组合对策。若 Cpk < 1.0，追加工艺参数回调。",
+          "confidence": 0.80,
+          "blocking": false
+        },
+        {
+          "id": "C",
+          "name": "Control（控制）",
+          "goal": "建立监控体系，固化改善成果",
+          "requiredData": [
+            { "semantic": "spc_samples", "required": false, "description": "建立 SPC 监控" },
+            { "semantic": "fmea", "required": false, "description": "更新控制计划" }
+          ],
+          "guidance": "C 阶段建立 SPC 监控 + 标准作业。目标 Cpk=1.33、σ=4。",
+          "confidence": 0.80,
+          "blocking": false
+        }
+      ]
+    },
+    {
+      "topic": "oee_diagnose",
+      "confidence": 0.92,
+      "source": "mock",
+      "granularity": "full",
+      "guidance": "OEE 综合诊断方法论。按 取OEE基线 → 设备取证 → 质量取证 → 工艺取证 → 因果链 五阶段定位 OEE 损失根因。",
+      "phases": [
+        {
+          "id": "baseline",
+          "name": "OEE 基线",
+          "goal": "取当前 OEE 及其分解，量化损失",
+          "requiredData": [
+            { "semantic": "oee", "required": true, "description": "实时 OEE（含可用率/性能率/质量率）" }
+          ],
+          "guidance": "先取 OEE 总值，再分解看哪一项损失最大。",
+          "confidence": 0.95,
+          "blocking": true
+        },
+        {
+          "id": "equipment",
+          "name": "设备取证",
+          "goal": "设备健康/停机/可靠性取证",
+          "requiredData": [
+            { "semantic": "equipment_health", "required": false, "description": "设备健康分" },
+            { "semantic": "oee_availability", "required": false, "description": "可用率损失（停机事件）" }
+          ],
+          "guidance": "若可用率损失大，重点查设备停机原因。",
+          "confidence": 0.90
+        },
+        {
+          "id": "quality",
+          "name": "质量取证",
+          "goal": "缺陷率/Cpk/SPC 取证",
+          "requiredData": [
+            { "semantic": "defect_rate", "required": false, "description": "缺陷率" },
+            { "semantic": "process_capability", "required": false, "description": "Cpk" }
+          ],
+          "guidance": "若质量率损失大，重点查缺陷类型和能力。",
+          "confidence": 0.90
+        },
+        {
+          "id": "process",
+          "name": "工艺取证",
+          "goal": "工艺参数偏离取证",
+          "requiredData": [
+            { "semantic": "process_deviation", "required": false, "description": "工艺参数偏差" }
+          ],
+          "guidance": "查温度/压力/速度是否超规格。",
+          "confidence": 0.88
+        },
+        {
+          "id": "causal",
+          "name": "因果链",
+          "goal": "5Why + 鱼骨图定位根因",
+          "requiredData": [
+            { "semantic": "causal_chain", "required": true, "description": "5Why + 鱼骨图" }
+          ],
+          "guidance": "综合取证结果，用 5Why 追问根因。",
+          "confidence": 0.85,
+          "blocking": false
+        }
+      ]
+    },
+    {
+      "topic": "downtime_root_cause",
+      "confidence": 0.88,
+      "source": "mock",
+      "granularity": "full",
+      "guidance": "停机根因专项方法论。适用于异常/危机场景的停机事件根因定位。normal 场景无停机不适用。",
+      "phases": [
+        {
+          "id": "events",
+          "name": "停机事件梳理",
+          "goal": "列出停机事件清单，按时长排序",
+          "requiredData": [
+            { "semantic": "oee_availability", "required": true, "description": "停机事件列表（含原因/时长）" }
+          ],
+          "guidance": "先拿到完整停机事件列表，识别 Top 停机原因。",
+          "confidence": 0.92,
+          "blocking": true
+        },
+        {
+          "id": "classify",
+          "name": "停机分类",
+          "goal": "按停机类型（设备/换模/缺料/电气）分类",
+          "requiredData": [
+            { "semantic": "equipment_reliability", "required": false, "description": "MTBF/MTTR" },
+            { "semantic": "schedule_attainment", "required": false, "description": "换模时间" }
+          ],
+          "guidance": "区分计划停机 vs 故障停机，故障停机再细分设备/物料/电气。",
+          "confidence": 0.88
+        },
+        {
+          "id": "root_cause",
+          "name": "根因定位",
+          "goal": "对 Top 停机原因做 5Why 追问",
+          "requiredData": [
+            { "semantic": "causal_chain", "required": true, "description": "5Why 根因链" }
+          ],
+          "guidance": "针对最大停机原因做 5Why。",
+          "confidence": 0.85,
+          "blocking": false
+        }
+      ]
+    },
+    {
+      "topic": "multi_perspective_rca",
+      "confidence": 0.85,
+      "source": "mock",
+      "granularity": "full",
+      "guidance": "多视角根因分析方法论。从设备/质量/工艺/物料多维度并行排查，交叉印证根因。适用于复杂问题的多因素分析。",
+      "phases": [
+        {
+          "id": "symptom",
+          "name": "症状确认",
+          "goal": "明确待分析的症状（如缺陷率/OEE）",
+          "requiredData": [
+            { "semantic": "defect_rate", "required": true, "description": "缺陷率（或 OEE）作为症状指标" }
+          ],
+          "guidance": "先量化症状严重度。",
+          "confidence": 0.90,
+          "blocking": true
+        },
+        {
+          "id": "multi_probe",
+          "name": "多维度并行取证",
+          "goal": "设备/质量/工艺/物料并行排查",
+          "requiredData": [
+            { "semantic": "equipment_health", "required": false },
+            { "semantic": "process_deviation", "required": false },
+            { "semantic": "oee_availability", "required": false }
+          ],
+          "guidance": "并行调多域工具，不要串行。",
+          "confidence": 0.85
+        },
+        {
+          "id": "cross_validate",
+          "name": "交叉印证",
+          "goal": "用鱼骨图汇总多维度发现",
+          "requiredData": [
+            { "semantic": "causal_chain", "required": true, "description": "鱼骨图（5M1E 汇总）" }
+          ],
+          "guidance": "用鱼骨图把多维度发现归类到 5M1E。",
+          "confidence": 0.82,
+          "blocking": false
+        }
+      ]
+    },
+    {
+      "topic": "cost_summary",
+      "confidence": 0.90,
+      "source": "mock",
+      "granularity": "full",
+      "guidance": "成本汇总方法论。聚合 OEE 损失 + 能耗成本 + 质量损失，输出综合损失成本。单阶段方法论。",
+      "phases": [
+        {
+          "id": "aggregate",
+          "name": "损失聚合",
+          "goal": "聚合 OEE/能耗/质量三类损失成本",
+          "requiredData": [
+            { "semantic": "oee", "required": true, "description": "OEE 损失（产量损失折算）" },
+            { "semantic": "energy_consumption", "required": true, "description": "能耗成本" },
+            { "semantic": "defect_rate", "required": true, "description": "质量损失（报废+返工）" }
+          ],
+          "guidance": "三类损失折算为金额后汇总，识别最大损失项。",
+          "confidence": 0.90,
+          "blocking": false
+        }
+      ]
+    },
+    {
+      "topic": "waste_audit",
+      "confidence": 0.88,
+      "source": "mock",
+      "granularity": "full",
+      "guidance": "精益七大浪费审计方法论。按丰田七大浪费（过量生产/等待/运输/过度加工/库存/动作/缺陷）+ 第八浪费（未利用的智慧）审计。跨域聚合分析。",
+      "phases": [
+        {
+          "id": "scan",
+          "name": "全域扫描",
+          "goal": "扫描 OEE/质量/物料/排产/设备各域数据",
+          "requiredData": [
+            { "semantic": "oee", "required": true, "description": "OEE（过量生产/缺陷浪费）" },
+            { "semantic": "wip_level", "required": true, "description": "WIP（库存/等待浪费）" },
+            { "semantic": "schedule_attainment", "required": false, "description": "排产达成（等待浪费）" }
+          ],
+          "guidance": "并行调多域工具采集数据。",
+          "confidence": 0.88,
+          "blocking": true
+        },
+        {
+          "id": "classify",
+          "name": "浪费分类",
+          "goal": "把损失归类到七大浪费",
+          "requiredData": [],
+          "guidance": "按丰田七大浪费框架分类。",
+          "confidence": 0.85
+        },
+        {
+          "id": "quantify",
+          "name": "量化排序",
+          "goal": "量化每类浪费的损失金额，排序改善优先级",
+          "requiredData": [
+            { "semantic": "cost_summary", "required": false, "description": "成本折算" }
+          ],
+          "guidance": "量化后按金额排序，输出改善建议。",
+          "confidence": 0.85,
+          "blocking": false
+        }
+      ]
+    }
+  ]
+}

@@ -125,3 +125,55 @@ export function confirmTask(taskId: string, decision: ConfirmDecision): Promise<
 export function clarifyTask(taskId: string, message: string): Promise<{ clarified: boolean }> {
   return api.post(`/api/tasks/${taskId}/clarify`, { message });
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 报表固化模板（Phase 2）
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface ReportTemplateRecord {
+  reportType: string;
+  title: string;
+  layout: ComponentLayout;
+  status: "draft" | "active";
+  source: "manual" | "mined";
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** ComponentLayout（与后端 report-types.ts 对齐，前端独立定义避免引入后端构建）。 */
+export interface ComponentLayout {
+  reportType: string;
+  title: string;
+  meta?: { line?: string; scenarioId?: string; generatedAt?: string };
+  components: Array<{
+    name: string;
+    data: Record<string, unknown>;
+    wrapper?: { type: "section"; title?: string };
+  }>;
+}
+
+/** 登记固化报表模板 */
+export function saveReportTemplate(input: {
+  reportType: string;
+  title: string;
+  layout: ComponentLayout;
+  status?: "draft" | "active";
+  source?: "manual" | "mined";
+}): Promise<{ template: ReportTemplateRecord }> {
+  return api.post("/api/report-templates", input);
+}
+
+/** 查询单个 active 模板（报表生成时用） */
+export function getReportTemplate(reportType: string): Promise<{ template: ReportTemplateRecord }> {
+  return api.get(`/api/report-templates/${reportType}`);
+}
+
+/** 列出全部模板（含 draft） */
+export function listReportTemplates(): Promise<{ templates: ReportTemplateRecord[]; count: number }> {
+  return api.get("/api/report-templates");
+}
+
+/** 删除模板 */
+export function deleteReportTemplate(reportType: string): Promise<{ deleted: string }> {
+  return api.del(`/api/report-templates/${reportType}`);
+}

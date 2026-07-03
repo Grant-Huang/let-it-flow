@@ -1,0 +1,68 @@
+{
+  "_comment": "证据契约（governance 校验用）。定义'某结论成立需要什么证据'。MockOrchestrator.getEvidenceContract 消费此文件。Phase 4.5 新增 qs16949_evidence_complete 契约。",
+  "contracts": [
+    {
+      "conclusion": "root_cause_identified",
+      "requiredEvidence": [
+        { "semantic": "causal_chain", "minConfidence": 0.70, "required": true },
+        { "semantic": "defect_rate", "minConfidence": 0.80, "required": true },
+        { "semantic": "process_deviation", "minConfidence": 0.60, "required": false }
+      ],
+      "minConfidence": 0.65,
+      "source": "mock",
+      "notes": "根因已识别的最低证据要求"
+    },
+    {
+      "conclusion": "capability_sufficient",
+      "requiredEvidence": [
+        { "semantic": "process_capability", "minConfidence": 0.90, "required": true },
+        { "semantic": "spc_samples", "minConfidence": 0.80, "required": false }
+      ],
+      "minConfidence": 0.85,
+      "source": "mock",
+      "notes": "Cpk ≥ 1.33 且样本数 ≥ 25 才判定能力充足"
+    },
+    {
+      "conclusion": "D_complete",
+      "requiredEvidence": [
+        { "semantic": "oee", "minConfidence": 0.90, "required": true },
+        { "semantic": "process_capability", "minConfidence": 0.90, "required": true },
+        { "semantic": "cost_summary", "minConfidence": 0.80, "required": true }
+      ],
+      "minConfidence": 0.85,
+      "source": "mock",
+      "notes": "DMAIC Define 阶段完成的证据要求"
+    },
+    {
+      "conclusion": "M_complete",
+      "requiredEvidence": [
+        { "semantic": "defect_rate", "minConfidence": 0.85, "required": true },
+        { "semantic": "process_capability", "minConfidence": 0.85, "required": true }
+      ],
+      "minConfidence": 0.80,
+      "source": "mock",
+      "notes": "DMAIC Measure 阶段完成的证据要求"
+    },
+    {
+      "conclusion": "A_complete",
+      "requiredEvidence": [
+        { "semantic": "causal_chain", "minConfidence": 0.70, "required": true }
+      ],
+      "minConfidence": 0.65,
+      "source": "mock",
+      "notes": "DMAIC Analyze 阶段完成的证据要求。normal 场景无因果链时，此契约无法满足，A 阶段标 blocked_by_data"
+    },
+    {
+      "conclusion": "qs16949_evidence_complete",
+      "requiredEvidence": [
+        { "semantic": "fmea", "minConfidence": 0.80, "required": true },
+        { "semantic": "process_capability", "minConfidence": 0.85, "required": true },
+        { "semantic": "spc_samples", "minConfidence": 0.80, "required": true },
+        { "semantic": "calibration_status", "minConfidence": 0.80, "required": true }
+      ],
+      "minConfidence": 0.80,
+      "source": "mock",
+      "notes": "QS16949 内审四大核心工具齐备度评估。Phase 4.5 新增。符合性评估类，不要求 causal_chain。"
+    }
+  ]
+}

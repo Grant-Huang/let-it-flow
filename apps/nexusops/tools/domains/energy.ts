@@ -27,6 +27,7 @@ export function registerEnergyTools(): import("../../../../src/tools/base.js").F
       },
       system: "智能电表",
       provenance: (a) => `/iot/energy/realtime?line=${(a.line as string) ?? "L01"}`,
+      semanticTags: ["energy_consumption"],
     }),
 
     // 2. 按产线对比
@@ -45,6 +46,7 @@ export function registerEnergyTools(): import("../../../../src/tools/base.js").F
       }),
       system: "智能电表",
       provenance: () => `/iot/energy/by_line`,
+      semanticTags: ["energy_consumption"],
     }),
 
     // 3. 按工艺分解
@@ -68,6 +70,7 @@ export function registerEnergyTools(): import("../../../../src/tools/base.js").F
       },
       system: "智能电表",
       provenance: (a) => `/iot/energy/by_process?line=${(a.line as string) ?? "L01"}`,
+      semanticTags: ["energy_consumption"],
     }),
 
     // 4. 峰值
@@ -88,6 +91,7 @@ export function registerEnergyTools(): import("../../../../src/tools/base.js").F
       },
       system: "智能电表",
       provenance: (a) => `/iot/energy/peak?line=${(a.line as string) ?? "L01"}&today=true`,
+      semanticTags: ["energy_consumption"],
     }),
 
     // 5. 能耗成本
@@ -109,6 +113,7 @@ export function registerEnergyTools(): import("../../../../src/tools/base.js").F
       system: "ERP",
       provenance: (a) => `/erp/energy/cost?line=${(a.line as string) ?? "L01"}&today=true`,
       freshness: "daily",
+      semanticTags: ["energy_consumption", "cost_summary"],
     }),
 
     // 6. 能效（单位产品能耗）
@@ -129,6 +134,7 @@ export function registerEnergyTools(): import("../../../../src/tools/base.js").F
       },
       system: "MES",
       provenance: (a) => `/mes/energy/efficiency?line=${(a.line as string) ?? "L01"}&today=true`,
+      semanticTags: ["energy_consumption"],
     }),
 
     // 7. 碳排放
@@ -148,6 +154,7 @@ export function registerEnergyTools(): import("../../../../src/tools/base.js").F
       },
       system: "MES",
       provenance: (a) => `/mes/energy/carbon?line=${(a.line as string) ?? "L01"}&today=true`,
+      semanticTags: ["energy_consumption", "carbon_emission"],
     }),
 
     // 8. 能耗异常检测
@@ -169,6 +176,7 @@ export function registerEnergyTools(): import("../../../../src/tools/base.js").F
       },
       system: "智能电表",
       provenance: (a) => `/iot/energy/anomaly?line=${(a.line as string) ?? "L01"}&window=24h`,
+      semanticTags: ["energy_consumption"],
     }),
   ];
 }

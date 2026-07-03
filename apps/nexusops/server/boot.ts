@@ -37,6 +37,8 @@ import { SkillRegistry } from "../../../src/agent/skill-registry.js";
 import { promotableCandidates } from "../../../src/agent/skill-miner.js";
 import { buildNexusTools } from "../tools/index.js";
 import { registerMcpActionTools } from "../tools/domains/mcp-actions.js";
+import { createToolResolverTool } from "../tools/tool-resolver-tool.js";
+import { createQualityEvaluatorTool } from "../tools/quality-evaluator-tool.js";
 import { actionStore } from "../tools/mock-data/action-store.js";
 import { buildEvidenceMap } from "../tools/evidence-map.js";
 import { buildNexusSkills } from "../skills/index.js";
@@ -47,6 +49,14 @@ import { buildNexusPostToolUseChain } from "./post-rules.js";
 import { FileTaskStore } from "../../../src/tasks/task-store.js";
 import { ConversationStore } from "../../../src/tasks/conversation-store.js";
 import type { TaskRuntime, TaskRunnerHooks } from "../../../src/tasks/registry.js";
+import { createOrchestrator } from "../../../src/orchestrator/factory.js";
+import { createToolResolver } from "../../../src/orchestrator/resolver-factory.js";
+import type { Orchestrator, ToolManifest } from "../../../src/orchestrator/types.js";
+import type { ToolResolver } from "../../../src/orchestrator/tool-resolver.js";
+import { McpCatalogCache } from "../../../src/tools/mcp/mcp-catalog-cache.js";
+import { EmbeddingToolRouter, makeAiEmbedder } from "../../../src/orchestrator/embedding-router.js";
+import { CatalogSearchResolver } from "../../../src/orchestrator/catalog-search-resolver.js";
+import { createLazyMcpActionTool } from "../../../src/tools/mcp/lazy-mcp-action-tool.js";
 
 /** 解析 MCP server 配置（NEXUS_MCP_SERVERS env，JSON 数组）。 */
 function parseMcpConfigs(): import("../../../src/tools/mcp/mcp-client.js").McpServerConfig[] {
@@ -83,6 +93,18 @@ export interface NexusRuntime {
   knowledgeProviders: IKnowledgeProvider[];
   /** MCP router（优雅关闭用）。 */
   mcpRouter: McpRouter;
+  /** skill 沉淀 registry（供报表固化 API / 模板匹配用）。 */
+  skillRegistry: SkillRegistry;
+  /** 编排知识层（MockOrchestrator，未来可热替换为 RelosOrchestrator）。 */
+  orchestrator: Orchestrator;
+  /** 工具语义解析层（IndexToolResolver + LlmToolResolver 组合）。 */
+  toolResolver: ToolResolver;
+  /** MCP catalog 预热缓存（按 serverId 索引，供 systemPrompt 注入模块地图 / EmbeddingRouter 用）。 */
+  catalogCaches: Map<string, McpCatalogCache>;
+  /** catalog 模式的 EmbeddingRouter（按 serverId 索引，已装配进 toolResolver 链）。 */
+  catalogRouters: Map<string, EmbeddingToolRouter>;
+  /** catalog 模式的在线兜底 resolver（按 serverId 索引）。 */
+  catalogSearchResolvers: Map<string, CatalogSearchResolver>;
 }
 
 /**
@@ -136,7 +158,12 @@ export async function bootNexusOps(opts: NexusBootOptions = {}): Promise<NexusRu
   }
 
   // NexusOps skill.* 沉淀流程（L 层 —— 手写 skill + registry active skill）
-  for (const skill of buildNexusSkills(skillRegistry)) {
+  // Phase 4.6：quality_evaluate 用便宜模型做结果质量评估
+  for (const skill of buildNexusSkills({
+    registry: skillRegistry,
+    qualityEvalModel: llm.model("nexus_review"),
+    qualityEvalCompatMode: llm.compatModeFor ? llm.compatModeFor("nexus_review") : false,
+  })) {
     if (!toolRegistry.has(skill.name)) toolRegistry.register(skill);
   }
 
@@ -155,22 +182,125 @@ export async function bootNexusOps(opts: NexusBootOptions = {}): Promise<NexusRu
   }
 
   // 4. MCP server（C+T 层）：读 bridge 写工具 + 读 resources 作 KB provider
-  const mcpRouter = new McpRouter(parseMcpConfigs());
-  for (const serverId of mcpRouter.listServerIds()) {
-    // 写桥：把 server 工具注册成 FlowConnector
-    const n = await registerMcpServerTools(toolRegistry, mcpRouter, serverId);
-    if (n > 0) console.log(`[nexusops] MCP server "${serverId}" 注册 ${n} 个动作工具`);
-    // 读桥：把 server resources 适配成 KB provider
+  const mcpConfigs = parseMcpConfigs();
+  const mcpRouter = new McpRouter(mcpConfigs);
+  /** catalog 预热缓存（catalog 模式的 server 才有，供 systemPrompt/EmbeddingRouter 用）。 */
+  const catalogCaches = new Map<string, McpCatalogCache>();
+  /** catalog EmbeddingRouter（向量检索路由）。 */
+  const catalogRouters = new Map<string, EmbeddingToolRouter>();
+  /** catalog 在线兜底 resolver。 */
+  const catalogSearchResolvers = new Map<string, CatalogSearchResolver>();
+  for (const cfg of mcpConfigs) {
+    const serverId = cfg.id;
     const client = mcpRouter.getClient(serverId);
-    if (client) {
-      const mcpKb = new McpKnowledgeProvider({ serverId, client });
-      if (mcpKb.ready()) knowledgeProviders.push(mcpKb);
+    if (!client) continue;
+
+    // 写桥：catalog 模式 vs 普通模式分流
+    if (cfg.catalog?.enabled) {
+      // catalog 模式（07-mestar-integration-spec.md §4.3）：
+      // 预热缓存而非全量注册，避免数千工具导致 context 爆炸
+      const cache = new McpCatalogCache({
+        serverId,
+        client,
+        pageSize: cfg.catalog.pageSize,
+      });
+      await cache.warmup(cfg.catalog.refreshMs ?? 24 * 60 * 60 * 1000);
+      if (cache.isReady()) {
+        catalogCaches.set(serverId, cache);
+        const map = cache.getModuleMap();
+        console.log(
+          `[nexusops] MCP server "${serverId}" catalog 预热完成：${map?.totalTools ?? 0} 个工具（${map?.totalExecutable ?? 0} 可执行，${map?.modules.length ?? 0} 模块）`,
+        );
+
+        // 注册 LazyMcpActionTool（catalog 模式的执行入口）
+        toolRegistry.register(
+          createLazyMcpActionTool({ serverId, client, catalogCache: cache }),
+        );
+
+        // 构建 EmbeddingToolRouter（向量检索路由）
+        const cacheDir = `data/mcp-catalog-cache/${serverId}`;
+        const embedder = makeAiEmbedder(llm.embeddingModel());
+        const router = new EmbeddingToolRouter({ cacheDir, embedder });
+        // 优先加载已持久化的向量索引，否则构建
+        if (!router.loadIndex()) {
+          const buckets = cache.getAllBuckets();
+          await router.buildIndex(buckets);
+        }
+        if (router.isReady()) {
+          catalogRouters.set(serverId, router);
+          console.log(
+            `[nexusops] MCP server "${serverId}" EmbeddingRouter 就绪（${router.indexSize()} 个向量）`,
+          );
+        }
+
+        // 构造 CatalogSearchResolver（在线兜底，回写本地索引）
+        const searchResolver = new CatalogSearchResolver({
+          serverId,
+          client,
+          onResolved: (toolName, semantic) => {
+            // 回写到 tool-index.json（下次走 IndexToolResolver 命中）
+            cache.appendToolEntry(toolName, semantic);
+          },
+        });
+        catalogSearchResolvers.set(serverId, searchResolver);
+      }
+    } else {
+      // 普通模式：全量注册（现有路径）
+      const n = await registerMcpServerTools(toolRegistry, mcpRouter, serverId);
+      if (n > 0) console.log(`[nexusops] MCP server "${serverId}" 注册 ${n} 个动作工具`);
     }
+
+    // 读桥：把 server resources 适配成 KB provider（两种模式都做）
+    const mcpKb = new McpKnowledgeProvider({ serverId, client });
+    if (mcpKb.ready()) knowledgeProviders.push(mcpKb);
   }
 
   // 注册 core.knowledge_base 工具（查询所有 KB provider）
   if (!toolRegistry.has("core.knowledge_base")) {
     toolRegistry.register(createKnowledgeBaseTool(knowledgeProviders));
+  }
+
+  // 4b. 编排知识层 + 工具语义解析层（Phase 3）
+  // Orchestrator（本期 MockOrchestrator，未来热替换为 RelosOrchestrator）
+  const orchestrator = createOrchestrator({ dataDir: "data/relos-mock" });
+  // ToolResolver（IndexToolResolver + EmbeddingToolRouter + LlmToolResolver 组合）
+  // 取第一个 catalog Router 注入（多 server 时取合并候选；本期单 mestar）
+  const primaryEmbeddingRouter = catalogRouters.values().next().value;
+  const toolResolver = createToolResolver({
+    registry: toolRegistry,
+    model: llm.model("nexus_agent"),
+    compatMode: llm.compatModeFor ? llm.compatModeFor("nexus_agent") : false,
+    embeddingRouter: primaryEmbeddingRouter,
+  });
+  // syncToolIndex：把当前 registry 工具清单（含 semanticTags）回写到 relos-mock/tool-index.json
+  // 模拟企业工具索引回写 relos（未来接 relos 时走 relos API）
+  const toolManifests: ToolManifest[] = toolRegistry
+    .listByTiers(["core", "domain", "custom"])
+    .map((t) => ({
+      name: t.name,
+      description: t.description,
+      whenToUse: t.whenToUse,
+      semanticTags: t.semanticTags,
+    }));
+  void orchestrator.syncToolIndex(toolManifests).catch(() => {
+    // syncToolIndex 失败不阻断启动（降级为无索引，LLM 兜底解析）
+  });
+
+  // 4c. ToolResolver 工具（Phase 4.2）：把 toolResolver 暴露给 LLM
+  if (!toolRegistry.has("nexus_tool_resolver")) {
+    toolRegistry.register(createToolResolverTool(toolResolver));
+  }
+
+  // 4d. 质量评估工具（Phase 4.7）：LLM 自检分析结果，与 skill.quality_evaluate 共用评估内核
+  // 用便宜模型（nexus_review）做评估；无此模型时降级为启发式评分
+  if (!toolRegistry.has("nexus_quality_evaluate")) {
+    toolRegistry.register(
+      createQualityEvaluatorTool(
+        llm.model("nexus_review")
+          ? { model: llm.model("nexus_review"), compatMode: llm.compatModeFor ? llm.compatModeFor("nexus_review") : false }
+          : {},
+      ),
+    );
   }
 
   // 5. V + G：业务前置条件 + 治理规则（pre 链全局复用，post 链每 run 新建因含会话状态）
@@ -188,11 +318,12 @@ export async function bootNexusOps(opts: NexusBootOptions = {}): Promise<NexusRu
   const toolTiers: ("core" | "domain" | "custom")[] = ["core", "domain", "custom"];
   const allToolNames = toolRegistry.listByTiers(toolTiers).map((t) => t.name);
   // 收尾前证据评估用主力模型（与主循环同款），仅收尾意图时触发，控制延迟
-  const prepareStep = buildNexusPrepareStep(
+  const prepareStep = buildNexusPrepareStep({
     allToolNames,
-    llm.model("nexus_agent"),
-    llm.compatModeFor ? llm.compatModeFor("nexus_agent") : false,
-  );
+    evidenceGateModel: llm.model("nexus_agent"),
+    evidenceGateCompatMode: llm.compatModeFor ? llm.compatModeFor("nexus_agent") : false,
+    orchestrator,
+  });
 
   // review pass 开关（默认关，生产可开；用便宜模型事后审计）
   const reviewPassEnabled = process.env.NEXUS_REVIEW_PASS === "1";
@@ -238,9 +369,13 @@ export async function bootNexusOps(opts: NexusBootOptions = {}): Promise<NexusRu
     const governanceHooks = governanceToHooks(governanceChain, buildNexusPostToolUseChain());
     // 证据源地图：从当前已注册工具动态生成，拼到 system prompt（让 LLM 知道域→工具→证据性质）
     const evidenceMap = buildEvidenceMap(toolRegistry);
-    const systemPrompt = evidenceMap
-      ? `${NEXUS_SYSTEM_PROMPT}\n\n${evidenceMap}`
-      : NEXUS_SYSTEM_PROMPT;
+    // MCP catalog 模块目录地图（07-mestar-integration-spec.md §8）：
+    // 把数千工具压缩成几十个模块目录喂给 LLM，引导其用 resolver 按需定位具体工具
+    const catalogMap = buildMcpCatalogPrompt(catalogCaches);
+    const systemPromptParts = [NEXUS_SYSTEM_PROMPT];
+    if (evidenceMap) systemPromptParts.push(evidenceMap);
+    if (catalogMap) systemPromptParts.push(catalogMap);
+    const systemPrompt = systemPromptParts.join("\n\n");
     const harnessConfig: HarnessConfig = {
       callSite: "nexus_agent",
       model,
@@ -404,7 +539,30 @@ export async function bootNexusOps(opts: NexusBootOptions = {}): Promise<NexusRu
     customRunner,
   };
 
-  return { taskRuntime, toolRegistry, knowledgeProviders, mcpRouter };
+  return { taskRuntime, toolRegistry, knowledgeProviders, mcpRouter, skillRegistry, orchestrator, toolResolver, catalogCaches, catalogRouters, catalogSearchResolvers };
+}
+
+/**
+ * 把 MCP catalog 预热缓存渲染成模块目录地图（注入 systemPrompt）。
+ *
+ * 07-mestar-integration-spec.md §8：LLM 看到的不是 2850 个工具描述，
+ * 而是约 30 个模块的目录（<2K token）。LLM 的行为模式变为
+ * "我知道有设备BOM 这个域 → 用 resolver 找具体工具"。
+ */
+function buildMcpCatalogPrompt(caches: Map<string, McpCatalogCache>): string {
+  if (caches.size === 0) return "";
+  const sections: string[] = [];
+  for (const [serverId, cache] of caches) {
+    const map = cache.getModuleMap();
+    if (!map || map.modules.length === 0) continue;
+    const moduleList = map.modules
+      .map((m) => `- ${m.name}：${m.desc}（${m.executableCount} 个可查询工具）`)
+      .join("\n");
+    sections.push(
+      `### ${serverId} catalog（已缓存 ${map.totalTools} 个工具，按模块组织，只展示可查询工具数）\n${moduleList}\n\n不确定具体工具时：\n1. 调 nexus_tool_resolver(semantic="<业务语义>") 按语义查找\n2. 调 mcp.${serverId}.call(toolName="<resolver 返回>", args={...}) 执行`,
+    );
+  }
+  return sections.length > 0 ? `## 可用的 MCP 业务系统\n${sections.join("\n\n")}` : "";
 }
 
 /** NexusOps 默认 system prompt（追加到 harness 默认 prompt 之后）。 */
@@ -416,8 +574,24 @@ const NEXUS_SYSTEM_PROMPT = `
 3. 用 core.knowledge_base 查企业专有知识（SOP/A3/术语表/方法论）。
 4. 用 core.web_search 查外部专家通用知识。
 5. 证据充分后调 nexus_advise 产出结构化建议（每条含 impact 影响度 / executionScore 执行度 / confidence 置信度；有可执行 MCP 工具才附 actionTool，否则不勉强）。
-5b. 建议产出后，调 skill.report_html 生成可视化 HTML 诊断报告（传入 primaryRootCause/mechanismExplained/auxiliaryFactors/confidence 及 recommendations 列表），供右栏展示。
-6. 最后调 nexus_finalize 收尾。
+5b. 建议产出后，调 skill.report_html 生成可视化 HTML 报告，供右栏展示。报告主题必须与前置分析一致，按 reportType 选匹配模板，禁止用错配模板覆盖主题：
+  - 前置为 DMAIC/6Sigma 分析（调过 skill.dmaic 或 quality.sigma_level/dpmo）→ reportType="dmaic"：渲染 σ/DPMO/Cpk 目标 + D-M-A-I-C 五阶段路线图，不要传 primaryRootCause（模板内部自动取数，聚焦改善路径而非根因树）。
+  - 前置为 OEE 诊断 / 停机根因 / 多视角根因（调过 skill.oee_diagnose / skill.downtime_root_cause / skill.multi_perspective_rca）→ reportType="oee"（缺省）：传入 primaryRootCause/mechanismExplained/auxiliaryFactors/confidence 及 recommendations 列表。
+  - 前置为七大浪费 / 成本汇总 / 通用兜底分析 → 暂用 reportType="oee"（缺省）。
+  - 主题一致性纪律：若前置分析是 DMAIC，绝不用 oee 模板（否则 σ/DPMO 主题会被 OEE 根因树覆盖）。
+6. 收尾前调 nexus_quality_evaluate 对本次分析结果做多维质量评分（主题一致性/证据充分性/根因合理性/建议可执行性/方法合规性），产出评估报告（参考性评分，用于自检与改进）。
+7. 最后调 nexus_finalize 收尾。
+
+## 编排知识层与工具解析（LLM 主导）
+- **方法论指导**：每轮分析首步会收到来自编排知识层（Orchestrator）的方法论指导（注入到 system prompt）。指导含阶段路线图（如 DMAIC 的 D→M→A→I→C）和每阶段必取证项。严格按阶段顺序执行，不要跳过必取证项。
+- **知识来源标记**：指导末尾标注 \`source\` 字段。当前为 \`source=mock\`（模拟知识，可参考但允许自主判断）。未来 \`source=relos\` 时知识更可信。
+- **工具语义解析**：不确定该用哪个工具时，调 \`nexus_tool_resolver\` 按语义查找（输入 semantic 如 "process_capability"，返回匹配工具名 + 来源）。优先用此工具而非硬记工具名。
+- **方法论与报告主题一致**：不同方法论产出不同形态的报告。DMAIC → σ/DPMO 改善路线图；OEE 诊断 → 根因树；QS16949 内审 → 符合性评估（四大工具齐备度 + NC 清单，**不需要根因诊断**）；七大浪费 → 浪费量化；能耗分析 → 能耗趋势。不要把所有问题都套成根因诊断。
+
+## 开放问题类型（不止根因诊断）
+分析问题分两类，方法论指导会帮你区分：
+- **诊断类**（找根因）：如 OEE 偏低、停机频发、缺陷率高。走 5Why + 鱼骨图 + 根因树。
+- **符合性评估类**（查合规）：如 IATF 16949 内审、过程审核。走"对照标准 → 收集证据 → 找差距 → 输出不符合项（NC）"。这类问题**不需要根因诊断**，prepare-step 不会强制要求因果链。
 
 ## 证据纪律
 - freshness=estimated/historical 或 confidence=inferred 的证据，需交叉验证后再下结论。
