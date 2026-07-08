@@ -134,7 +134,7 @@ export { NEXUS_PORT } from "./core/ports.js";
 export { createBootLogger } from "./core/boot-logger.js";
 export type { BootLogger } from "./core/boot-logger.js";
 export { narrate, narrateSummary } from "./core/narrate.js";
-export type { ToolEvent } from "./core/stream-events.js";
+export type { ToolEvent, StreamEvent } from "./core/stream-events.js";
 export {
   makeEvent,
   toSSE,
