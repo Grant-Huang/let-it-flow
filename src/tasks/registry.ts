@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { FileTaskStore, type TaskMeta } from "./task-store.js";
+import { FileTaskStore, type TaskMeta, isTerminalStatus } from "./task-store.js";
 import { AsyncLatch } from "./latch.js";
 import {
   makeEvent,
@@ -12,6 +12,7 @@ import {
   type StreamEventType,
   type EventTypePayloadMap,
 } from "../core/stream-events.js";
+import { globalBroadcaster } from "../core/event-broadcaster.js";
 import type { LlmService } from "../services/llm-service.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import { plan, type PlannerConfig } from "../planner/planner.js";
@@ -166,7 +167,7 @@ export class TaskRegistry {
     if (rt?.customRunner) {
       const hooks: TaskRunnerHooks = {
         emit: (type, payload) => this.emit(taskId, type, payload),
-        setStatus: (status, message) => this.store.setStatus(taskId, status, message),
+        setStatus: (status, message) => this.setStatusAndNotify(taskId, status, message),
         awaitConfirmation: (gate) =>
           this.awaitConfirmation(taskId, {
             nodeId: gate.nodeId,
@@ -203,7 +204,7 @@ export class TaskRegistry {
       throw new Error(`task ${taskId} already has a pending confirmation`);
     }
     this.latches.set(taskId, { latch, gateId });
-    this.store.setStatus(taskId, "pending_confirmation");
+    this.setStatusAndNotify(taskId, "pending_confirmation");
     this.emit(taskId, "extension", confirmGatePayload({
       gate_id: gateId,
       node_id: gate.nodeId,
@@ -235,7 +236,7 @@ export class TaskRegistry {
       note: decision.note,
     };
     if (!result.approved) {
-      this.store.setStatus(taskId, "aborted");
+      this.setStatusAndNotify(taskId, "aborted");
     }
     entry.latch.release(result);
   }
@@ -260,8 +261,8 @@ export class TaskRegistry {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // 事件发射 helper：append 到 store（落库）。
-  // coalescer 在 SSE 出口层（api/tasks.ts）处理，registry 只负责落库。
+  // 事件发射 helper：append 到 store（落库）+ 内存广播（push 到 SSE 订阅者）。
+  // coalescer 在 SSE 出口层（api/tasks.ts）处理，registry 只负责落库 + 广播。
   // ─────────────────────────────────────────────────────────────────────────
   private emit<T extends StreamEventType>(
     taskId: string,
@@ -269,7 +270,39 @@ export class TaskRegistry {
     payload: EventTypePayloadMap[T],
   ): StreamEvent {
     const ev = makeEvent(taskId, type, payload, channelOf(type));
-    return this.store.append(taskId, ev);
+    return this.appendAndBroadcast(taskId, ev);
+  }
+
+  /**
+   * 落盘 + 内存广播统一入口（emit 与 executor hooks 旁路共用，避免漏接 broadcaster）。
+   * 终态事件（done/error）触发 broadcaster.notifyTerminal，让 SSE push 订阅者发 [DONE] 退出。
+   */
+  private appendAndBroadcast(
+    taskId: string,
+    ev: Omit<StreamEvent, "seq">,
+  ): StreamEvent {
+    const full = this.store.append(taskId, ev);
+    // 内存广播：push 到 SSE 订阅者（push 模式实时下发；无订阅者时无副作用）
+    void globalBroadcaster.push(taskId, full);
+    if (full.type === "done" || full.type === "error") {
+      globalBroadcaster.notifyTerminal(taskId);
+    }
+    return full;
+  }
+
+  /**
+   * 置任务状态并在终态时通知 broadcaster。
+   * 终态通知触发 SSE 端点发 [DONE] 并退出（push 模式）。
+   */
+  private setStatusAndNotify(
+    taskId: string,
+    status: TaskMeta["status"],
+    message?: string,
+  ): void {
+    this.store.setStatus(taskId, status, message);
+    if (isTerminalStatus(status)) {
+      globalBroadcaster.notifyTerminal(taskId);
+    }
   }
 
   private emitError(taskId: string, message: string): void {
@@ -277,7 +310,7 @@ export class TaskRegistry {
     if (!meta) return;
     if (meta.status !== "done" && meta.status !== "aborted") {
       this.emit(taskId, "error", errorPayload(message));
-      this.store.setStatus(taskId, "error", message);
+      this.setStatusAndNotify(taskId, "error", message);
     }
   }
 
@@ -302,7 +335,7 @@ export class TaskRegistry {
 
     // planner 带澄清循环（用户多次补充直到 proceed/reject）
     while (true) {
-      this.store.setStatus(taskId, "running");
+      this.setStatusAndNotify(taskId, "running");
       const outcome = await plan(currentIntent, plannerCfg);
 
       if (outcome.kind === "reject") {
@@ -312,7 +345,7 @@ export class TaskRegistry {
           version: "1.0",
           data: { reason: outcome.reason, suggest_retry: outcome.suggestRetry },
         });
-        this.store.setStatus(taskId, "failed", outcome.reason);
+        this.setStatusAndNotify(taskId, "failed", outcome.reason);
         return;
       }
 
@@ -320,7 +353,7 @@ export class TaskRegistry {
         // 模糊：挂起等 POST /clarify，合并意图后重跑
         const latch = new AsyncLatch<string>();
         this.clarifyLatches.set(taskId, latch);
-        this.store.setStatus(taskId, "pending_clarification");
+        this.setStatusAndNotify(taskId, "pending_clarification");
         this.emit(taskId, "extension", {
           name: "clarification_required",
           version: "1.0",
@@ -345,7 +378,7 @@ export class TaskRegistry {
         intent: currentIntent,
         registry: rt.toolRegistry,
         hooks: {
-          emit: async (ev) => this.store.append(taskId, makeEvent(taskId, ev.type, ev.payload, ev.channel)),
+          emit: async (ev) => this.appendAndBroadcast(taskId, makeEvent(taskId, ev.type, ev.payload, ev.channel)),
           requireConfirmation: (gate) =>
             this.awaitConfirmation(taskId, {
               nodeId: gate.detail?.node_id as string ?? "",
@@ -360,11 +393,11 @@ export class TaskRegistry {
 
       if (!result.ok) {
         // abort/skip：executor 已发 error 事件，这里只置终态
-        this.store.setStatus(taskId, "error", result.error ?? "执行失败");
+        this.setStatusAndNotify(taskId, "error", result.error ?? "执行失败");
         return;
       }
       this.emit(taskId, "done", {});
-      this.store.setStatus(taskId, "done");
+      this.setStatusAndNotify(taskId, "done");
       return;
     }
   }
@@ -375,7 +408,7 @@ export class TaskRegistry {
   // 用于 P1 验收：SSE 推送、断线重连、HITL 暂停/恢复全链路。
   // P3 替换为真实 executor。
   private async runStub(taskId: string, intent: string): Promise<void> {
-    this.store.setStatus(taskId, "running");
+    this.setStatusAndNotify(taskId, "running");
     this.emit(taskId, "phase", phasePayload("understand", "理解意图", "running"));
     // 模拟一点 LLM 思考输出
     for (const delta of ["正在分析：", intent, " …"]) {
@@ -396,12 +429,12 @@ export class TaskRegistry {
       return;
     }
 
-    this.store.setStatus(taskId, "running");
+    this.setStatusAndNotify(taskId, "running");
     this.emit(taskId, "phase", phasePayload("generate", "生成结果", "running"));
     await delay(5);
     this.emit(taskId, "phase", phasePayload("generate", "生成结果", "done"));
     this.emit(taskId, "done", {});
-    this.store.setStatus(taskId, "done");
+    this.setStatusAndNotify(taskId, "done");
   }
 }
 

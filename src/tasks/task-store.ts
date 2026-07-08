@@ -12,29 +12,16 @@ import {
   listTaskIds,
 } from "../storage/file-store.js";
 import type { StreamEvent, StreamEventType } from "../core/stream-events.js";
-import { getLogVerbose } from "../core/config.js";
+import { getLogPersist } from "../core/config.js";
 
 /**
- * 判断事件是否应被当前 verbose 级别落盘（不影响 SSE 推送与 seq 单调性）。
+ * 判断事件是否应落盘（不影响 SSE 推送与 seq 单调性）。
  *
- *   verbose=0 (off)  → 全部不落盘
- *   verbose=1 (basic)→ 只保留工具调用元信息 + 终态，不含 narrative text / workflow_node
- *   verbose=2 (full) → 全部落盘（缺省）
+ *   persist=false (off) → 全部不落盘（前端实时显示仍通过 EventBroadcaster 全量下发）
+ *   persist=true  (on)  → 全部落盘（缺省）
  */
-function shouldPersist(type: StreamEventType): boolean {
-  const verbose = getLogVerbose();
-  if (verbose >= 2) return true;
-  if (verbose <= 0) return false;
-  // basic：只保留工具调用元信息 + 终态
-  return (
-    type === "tool_call" ||
-    type === "tool_result" ||
-    type === "tool_status" ||
-    type === "phase" ||
-    type === "done" ||
-    type === "error" ||
-    type === "extension"
-  );
+function shouldPersist(_type: StreamEventType): boolean {
+  return getLogPersist();
 }
 
 /**
@@ -150,10 +137,12 @@ export class FileTaskStore {
   /**
    * 追加一个事件并分配 seq（seq 始终单调递增，保证 SSE 断线重连正确）。
    *
-   * verbose 级别只控制**是否落盘到 events.jsonl**，不影响 seq 分配与 SSE 推送：
-   *   - verbose=0：不落盘（仍返回带 seq 的事件，SSE 正常工作）
-   *   - verbose=1：仅落盘工具调用元信息 + 终态（不含 narrative text / workflow_node）
-   *   - verbose=2：全部落盘（缺省）
+   * persist 开关只控制**是否落盘到 events.jsonl**，不影响 seq 分配与 SSE 推送：
+   *   - persist=false：不落盘（仍返回带 seq 的事件，内存广播 + SSE 正常工作）
+   *   - persist=true：全部落盘（缺省）
+   *
+   * 落盘保持同步（保证 readAll/readSince 在 append 返回后立即可读——断线重连契约）。
+   * SSE 实时性由 EventBroadcaster 内存广播提供（不经磁盘），故同步落盘不拖慢推送。
    *
    * 返回带 seq 的完整事件（无论是否落盘）。
    */
@@ -162,7 +151,7 @@ export class FileTaskStore {
     if (!meta) throw new Error(`task not found: ${taskId}`);
     const seq = meta.lastSeq + 1;
     const full: StreamEvent = { ...event, seq } as StreamEvent;
-    // seq 始终递增（保证 SSE 断线重连），仅落盘按 verbose 过滤
+    // seq 始终递增（保证 SSE 断线重连），仅落盘按 persist 开关过滤
     this.update(taskId, { lastSeq: seq });
     if (shouldPersist(event.type)) {
       appendJsonlLine(taskEventsPath(taskId), full);
@@ -211,6 +200,14 @@ export type TaskSummary = Pick<
   TaskMeta,
   "id" | "intent" | "status" | "createdAt" | "updatedAt" | "conversationId" | "parentTaskId"
 >;
+
+/**
+ * 判断任务状态是否为终态（SSE 端点据此决定是否发 [DONE] 并退出）。
+ * 供 registry / api/tasks.ts / broadcaster 协作复用，避免各处重复定义。
+ */
+export function isTerminalStatus(status: string): boolean {
+  return status === "done" || status === "error" || status === "aborted" || status === "failed";
+}
 
 /** 生成短随机 id（前缀 t = task）。 */
 function cryptoRandomId(): string {

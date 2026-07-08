@@ -37,11 +37,21 @@ interface ContractsFile {
 }
 
 /** syncToolIndex 产物结构。 */
+interface ToolIndexEntry {
+  semantic: string;
+  toolName: string;
+  primary?: boolean;
+  paramMap?: Record<string, string>;
+  fieldMap?: Record<string, string>;
+}
+
 interface ToolIndexFile {
   version: string;
   enterprise: string;
   syncedAt: string;
   tools: ToolManifest[];
+  /** entries 数组：英文 semantic key → toolName（由 McpCatalogCache.persistToToolIndex 写入）。 */
+  entries?: ToolIndexEntry[];
 }
 
 /**
@@ -124,13 +134,38 @@ export class MockOrchestrator implements Orchestrator {
   async syncToolIndex(manifest: ToolManifest[]): Promise<void> {
     try {
       mkdirSync(this.dataDir, { recursive: true });
+      const indexPath = join(this.dataDir, "tool-index.json");
+
+      // merge 语义：保留现有文件中非 manifest 来源的 tools + 全部 entries
+      // （例如 McpCatalogCache.persistToToolIndex 写入的 mestar 工具 + 双 tag 索引），
+      // 避免全量覆盖导致 catalog 预热产物丢失。
+      // 顺序无关：无论 sync 与 warmup 谁先谁后，结果一致。
+      let existing: ToolIndexFile | null = null;
+      try {
+        if (existsSync(indexPath)) {
+          const raw = readFileSync(indexPath, "utf8");
+          existing = JSON.parse(raw) as ToolIndexFile;
+        }
+      } catch {
+        // 损坏文件降级为全量写入
+      }
+
+      const manifestNames = new Set(manifest.map((t) => t.name));
+      const preservedTools = (existing?.tools ?? []).filter(
+        (t) => !manifestNames.has(t.name),
+      );
+
       const data: ToolIndexFile = {
         version: "1.0",
         enterprise: "nexusops-mock",
         syncedAt: new Date().toISOString(),
-        tools: manifest,
+        tools: [...manifest, ...preservedTools],
+        // 原样保留 entries（由 McpCatalogCache 写入，syncToolIndex 不触碰）
+        ...(existing?.entries && existing.entries.length > 0
+          ? { entries: existing.entries }
+          : {}),
       };
-      writeFileSync(join(this.dataDir, "tool-index.json"), JSON.stringify(data, null, 2), "utf8");
+      writeFileSync(indexPath, JSON.stringify(data, null, 2), "utf8");
     } catch {
       // 写盘失败不阻断主流程
     }

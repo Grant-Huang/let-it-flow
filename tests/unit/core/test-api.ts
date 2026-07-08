@@ -210,3 +210,70 @@ async function waitStatus(app: ReturnType<typeof createApp>, taskId: string, sta
   }
   throw new Error(`task ${taskId} did not reach status=${status}`);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SSE push/poll 模式切换验证
+// ─────────────────────────────────────────────────────────────────────────────
+
+import { writeFileSync, mkdirSync } from "node:fs";
+import { saveSystemSettings } from "../../../src/core/system-settings.js";
+
+/**
+ * 两种 SSE 推送模式都应支持完整的 stub 流程：
+ *   创建 → 订阅 → approve → 收到 phase/text/done 事件
+ * push 模式走 EventBroadcaster 内存广播；poll 模式轮询磁盘。
+ */
+for (const mode of ["push", "poll"] as const) {
+  describe(`SSE ${mode} 模式`, () => {
+    beforeEach(() => {
+      // 写入指定模式的 system_settings.json
+      mkdirSync(join(tmpRoot, "config"), { recursive: true });
+      saveSystemSettings({
+        ssePushMode: mode,
+        sseDeadlineMs: 5000,
+        ssePollIntervalMs: 20,
+        coalescerEnabled: false,
+        coalescerMaxBuffer: 8,
+        coalescerMaxDelayMs: 20,
+        heavyIoTimeoutMs: 900_000,
+        subprocessDefaultTimeoutMs: 600_000,
+        contentMaxTokens: 4000,
+        contentRewriteMaxTokens: 6000,
+        contentStrip: true,
+        contentSummarize: false,
+        fetchMaxBytes: 1_000_000,
+        searchMaxResults: 5,
+      });
+    });
+
+    it(`${mode} 模式下 full flow 收到 phase/text/done`, async () => {
+      const app = createStubApp();
+      const create = await json<TaskCreatedData>(
+        await app.request("/api/workflows", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ intent: `${mode} 模式测试` }),
+        }),
+      );
+      const taskId = create.data.taskId;
+      await waitStatus(app, taskId, "pending_confirmation");
+
+      const ssePromise = app.request(`/api/tasks/${taskId}/stream`);
+      // 给 SSE 一点时间连上并回放历史
+      await new Promise((r) => setTimeout(r, 50));
+      await app.request(`/api/tasks/${taskId}/confirm`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ decision: "approve" }),
+      });
+
+      const res = await ssePromise;
+      const events = await collectSSEEvents(res);
+      const types = events.map((e) => e.type);
+      expect(types).toContain("phase");
+      expect(types).toContain("text");
+      expect(types).toContain("extension");
+      expect(types).toContain("done");
+    });
+  });
+}

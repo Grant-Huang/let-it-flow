@@ -124,6 +124,15 @@ const streamArgs = compatMode
   : { system, messages: [{ role: "user", content: intent }] };
 ```
 
+### 15.3.5 步数预算（R4）与 prepareStep 中间件（R6）
+
+平台新增的 E 层机制：
+
+- **StepBudget**（`src/agent/step-budget.ts`）：`computeStepBudget(stepNumber, maxSteps)` 返回 `{ total, used, remaining, ratio, phase }`，phase 三档（ramp_up 0-40% / focus 40-80% / wrap_up 80-100%+）。harness 自动计算并通过 `PrepareStepContext.budget` 透传给 prepareStep 钩子。
+- **prepareStep 中间件模式**（`src/agent/prepare-step-middleware.ts`）：`composePrepareStep([mw1, mw2, ...])` 把多个职责（方法论注入 / 工具裁剪 / 前置条件提醒 / 证据门 / 步数预警）组合成单个 prepareStep 函数（洋葱模型）。平台内置 `stepBudgetWarnMiddleware`：phase=wrap_up 时注入步数预警提示。
+
+应用读取 `ctx.budget.phase` 决定策略（如 NexusOps 的 40/40/20 分级），不再自己算 stepRatio。
+
 ## 15.4 T 层：工具
 
 ### 15.4.1 FlowConnector 接口
@@ -221,6 +230,12 @@ skill 沉淀从"纯手写"升级为混合机制（详见 [17-skill-sedimentation
 - `TraceAccumulator`：累积全部步骤，汇总 token 用量
 - SSE 事件：`phase` / `tool_call` / `tool_result` / `workflow_node` / `extension`
 - 前端 `StepTrace` 组件渲染 Thought→Action→Observation 时间线
+
+### 15.7.1 平台新增的 O 层机制（R5/R7/R9）
+
+- **TraceCompressor**（`src/agent/trace-compressor.ts`）：把 stepTrace 压成精简文本（thought 截断 200 字、Evidence 附徽章、rejected 标记），供多轮追问作为 user 消息前置段落注入。`DefaultTraceCompressor` 是默认实现；`loadPreviousContext` 封装从 task 事件流还原 + 压缩的完整链路。
+- **emitHarnessResult**（`src/agent/result-emitter.ts`）：会话收尾时统一 emit 兜底总结 + extension（precondition_unmet / artifacts / react_result）。三种 finishReason 分支（success / precondition_unmet / error）由平台处理，应用只需调用一次。
+- **NarrationSequencer**（`react-harness.ts` 的 `fireNarrations`）：多工具解读的下发顺序可配置（`HarnessConfig.narrationSequence`）。缺省 `serial`（按 toolCalls 顺序串行，避免 token 交错混乱）；`concurrent` 走 Promise.all 并发。
 
 ## 15.8 V 层：验证（Precondition）
 

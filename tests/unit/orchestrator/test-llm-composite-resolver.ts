@@ -167,4 +167,45 @@ describe("CompositeToolResolver", () => {
     await composite.resolve(need, ctx);
     expect(callCount).toBe(2);
   });
+
+  it("reload() 联动子 resolver + 清会话缓存", async () => {
+    // ReloadableResolver stub：记录 reload 调用次数
+    let reloadCount = 0;
+    let currentTool = "quality.cp_cpk.v1";
+    const reloadable: ToolResolver & { reload(): void } = {
+      async resolve(_need, _ctx) {
+        return { toolName: currentTool, params: {}, source: "index", confidence: 1.0 };
+      },
+      async resolveBatch() {
+        return [];
+      },
+      reload() {
+        reloadCount++;
+        currentTool = "quality.cp_cpk.v2"; // reload 后切到新工具
+      },
+    };
+    // 普通 stub（无 reload 方法）
+    const plain: ToolResolver = {
+      async resolve(_need, _ctx) {
+        return null;
+      },
+      async resolveBatch() {
+        return [];
+      },
+    };
+    const composite = new CompositeToolResolver([reloadable, plain]);
+    const need: SemanticNeed = { semantic: "process_capability", required: true };
+
+    // 第一次查询：命中 v1，缓存
+    const r1 = await composite.resolve(need, ctx);
+    expect(r1!.toolName).toBe("quality.cp_cpk.v1");
+
+    // reload：应触发 reloadable.reload() + 清缓存
+    composite.reload();
+    expect(reloadCount).toBe(1);
+
+    // 第二次查询：缓存已清 + reload 后切到 v2
+    const r2 = await composite.resolve(need, ctx);
+    expect(r2!.toolName).toBe("quality.cp_cpk.v2");
+  });
 });

@@ -15,6 +15,8 @@ import type { LanguageModel } from "ai";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { ToolTier } from "../tools/base.js";
 import type { CallSite } from "../llm/call-sites.js";
+import type { NarrationTemplates } from "./narrate-pass.js";
+import type { StepBudget } from "./step-budget.js";
 
 /** 循环停止策略配置。 */
 export interface StopPolicyConfig {
@@ -122,6 +124,18 @@ export interface PrepareStepContext {
   stepNumber: number;
   /** 用户原始意图。 */
   intent: string;
+  /**
+   * 步数预算（R4 平台机制）。
+   *
+   * 当 stopPolicy.maxSteps 配置时由 harness 自动计算并填充；缺省时为 undefined
+   * （应用层应做防御性处理，如不触发步数预警）。
+   *
+   * 应用读取 phase 决定策略：
+   *   - ramp_up：前期，可全量探索
+   *   - focus：中期，聚焦相关取证
+   *   - wrap_up：后期，强制收口（平台 stepBudgetWarnMiddleware 据此注入提示）
+   */
+  budget?: StepBudget;
 }
 
 /** prepareStep 返回（透传给 AI SDK v6 的 PrepareStepResult）。 */
@@ -176,6 +190,14 @@ export interface HarnessConfig {
   /** 追加到默认 agent 提示的 system 文本。 */
   systemPrompt?: string;
   /**
+   * 应用层注入的"思考与叙述"指引（覆盖平台默认文案）。
+   *
+   * 缺省时用平台内置的叙述指引（"调用工具前说明要查什么"等通用要求）。
+   * 应用如需自定义叙述纪律（如 NexusOps 的"工具阶段不要逐条 narrate，攒到末尾综合判断"），
+   * 通过此字段注入，平台层不再追加默认版本，避免两段指引同时存在产生矛盾。
+   */
+  thinkingGuidance?: string;
+  /**
    * 多轮追问：上一轮的压缩上下文（由 customRunner 注入）。
    *
    * 存在时 harness 把它作为 user 消息的前置段落注入，让 LLM 感知上一轮的
@@ -212,6 +234,29 @@ export interface HarnessConfig {
   narrateModel?: LanguageModel;
   /** 解读模型的兼容模式（DeepSeek 等折叠 system 进 user）。 */
   narrateCompatMode?: boolean;
+  /**
+   * 关闭独立的 narration pass，完全依赖主 LLM 的流式叙述。
+   *
+   * 缺省 false（保留 narration）。主模型叙述能力强的应用（如 NexusOps）可设 true，
+   * 省一次 LLM 调用 + 彻底消除 onStepFinish 的停顿。
+   */
+  disableNarration?: boolean;
+  /**
+   * 自定义 narration 模板文案（覆盖内置默认）。
+   * 仅 disableNarration=false 时生效。用于减少硬编码中文文案。
+   */
+  narrationTemplates?: NarrationTemplates;
+  /**
+   * 多工具解读的下发顺序（R9 NarrationSequencer）。
+   *
+   *   - "serial"（缺省）：按 toolCalls 顺序串行，每个解读完整下发后再开始下一个。
+   *     避免多工具解读 token 交错混乱，适合需要清晰分段叙述的应用。
+   *   - "concurrent"：多个解读用 Promise.all 并发跑，token 交错下发。
+   *     吞吐更高，但多解读文本会混合，适合每个解读都较短的场景。
+   *
+   * 缺省改为 "serial"（旧行为是 concurrent）。NexusOps disableNarration=true 不受影响。
+   */
+  narrationSequence?: "concurrent" | "serial";
   /** AbortSignal（外部中止）。 */
   abortSignal?: AbortSignal;
 }

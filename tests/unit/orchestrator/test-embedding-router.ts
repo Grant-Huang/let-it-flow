@@ -164,4 +164,56 @@ describe("EmbeddingToolRouter", () => {
     await router.buildIndex([]);
     expect(router.isReady()).toBe(false);
   });
+
+  it("reload() 注入 bucketProvider 时重建向量索引", async () => {
+    // 模拟 catalog 刷新：bucketProvider 第一次返回 1 个工具，第二次返回 2 个
+    let bucketCount = 1;
+    const bucketProvider = () => {
+      const base = [makeBucket()];
+      if (bucketCount >= 2) {
+        base.push(
+          makeBucket({
+            name: "mestar.query.xmjbda_1...select",
+            title: "项目档案",
+            desc: "项目基本档案查询",
+            triggers: ["项目档案"],
+          }),
+        );
+      }
+      return base;
+    };
+    const embedder = makeMockEmbedder();
+    const router = new EmbeddingToolRouter({ cacheDir: tmpDir, embedder, bucketProvider });
+
+    // 初始构建：1 个工具
+    await router.buildIndex(bucketProvider());
+    expect(router.indexSize()).toBe(1);
+
+    // 模拟 catalog 刷新：bucketProvider 返回值变化
+    bucketCount = 2;
+    // reload() 异步触发 buildIndex（不 await），等待微任务跑完
+    router.reload();
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(router.indexSize()).toBe(2);
+    expect(embedder.embed).toHaveBeenCalledTimes(2); // 初始 + reload 各一次
+  });
+
+  it("reload() 未注入 bucketProvider 时降级为 loadIndex", async () => {
+    const embedder = makeMockEmbedder();
+    // 第一个 router 构建并持久化
+    const router1 = new EmbeddingToolRouter({ cacheDir: tmpDir, embedder });
+    await router1.buildIndex([makeBucket()]);
+
+    // 第二个 router：不注入 bucketProvider，只 loadIndex
+    const embedder2 = makeMockEmbedder();
+    const router2 = new EmbeddingToolRouter({ cacheDir: tmpDir, embedder: embedder2 });
+    expect(router2.loadIndex()).toBe(true);
+    expect(router2.indexSize()).toBe(1);
+
+    // reload 应回退到 loadIndex（不调 embedder）
+    router2.reload();
+    expect(router2.isReady()).toBe(true);
+    expect(embedder2.embed).not.toHaveBeenCalled();
+  });
 });

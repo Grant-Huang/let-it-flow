@@ -9,7 +9,7 @@
  *
  * 关键价值：锁定 p5 修复的 5 个平台 bug 不回归：
  *   - 别名参数映射（thought.directive → core.llm_node.prompt）
- *   - stepTrace 丢失（boot precondition 分支不发 react_step_trace）
+ *   - stepTrace 丢失（boot precondition 分支不发 step_trace）
  *   - finalize 工具名转换（keyToName 精确映射，nexus_finalize 不被误转为 nexus.finalize）
  *   - kb 结果结构解析（data.results[].data.content）
  *   - 澄清反问误判（空 trace + 有文本 → no_tool_call，非 precondition_unmet）

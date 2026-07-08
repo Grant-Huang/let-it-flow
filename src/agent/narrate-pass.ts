@@ -19,7 +19,7 @@
  *     避免 token 爆炸
  *   - 第一人称、动词开头、点出关键数值与异常（见 docs/20 叙述规范）
  */
-import { generateText } from "ai";
+import { generateText, streamText } from "ai";
 import type { LanguageModel } from "ai";
 import {
   isEvidenceEnvelope,
@@ -55,6 +55,61 @@ export interface ToolCallForNarrate {
 
 /** data 字段序列化时的最大长度（超长截断，防 token 爆炸）。 */
 const MAX_DATA_DIGEST = 400;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 模板文案（可被应用自定义覆盖，减少硬编码）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 模板文案配置：应用可注入自定义函数覆盖默认文案。
+ * 用于 rejected/error/blocked/empty 等确定性结果，避免硬编码中文。
+ */
+export interface NarrationTemplates {
+  /** 用户在 HITL 门拒绝时的文案。 */
+  rejected?: (toolName: string) => string;
+  /** 工具执行抛错时的文案。 */
+  error?: (toolName: string, error: string) => string;
+  /** governance 阻断时的文案。 */
+  blocked?: (toolName: string, reason: string) => string;
+  /** 空结果时的文案。 */
+  empty?: (toolName: string) => string;
+}
+
+/** 内置默认模板文案（应用未注入时兜底）。 */
+export const DEFAULT_TEMPLATES: Required<NarrationTemplates> = {
+  rejected: (n) => `已跳过 ${n}（用户未确认执行）`,
+  error: (n, e) => `${n} 执行失败：${e}`,
+  blocked: (n, r) => `${n} 未执行（${r}）`,
+  empty: (n) => `${n} 未返回数据`,
+};
+
+/**
+ * 确定性结果的模板解读。返回 null 表示走 LLM 分支（EvidenceEnvelope / 裸对象）。
+ *
+ * 抽出来供 streamNarrateToolCall 和 narrateToolCall 复用，
+ * 并支持应用通过 templates 参数覆盖默认文案。
+ *
+ * @param tc         工具调用 trace
+ * @param templates  应用自定义文案（覆盖默认）
+ * @returns          模板文本；null 表示需走 LLM
+ */
+export function templateNarration(
+  tc: ToolCallForNarrate,
+  templates: NarrationTemplates = {},
+): string | null {
+  const t = { ...DEFAULT_TEMPLATES, ...templates };
+  if (tc.rejected) return t.rejected(tc.toolName);
+  if (tc.error) return t.error(tc.toolName, truncateReason(tc.error));
+  const blockReason = detectGovernanceBlock(tc.result);
+  if (blockReason) return t.blocked(tc.toolName, blockReason);
+  if (isEmptyResult(tc.result)) return t.empty(tc.toolName);
+  // EvidenceEnvelope 或裸对象 → 走 LLM
+  return null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 混合策略入口（保留原 narrateToolCall 向后兼容）
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * 对单步工具调用生成一段人类可读解读（混合策略入口）。
@@ -116,6 +171,88 @@ export async function narrateStepResult(
 ): Promise<string> {
   if (!isEvidenceEnvelope(result)) return "";
   return narrateEnvelope(toolName, toolArgs, result, options);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 流式版（streamText）：解读逐 token 下发，不阻塞 ReAct 主循环
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 流式解读选项。 */
+export interface StreamNarrateOptions extends NarrateStepOptions {
+  /** 接收流式 delta 的回调（每收到一段文本就调一次）。 */
+  onDelta: (delta: string) => void | Promise<void>;
+  /** 自定义模板文案（覆盖默认，减少硬编码）。 */
+  templates?: NarrationTemplates;
+}
+
+/**
+ * 流式版工具解读：用 streamText 替代 generateText，解读文本逐 token 通过 onDelta 下发。
+ *
+ * 解决原 narrateToolCall 的阻塞问题（generateText 等完整结果才返回，造成 SSE 成组停顿）。
+ *
+ * 策略与 narrateToolCall 对齐：
+ *   - 确定性结果（rejected/error/blocked/empty）→ 模板，整段通过 onDelta 一次性下发（零延迟）
+ *   - EvidenceEnvelope / 裸对象 → streamText 逐 token 流式
+ *   - 无模型 / 失败 → 静默（onDelta 不调）
+ *
+ * 模板分支的文本末尾补一个换行（与 LLM 分支对齐，harness 不再需要单独补换行）。
+ *
+ * @param tc       工具调用 trace
+ * @param options  onDelta 回调 + 模型 + 兼容模式 + 自定义模板
+ */
+export async function streamNarrateToolCall(
+  tc: ToolCallForNarrate,
+  options: StreamNarrateOptions,
+): Promise<void> {
+  const { model, compatMode = false, abortSignal, onDelta, templates } = options;
+
+  // 1. 模板分支优先（零延迟，整段下发）
+  const template = templateNarration(tc, templates);
+  if (template !== null) {
+    await onDelta(`${template}\n`);
+    return;
+  }
+
+  // 2. LLM 分支：无模型则静默
+  if (!model) return;
+
+  const isEnv = isEvidenceEnvelope(tc.result);
+  const env = isEnv ? (tc.result as EvidenceEnvelope) : undefined;
+  const digest = buildDataDigest(env?.data ?? tc.result);
+  const badge = env ? summarizeEvidence(env) : "(非信封结果)";
+  const system = buildNarrateSystemPrompt();
+  const user = buildNarrateUserPrompt(tc.toolName, tc.args, digest, badge);
+
+  try {
+    const callArgs = compatMode
+      ? { messages: [{ role: "user" as const, content: `${system}\n\n---\n${user}` }] }
+      : { system, messages: [{ role: "user" as const, content: user }] };
+
+    const narrateParams = resolveCallSiteParams("nexus_narrate");
+    const result = streamText({
+      model,
+      ...callArgs,
+      temperature: narrateParams.temperature,
+      maxOutputTokens: narrateParams.maxTokens,
+      abortSignal,
+    });
+
+    let emitted = false;
+    for await (const delta of result.textStream) {
+      if (delta) {
+        emitted = true;
+        await onDelta(delta);
+      }
+    }
+    // LLM 分支结束补换行（模板分支已在上面补过）
+    if (emitted) await onDelta("\n");
+  } catch (e) {
+    // 流式失败静默降级（与 narrateEnvelope 一致，不阻断主流程）
+    console.warn(
+      `[streamNarrate] ${tc.toolName} 解读失败：`,
+      e instanceof Error ? e.message : String(e),
+    );
+  }
 }
 
 /** EvidenceEnvelope / 裸对象走 LLM 解读的内部实现。 */

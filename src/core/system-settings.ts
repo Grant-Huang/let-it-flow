@@ -36,13 +36,25 @@ export interface SystemSettings {
   /** web_search 默认最大结果数。原 5。来源 web-search + planner heuristicParams。 */
   searchMaxResults: number;
   // ── 流式 ──
-  /** SSE 长连接最大挂起时间（ms）。原 5*60*1000。来源 tasks.ts。 */
+  /**
+   * SSE 推送模式：
+   *   - "push"：内存广播（EventBroadcaster），实时推送，端到端延迟个位数 ms
+   *   - "poll"：轮询磁盘（events.jsonl），兼容旧行为，延迟受 ssePollIntervalMs 影响
+   * 缺省 "push"（新架构）。出问题时可改 "poll" 回滚。
+   */
+  ssePushMode: "push" | "poll";
+  /** SSE 长连接最大挂起时间（ms）。原 5*60*1000。push/poll 都生效。 */
   sseDeadlineMs: number;
-  /** SSE 轮询事件间隔（ms）。原 50。来源 tasks.ts。 */
+  /** SSE 轮询事件间隔（ms）。仅 poll 模式生效。保留向后兼容。原 50。 */
   ssePollIntervalMs: number;
-  /** content 通道缓冲自动 flush 阈值（条数）。原 8。来源 coalescer。 */
+  /**
+   * 是否启用 coalescer 合并 content 通道。
+   * push 模式默认 false（content 立即 flush，最大实时性）；高并发场景可开以减少 SSE 帧数。
+   */
+  coalescerEnabled: boolean;
+  /** content 通道缓冲自动 flush 阈值（条数）。仅 coalescerEnabled=true 生效。原 8。 */
   coalescerMaxBuffer: number;
-  /** content 缓冲自动 flush 阈值（ms）。原 50。来源 coalescer。 */
+  /** content 缓冲自动 flush 阈值（ms）。仅 coalescerEnabled=true 生效。原 50。 */
   coalescerMaxDelayMs: number;
 }
 
@@ -56,8 +68,10 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   contentSummarize: false,
   fetchMaxBytes: 1_000_000,
   searchMaxResults: 5,
+  ssePushMode: "push",
   sseDeadlineMs: 5 * 60 * 1000,
   ssePollIntervalMs: 50,
+  coalescerEnabled: false,
   coalescerMaxBuffer: 8,
   coalescerMaxDelayMs: 50,
 };
@@ -83,8 +97,15 @@ export function loadSystemSettings(dataDir: string = getDataDir()): SystemSettin
     const merged = { ...DEFAULT_SYSTEM_SETTINGS };
     for (const key of Object.keys(DEFAULT_SYSTEM_SETTINGS) as (keyof SystemSettings)[]) {
       const v = parsed[key];
-      if (v !== undefined && typeof v === typeof DEFAULT_SYSTEM_SETTINGS[key]) {
-        // 类型已对齐（number/boolean），直接赋值
+      if (v === undefined) continue;
+      // ssePushMode 是字符串字面量联合，额外校验合法值
+      if (key === "ssePushMode") {
+        if (v === "push" || v === "poll") {
+          (merged as unknown as Record<string, unknown>)[key] = v;
+        }
+        continue;
+      }
+      if (typeof v === typeof DEFAULT_SYSTEM_SETTINGS[key]) {
         (merged as unknown as Record<string, unknown>)[key] = v;
       }
     }
@@ -113,6 +134,10 @@ export function patchSystemSettings(
     if (merged[key] !== undefined && typeof merged[key] !== typeof DEFAULT_SYSTEM_SETTINGS[key]) {
       throw new Error(`字段 ${key} 类型错误：期望 ${typeof DEFAULT_SYSTEM_SETTINGS[key]}`);
     }
+  }
+  // ssePushMode 合法值校验
+  if (merged.ssePushMode !== "push" && merged.ssePushMode !== "poll") {
+    throw new Error(`字段 ssePushMode 值非法：期望 push|poll，实际 ${merged.ssePushMode}`);
   }
   saveSystemSettings(merged, dataDir);
   return merged;

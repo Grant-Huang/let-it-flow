@@ -102,17 +102,26 @@ export const SERVICE_URLS = {
 } as const;
 
 /**
- * 日志 verbose 级别（控制 events.jsonl / llm_calls.ndjson 落盘内容）：
- *   0 = off（不写日志文件，仅走 SSE）
- *   1 = basic（工具调用元信息 + 终态，不含 narrative text / workflow_node）
- *   2 = full（全部事件，含 Claude Code 风格 narrative；缺省）
+ * 日志落盘开关（控制 events.jsonl / llm_calls.ndjson 是否写入磁盘）：
+ *   false = off（完全不写日志文件；仅内存实时分发）
+ *   true  = on（全部事件落盘；缺省）
+ *
+ * 注意：此开关只影响「是否落盘」，不影响 SSE 实时推送与会话框渲染——
+ * 前端实时显示在两种模式下完全一致（走 EventBroadcaster 内存广播）。
+ * 历史会话回放仍读落盘文件，off 模式下历史会话将无法重建（这是 off 的本质）。
+ *
+ * 取值规则（env: LIF_LOG_PERSIST）：
+ *   - 缺省 / 非法值 → true（on，安全缺省）
+ *   - "0" / "false" / "off" / 负数 → false（off）
+ *   - 其它非空值 → true（on）
  *
  * 惰性读取（同 getDataDir 模式），便于测试切换 + 运行时改 env 生效。
- * 见 docs/20-narrative-output-rules.md §七「已知限制」末尾的 verbose 说明。
  */
-export function getLogVerbose(): number {
-  const raw = Number(process.env.LIF_LOG_VERBOSE ?? "2");
-  if (Number.isNaN(raw) || raw < 0) return 2;
-  if (raw > 2) return 2;
-  return Math.floor(raw);
+export function getLogPersist(): boolean {
+  const raw = process.env.LIF_LOG_PERSIST ?? "true";
+  const lower = raw.toLowerCase();
+  if (lower === "0" || lower === "false" || lower === "off") return false;
+  const num = Number(raw);
+  if (!Number.isNaN(num) && num <= 0) return false;
+  return true;
 }

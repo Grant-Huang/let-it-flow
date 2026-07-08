@@ -109,4 +109,32 @@ describe("IndexToolResolver", () => {
     const result = await resolver.resolve(need, ctx);
     expect(result).toBeNull();
   });
+
+  it("reload() 重载索引文件（运行时刷新场景）", async () => {
+    // 初始：只有 process_capability
+    writeIndex([
+      { semantic: "process_capability", toolName: "quality.cp_cpk", primary: true },
+    ]);
+    const resolver = new IndexToolResolver(indexPath);
+
+    // 此时 defect_rate 还没登记
+    const need1: SemanticNeed = { semantic: "defect_rate", required: true };
+    expect(await resolver.resolve(need1, ctx)).toBeNull();
+
+    // 模拟 catalog 定时刷新重写了 tool-index.json（新增 defect_rate 条目）
+    writeIndex([
+      { semantic: "process_capability", toolName: "quality.cp_cpk", primary: true },
+      { semantic: "defect_rate", toolName: "quality.fpy", primary: true },
+    ]);
+
+    // reload 之前内存仍是旧的（defect_rate 仍 miss）
+    expect(await resolver.resolve(need1, ctx)).toBeNull();
+
+    // reload 后内存同步到磁盘最新（defect_rate 命中）
+    resolver.reload();
+    const result = await resolver.resolve(need1, ctx);
+    expect(result).not.toBeNull();
+    expect(result!.toolName).toBe("quality.fpy");
+    expect(result!.source).toBe("index");
+  });
 });

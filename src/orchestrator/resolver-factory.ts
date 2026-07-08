@@ -20,6 +20,7 @@ import { IndexToolResolver } from "./index-resolver.js";
 import { LlmToolResolver, makeEmbeddingCandidateProvider, type LlmClient } from "./llm-resolver.js";
 import { CompositeToolResolver } from "./composite-resolver.js";
 import type { EmbeddingToolRouter } from "./embedding-router.js";
+import type { KpiResolver } from "./kpi-resolver.js";
 
 /** 工厂选项。 */
 export interface ToolResolverOptions {
@@ -33,6 +34,20 @@ export interface ToolResolverOptions {
   compatMode?: boolean;
   /** 可选：EmbeddingToolRouter 实例（catalog 模式 server 注入）。 */
   embeddingRouter?: EmbeddingToolRouter;
+  /**
+   * 可选：catalog 全量工具清单（catalog 模式 server 注入）。
+   *
+   * 当 EmbeddingRouter 返回空候选时，让 LlmToolResolver 从 catalog 全量工具里选，
+   * 而非降级到 registry 的 domain tier（拿不到 mestar 工具）。
+   */
+  catalogBucketProvider?: () => Array<{ name: string; title: string; desc: string; displayName?: string; triggers?: string[] }>;
+  /**
+   * 可选：KpiResolver 实例（catalog 模式 server 暴露 KPI 体系时注入）。
+   *
+   * 链路位置：作为解析链的**第一层**（在 Index 之前），负责"指标级"理解。
+   * 当用户问的语义对应一个 KPI 但企业缺数据时，产出 composite 实现可解释降级。
+   */
+  kpiResolver?: KpiResolver;
 }
 
 /**
@@ -61,20 +76,45 @@ function makeAiLlmClient(model: LanguageModel, compatMode: boolean): LlmClient {
  * @returns CompositeToolResolver（调用方不感知内部档位）
  */
 export function createToolResolver(opts: ToolResolverOptions): ToolResolver {
-  const resolvers: ToolResolver[] = [new IndexToolResolver(opts.indexPath ?? "data/relos-mock/tool-index.json")];
+  const resolvers: ToolResolver[] = [];
 
-  // 可选：插入 EmbeddingToolRouter（在 Index 之后、LLM 之前）
+  // 0. KpiResolver（第一层：指标级理解，产出可解释降级）
+  if (opts.kpiResolver) {
+    resolvers.push(opts.kpiResolver);
+  }
+
+  // 1. IndexToolResolver（索引命中，快）
+  resolvers.push(new IndexToolResolver(opts.indexPath ?? "data/relos-mock/tool-index.json"));
+
+  // 2. 可选：插入 EmbeddingToolRouter（在 Index 之后、LLM 之前）
   if (opts.embeddingRouter && opts.embeddingRouter.isReady()) {
     resolvers.push(opts.embeddingRouter);
   }
 
+  // 3. LlmToolResolver（LLM 推理兜底）
   if (opts.model) {
     const llmClient = makeAiLlmClient(opts.model, opts.compatMode ?? false);
     // 如果有 EmbeddingRouter，让 LlmToolResolver 只在它路由的候选里选（省 token）
     const candidateProvider = opts.embeddingRouter
       ? makeEmbeddingCandidateProvider(opts.embeddingRouter, 10)
       : undefined;
-    resolvers.push(new LlmToolResolver({ registry: opts.registry, llm: llmClient, candidateProvider }));
+    // catalog 兜底：Embedding 候选为空时，从 catalog 全量工具里选
+    const catalogFallbackProvider = opts.catalogBucketProvider
+      ? () =>
+          opts.catalogBucketProvider!().map((b) => ({
+            name: b.name,
+            description: b.displayName ? `${b.displayName}（${b.desc}）` : `${b.title}（${b.desc}）`,
+            triggers: b.triggers,
+          }))
+      : undefined;
+    resolvers.push(
+      new LlmToolResolver({
+        registry: opts.registry,
+        llm: llmClient,
+        candidateProvider,
+        catalogFallbackProvider,
+      }),
+    );
   }
 
   return new CompositeToolResolver(resolvers);

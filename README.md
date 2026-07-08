@@ -46,7 +46,7 @@ curl -N http://localhost:8787/api/tasks/{task_id}/stream
 或 SDK 形态（进程内）：
 
 ```typescript
-import { LetItFlow } from "let-it-flow";
+import { LetItFlow } from "@meso.ai/let-it-flow";
 const flow = new LetItFlow({ plannerModel: "openai/gpt-4o" });
 const stream = await flow.execute("分析宁德时代的新能源电池行业地位");
 for await (const chunk of stream) { /* 处理流式事件 */ }

@@ -1,4 +1,5 @@
 import { mkdirSync, writeFileSync, readFileSync, appendFileSync, existsSync, readdirSync, statSync, renameSync } from "node:fs";
+import { appendFile } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { getTasksDir, getArtifactsDir, ensureStorageDirs } from "../core/config.js";
@@ -38,6 +39,21 @@ export function readJsonSync<T = unknown>(filePath: string): T | null {
 export function appendJsonlLine(filePath: string, line: unknown): void {
   ensureDir(resolve(filePath, ".."));
   appendFileSync(filePath, `${JSON.stringify(line)}\n`, "utf8");
+}
+
+/**
+ * 异步向 jsonl 文件追加一行（自动建目录）。
+ *
+ * 用于 SSE push 模式：落盘改为异步旁路，不阻塞 emit 返回，
+ * 让内存广播（EventBroadcaster）能立即把事件推给 SSE 订阅者。
+ *
+ * 风险：进程崩溃时未 flush 的异步 append 可能丢失最后几条事件。
+ * seq 计数仍由 meta.lastSeq 同步维护（writeJsonAtomicSync），断线重连 seq 不乱，
+ * 仅 events.jsonl 文件可能缺最后几行——readJsonlSync 会跳过损坏行，容错健壮。
+ */
+export async function appendJsonlLineAsync(filePath: string, line: unknown): Promise<void> {
+  ensureDir(resolve(filePath, ".."));
+  await appendFile(filePath, `${JSON.stringify(line)}\n`, "utf8");
 }
 
 /** 读 jsonl 文件全部行；不存在返回空数组。 */

@@ -53,12 +53,14 @@ function makeStepTrace(thought: string, toolName?: string): StepTrace {
   };
 }
 
-/** 往 task 追加一个 react_step_trace extension 事件（模拟 NexusOps customRunner 落库）。 */
+/** 往 task 追加一个 step_trace extension 事件（模拟 NexusOps customRunner 落库）。
+ *  R3 迁移后用新 name "step_trace"；旧 task 用 "react_step_trace"（兼容读取）。 */
 function appendStepTraceEvent(
   store: FileTaskStore,
   taskId: string,
   stepTrace: StepTrace[],
   finalText: string,
+  name: "step_trace" | "react_step_trace" = "step_trace",
 ): void {
   const ev: Omit<StreamEvent, "seq"> = {
     type: "extension",
@@ -66,7 +68,7 @@ function appendStepTraceEvent(
     ts: Date.now(),
     channel: "status",
     payload: {
-      name: "react_step_trace",
+      name,
       version: "1.0",
       data: { stepTrace, finalText },
     },
@@ -422,7 +424,7 @@ describe("stepTrace 持久化与还原（多轮上下文读取基础）", () => 
     delete process.env.LIF_DATA_DIR;
   });
 
-  it("extension(react_step_trace) 事件落库后可被 readByType 读回", () => {
+  it("extension(step_trace) 事件落库后可被 readByType 读回", () => {
     const store = new FileTaskStore();
     const meta = store.create("首轮");
     const trace: StepTrace[] = [makeStepTrace("首轮分析", "oee.realtime")];
@@ -430,7 +432,7 @@ describe("stepTrace 持久化与还原（多轮上下文读取基础）", () => 
 
     const events = store.readByType(meta.id, "extension");
     const stepTraceEvent = events.find(
-      (e) => (e.payload as { name?: string }).name === "react_step_trace",
+      (e) => (e.payload as { name?: string }).name === "step_trace",
     );
     expect(stepTraceEvent).toBeTruthy();
     const data = (stepTraceEvent!.payload as { data: Record<string, unknown> }).data;
@@ -438,10 +440,10 @@ describe("stepTrace 持久化与还原（多轮上下文读取基础）", () => 
     expect(data.finalText).toBe("OEE=0.65");
   });
 
-  it("无 react_step_trace 事件的 task 还原为空（降级为无上下文）", () => {
+  it("无 step_trace 事件的 task 还原为空（降级为无上下文）", () => {
     const store = new FileTaskStore();
     const meta = store.create("首轮");
-    // 只追加普通事件，无 react_step_trace
+    // 只追加普通事件，无 step_trace
     store.append(meta.id, {
       type: "text",
       taskId: meta.id,
@@ -452,7 +454,7 @@ describe("stepTrace 持久化与还原（多轮上下文读取基础）", () => 
 
     const events = store.readByType(meta.id, "extension");
     const stepTraceEvent = events.find(
-      (e) => (e.payload as { name?: string }).name === "react_step_trace",
+      (e) => (e.payload as { name?: string }).name === "step_trace",
     );
     expect(stepTraceEvent).toBeUndefined();
   });

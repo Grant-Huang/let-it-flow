@@ -211,10 +211,10 @@ export const scenarioL5MultiTurnFollowUp: Scenario = {
   hypothesis: "用户首轮得出分析报告后，基于上轮结果继续追问（如'深挖 OEE 损失'）",
   purpose: "验证会话链聚合（ConversationStore）+ compressTrace 能把上一轮取证轨迹压成上下文，供追问轮的 ReAct harness 注入",
   procedure: [
-    "在临时 data 目录创建首轮 task，标记 done，并持久化 extension(react_step_trace) 事件",
+    "在临时 data 目录创建首轮 task，标记 done，并持久化 extension(step_trace) 事件",
     "创建追问 task（同一 conversationId，parentTaskId 指向首轮）",
     "用 ConversationStore.getLatestCompleted 取上一轮 done task",
-    "从上一轮 events 读回 react_step_trace，用 compressTrace 压成 traceDigest",
+    "从上一轮 events 读回 step_trace，用 compressTrace 压成 traceDigest",
     "构造 previousContext（intent + traceDigest + finalText）并断言内容完整",
   ],
   calls: [
@@ -274,7 +274,7 @@ export const scenarioL5MultiTurnFollowUp: Scenario = {
       const finalText = "L01 OEE=0.65，主要损失在性能率（0.72），疑为设备降速";
       store.append(first.id, {
         type: "extension", taskId: first.id, ts: Date.now(), channel: "status",
-        payload: { name: "react_step_trace", version: "1.0", data: { stepTrace: trace, finalText } },
+        payload: { name: "step_trace", version: "1.0", data: { stepTrace: trace, finalText } },
       } as Omit<StreamEvent, "seq">);
 
       // 断言1：会话聚合找到上一轮 done task
@@ -285,7 +285,7 @@ export const scenarioL5MultiTurnFollowUp: Scenario = {
       // 断言2：从 events 读回 stepTrace → compressTrace → 构造 previousContext
       const events = store.readByType(first.id, "extension");
       const stEvent = events.find(
-        (e) => (e.payload as { name?: string }).name === "react_step_trace",
+        (e) => (e.payload as { name?: string }).name === "step_trace",
       );
       const stData = (stEvent!.payload as { data: { stepTrace: StepTrace[]; finalText: string } }).data;
       const previousContext = {

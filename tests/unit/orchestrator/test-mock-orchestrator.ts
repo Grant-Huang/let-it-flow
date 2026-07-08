@@ -194,6 +194,78 @@ describe("MockOrchestrator - syncToolIndex", () => {
     expect(raw.tools[0].name).toBe("quality.cp_cpk");
     expect(raw.syncedAt).toBeDefined();
   });
+
+  it("syncToolIndex 采用 merge 语义：保留外部写入的工具 + entries", async () => {
+    // 模拟 McpCatalogCache.persistToToolIndex 先写入 mestar 工具 + entries
+    const indexPath = join(tmpDir, "tool-index.json");
+    mkdirSync(tmpDir, { recursive: true });
+    const preExisting = {
+      version: "1.0",
+      enterprise: "nexusops-mock",
+      syncedAt: "2026-07-06T06:19:57.000Z",
+      tools: [
+        {
+          name: "MES.Bom.Capability.Query",
+          description: "查询系统BOM设置",
+          semanticTags: ["系统BOM设置", "Capability"],
+          whenToUse: { triggers: ["查询系统BOM设置"], notFor: [] },
+        },
+      ],
+      entries: [
+        { semantic: "bom_capability", toolName: "MES.Bom.Capability.Query", primary: true },
+      ],
+    };
+    writeFileSync(indexPath, JSON.stringify(preExisting, null, 2));
+
+    const orch = new MockOrchestrator(tmpDir);
+    const manifest = [
+      { name: "core.web_search", semanticTags: ["search"], description: "搜索", whenToUse: { triggers: ["搜索"], notFor: [] } },
+    ];
+    await orch.syncToolIndex(manifest);
+
+    const raw = JSON.parse(readFileSync(indexPath, "utf8"));
+    // manifest 写入的工具在前
+    expect(raw.tools.length).toBe(2);
+    expect(raw.tools.map((t: { name: string }) => t.name)).toContain("core.web_search");
+    // mestar 工具被保留
+    expect(raw.tools.map((t: { name: string }) => t.name)).toContain("MES.Bom.Capability.Query");
+    // entries 被完整保留
+    expect(raw.entries).toBeDefined();
+    expect(raw.entries.length).toBe(1);
+    expect(raw.entries[0].semantic).toBe("bom_capability");
+  });
+
+  it("syncToolIndex 同名工具以 manifest 为准（本地工具定义覆盖）", async () => {
+    const indexPath = join(tmpDir, "tool-index.json");
+    mkdirSync(tmpDir, { recursive: true });
+    const preExisting = {
+      version: "1.0",
+      enterprise: "nexusops-mock",
+      syncedAt: "2026-07-06T06:19:57.000Z",
+      tools: [
+        // 旧版定义（desc 不同）
+        { name: "core.web_search", description: "旧描述", whenToUse: { triggers: [], notFor: [] } },
+        // 外部工具（保留）
+        { name: "mestar.foo", description: "mestar 工具", semanticTags: ["foo"] },
+      ],
+    };
+    writeFileSync(indexPath, JSON.stringify(preExisting, null, 2));
+
+    const orch = new MockOrchestrator(tmpDir);
+    const manifest = [
+      { name: "core.web_search", description: "新描述（manifest 覆盖）", whenToUse: { triggers: ["搜索"], notFor: [] } },
+    ];
+    await orch.syncToolIndex(manifest);
+
+    const raw = JSON.parse(readFileSync(indexPath, "utf8"));
+    // core.web_search 用 manifest 的新定义（desc 被覆盖），不重复
+    const ws = raw.tools.filter((t: { name: string }) => t.name === "core.web_search");
+    expect(ws.length).toBe(1);
+    expect(ws[0].description).toBe("新描述（manifest 覆盖）");
+    // mestar.foo 保留
+    const foo = raw.tools.filter((t: { name: string }) => t.name === "mestar.foo");
+    expect(foo.length).toBe(1);
+  });
 });
 
 describe("MockOrchestrator - 降级", () => {

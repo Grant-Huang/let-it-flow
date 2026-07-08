@@ -15,8 +15,10 @@
 import { generateText } from "ai";
 import type { LanguageModel } from "ai";
 import type { StepTrace } from "./types.js";
-import { isEvidenceEnvelope, summarizeEvidence } from "../core/evidence-envelope.js";
 import { resolveCallSiteParams } from "../llm/llm-config.js";
+// compressTrace 已迁移到 trace-compressor.ts（R5 平台回归）；本模块导入并 re-export 保持向后兼容。
+import { compressTrace } from "./trace-compressor.js";
+export { compressTrace };
 
 /** review pass 产出的可信度报告。 */
 export interface ReviewReport {
@@ -91,36 +93,10 @@ export async function runReviewPass(
 /**
  * 把 stepTrace 压成精简文本：每步的 thought 摘要 + 工具调用 + 证据徽章。
  * 跳过空步骤，截断过长的 thought。
+ *
+ * @deprecated 已迁移到 trace-compressor.ts（R5 平台回归）。本模块通过 re-export 保持向后兼容。
+ *             请从 trace-compressor.ts 或平台导出导入。
  */
-export function compressTrace(stepTrace: StepTrace[]): string {
-  const lines: string[] = [];
-  for (const step of stepTrace) {
-    const parts: string[] = [];
-    if (step.thought) {
-      // 截断 thought 到 200 字，避免上下文爆炸
-      const t = step.thought.length > 200 ? step.thought.slice(0, 200) + "…" : step.thought;
-      parts.push(`Thought: ${t}`);
-    }
-    for (const tc of step.toolCalls) {
-      if (tc.rejected) {
-        parts.push(`Action: ${tc.toolName}(已拒绝)`);
-        continue;
-      }
-      const evidenceTag = formatEvidenceTag(tc.result);
-      parts.push(`Action: ${tc.toolName}${evidenceTag}`);
-    }
-    if (parts.length > 0) {
-      lines.push(`[Step ${step.stepNumber}] ${parts.join(" | ")}`);
-    }
-  }
-  return lines.join("\n");
-}
-
-/** 工具结果若是 EvidenceEnvelope，附上简短徽章（来源/时效/置信度）。 */
-function formatEvidenceTag(result: unknown): string {
-  if (!isEvidenceEnvelope(result)) return "";
-  return ` → ${summarizeEvidence(result)}`;
-}
 
 /** review system prompt：定义审计员角色 + 输出格式。 */
 function buildReviewSystemPrompt(): string {

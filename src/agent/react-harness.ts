@@ -22,13 +22,17 @@ import { streamText } from "ai";
 import { buildStopWhen } from "./stop-policy.js";
 import { adaptToolSet, toolNameToKey } from "./tool-adapter.js";
 import { TraceAccumulator, emitStepPhase } from "./step-emitter.js";
-import { narrateToolCall } from "./narrate-pass.js";
+import { streamNarrateToolCall } from "./narrate-pass.js";
+import { computeStepBudget } from "./step-budget.js";
 import type {
   HarnessConfig,
   HarnessResult,
   StepTrace,
   Precondition,
+  EmitFn,
 } from "./types.js";
+import type { NarrationTemplates } from "./narrate-pass.js";
+import type { LanguageModel } from "ai";
 
 /**
  * 执行一次 ReAct 任务。
@@ -50,10 +54,14 @@ export async function runReactHarness(
     preconditions = [],
     emit,
     systemPrompt,
+    thinkingGuidance,
     previousContext,
     abortSignal,
     narrateModel,
     narrateCompatMode = false,
+    disableNarration = false,
+    narrationTemplates,
+    narrationSequence = "serial",
   } = config;
   const compatMode = config.compatMode ?? false;
 
@@ -100,7 +108,7 @@ export async function runReactHarness(
   const stopWhen = buildStopWhen(stopPolicy, extraConditions);
 
   // 3. system prompt
-  const system = buildSystemPrompt(intent, systemPrompt, connectors.map((c) => c.name), stopPolicy?.finalizeTool);
+  const system = buildSystemPrompt(intent, systemPrompt, connectors.map((c) => c.name), stopPolicy?.finalizeTool, thinkingGuidance);
 
   // 4. trace 累积器 + HITL 决策记录
   const accumulator = new TraceAccumulator();
@@ -152,36 +160,51 @@ export async function runReactHarness(
           });
         }
         // O 层增强：为每个工具调用生成人类可读解读，emit 为 text 事件，让用户跟上分析节奏。
-        // 混合策略：失败/拒绝/阻断/空 → 模板（零延迟）；EvidenceEnvelope → narrateModel LLM 解读。
-        // narrateModel 缺省时仍走模板分支（不再整体静默），仅 LLM 解读路径被跳过。
-        if (trace.toolCalls.length > 0) {
-          for (const tc of trace.toolCalls) {
-            const narration = await narrateToolCall(
-              {
-                toolName: tc.toolName,
-                args: tc.args,
-                result: tc.result,
-                rejected: tc.rejected,
-                error: tc.error,
-              },
-              { model: narrateModel, compatMode: narrateCompatMode, abortSignal },
-            );
-            if (narration) {
-              await emit?.({
-                type: "text",
-                channel: "content",
-                payload: { delta: `${narration}\n` },
-              });
-            }
-          }
+        // 关键改动（方案 B）：改为 fire-and-forget，不 await，不阻塞下一步 ReAct 推进。
+        //   - 确定性结果（失败/拒绝/阻断/空）→ 模板（零延迟），整段通过 onDelta 下发
+        //   - EvidenceEnvelope → streamText 逐 token 流式 emit（不再 generateText 整段阻塞）
+        //   - 多个工具解读并发跑（Promise.all），delta 交错下发（短句 ≤80 字，交错感弱）
+        // disableNarration=true 时完全跳过（靠主 LLM 流式叙述，省一次 LLM 调用）
+        if (
+          !disableNarration &&
+          trace.toolCalls.length > 0 &&
+          (narrateModel || narrationTemplates)
+        ) {
+          void fireNarrations(trace.toolCalls, {
+            emit,
+            narrateModel,
+            narrateCompatMode,
+            abortSignal,
+            templates: narrationTemplates,
+            sequence: narrationSequence,
+          });
         }
       },
-      prepareStep: async ({ steps, stepNumber }) => {
+      prepareStep: async ({ steps, stepNumber, messages: sdkMessages }) => {
         // C 层钩子：应用自定义裁剪/注入（支持异步，用于证据评估）
         if (!prepareStep) return undefined;
         const stepTraces = steps.map((s) => convertStep(s, riskMap, confirmedSet, rejectedSet, keyToName));
-        const stepResult = await prepareStep({ steps: stepTraces, stepNumber, intent });
+        // R4：平台计算步数预算并透传（应用层读取 phase 决定策略）
+        const budget = stopPolicy?.maxSteps
+          ? computeStepBudget(stepNumber, stopPolicy.maxSteps)
+          : undefined;
+        const stepResult = await prepareStep({ steps: stepTraces, stepNumber, intent, budget });
         if (!stepResult) return undefined;
+        // compatMode 兼容（DeepSeek 等）：
+        // SDK 的 OpenAI provider 会把 reasoning model 的 system message 转成 `developer` role，
+        // 而 DeepSeek 不支持该 role。compatMode 下把 system 内容折叠进 messages（追加一条 user
+        // 消息），避免 SDK 生成独立的 system/developer message。
+        if (compatMode && stepResult.system && sdkMessages) {
+          const foldedMessages = [
+            ...sdkMessages,
+            { role: "user" as const, content: stepResult.system },
+          ];
+          return {
+            ...(stepResult.activeTools ? { activeTools: stepResult.activeTools.map(toolNameToKey) } : {}),
+            ...(stepResult.toolChoice ? { toolChoice: stepResult.toolChoice } : {}),
+            messages: foldedMessages,
+          };
+        }
         // 透传成 SDK 的 PrepareStepResult（activeTools 转成 SDK key 形态）
         return {
           ...(stepResult.activeTools ? { activeTools: stepResult.activeTools.map(toolNameToKey) } : {}),
@@ -287,21 +310,27 @@ function buildSystemPrompt(
   extra: string | undefined,
   toolNames: string[],
   finalizeTool: string | undefined,
+  thinkingGuidance?: string,
 ): string {
   const parts = [
     "你是一个运营智能分析助手，使用 ReAct（Thought→Action→Observation）模式工作。",
     "每步你可以：思考（输出 text）或调用工具（function call）。工具返回的 Observation 会追加进上下文。",
     "根据证据的时效性（freshness）和置信度（confidence）谨慎判断——estimated/historical 数据需更多交叉验证。",
-    "",
-    "## 思考与叙述（重要）",
-    "你的每一步思考都会直接呈现给用户，不要静默执行。具体要求：",
-    "- 调用工具前，先用一两句话说明这一步要查什么、为什么查（如\"我先看实时 OEE，定位是哪一项拖累效率。\"）。",
-    "- 拿到结果后，结合数据简短点出关键发现（如\"可用率 0.62 偏低，需查停机原因。\"）。",
-    "- 让用户跟上你的分析节奏，不要省略这些过渡说明。",
-    "",
-    `## 可用工具（${toolNames.length} 个）`,
-    toolNames.join("、"),
   ];
+  // 应用层注入则用应用层版本，否则用平台默认叙述指引
+  if (thinkingGuidance) {
+    parts.push("", thinkingGuidance);
+  } else {
+    parts.push(
+      "",
+      "## 思考与叙述（重要）",
+      "你的每一步思考都会直接呈现给用户，不要静默执行。具体要求：",
+      "- 调用工具前，先用一两句话说明这一步要查什么、为什么查（如\"我先看实时 OEE，定位是哪一项拖累效率。\"）。",
+      "- 拿到结果后，结合数据简短点出关键发现（如\"可用率 0.62 偏低，需查停机原因。\"）。",
+      "- 让用户跟上你的分析节奏，不要省略这些过渡说明。",
+    );
+  }
+  parts.push("", `## 可用工具（${toolNames.length} 个）`, toolNames.join("、"));
   if (finalizeTool) {
     parts.push(
       "",
@@ -390,3 +419,76 @@ function convertStep(
     durationMs: 0,
   };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 后台流式 narration（fire-and-forget，不阻塞 ReAct 主循环）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 并发或串行流式生成多个工具解读，逐 token emit。
+ *
+ * 设计要点（方案 B + R9 NarrationSequencer）：
+ *   - 由 onStepFinish 以 `void fireNarrations(...)` 触发，不 await（fire-and-forget）
+ *     → 不阻塞下一步 ReAct 推进，消除"工具解读停顿→突发"现象
+ *   - sequence 模式：
+ *       "concurrent"：多个工具解读用 Promise.all 并发跑（原实现，多解读交错下发）
+ *       "serial"（默认）：按 toolCalls 顺序串行，每个解读完整下发后再开始下一个
+ *         → 避免多工具解读 token 交错混乱（适合需要清晰分段叙述的应用）
+ *   - 每个 streamNarrateToolCall 内部：
+ *       模板分支 → onDelta 整段下发（零延迟）
+ *       LLM 分支 → streamText 逐 token 下发（不再 generateText 整段阻塞）
+ *   - 解读文本通过 emit 以 text/content 事件下发，复用 SSE push 通道（实时）
+ *
+ * @param toolCalls  本步的工具调用 trace 列表
+ * @param opts       emit + narrateModel + 兼容模式 + abortSignal + 自定义模板 + sequence
+ */
+async function fireNarrations(
+  toolCalls: StepTrace["toolCalls"],
+  opts: {
+    emit?: EmitFn;
+    narrateModel?: LanguageModel;
+    narrateCompatMode: boolean;
+    abortSignal?: AbortSignal;
+    templates?: NarrationTemplates;
+    /** 多工具解读的下发顺序：serial（默认，按序） / concurrent（并发交错）。 */
+    sequence?: "concurrent" | "serial";
+  },
+): Promise<void> {
+  const sequence = opts.sequence ?? "serial";
+  const narrateOne = (tc: StepTrace["toolCalls"][number]) =>
+    streamNarrateToolCall(
+      {
+        toolName: tc.toolName,
+        args: tc.args,
+        result: tc.result,
+        rejected: tc.rejected,
+        error: tc.error,
+      },
+      {
+        model: opts.narrateModel,
+        compatMode: opts.narrateCompatMode,
+        abortSignal: opts.abortSignal,
+        templates: opts.templates,
+        onDelta: async (delta) => {
+          await opts.emit?.({
+            type: "text",
+            channel: "content",
+            payload: { delta },
+          });
+        },
+      },
+    );
+
+  if (sequence === "concurrent") {
+    // 并发：多个解读同时跑，token 交错下发（原行为）
+    await Promise.all(toolCalls.map(narrateOne));
+  } else {
+    // 串行（默认）：按 toolCalls 顺序，每个完整下发后再开始下一个
+    for (const tc of toolCalls) {
+      await narrateOne(tc);
+    }
+  }
+}
+
+// 导出供单元测试验证 fire-and-forget 语义（不改逻辑，仅为测试可达性）
+export { fireNarrations };

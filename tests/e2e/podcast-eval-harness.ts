@@ -35,7 +35,7 @@ export interface PodcastResult {
   artifacts: PodcastArtifact[];
   /** 累积的 finalText。 */
   finalText: string;
-  /** stepTrace（从 react_step_trace 事件还原）。 */
+  /** stepTrace（从 step_trace 事件还原，兼容旧名 react_step_trace）。 */
   stepTrace: StepTrace[];
   /** 所有 tool_result 里检测到的错误（error/governance_blocked/schema 错）。 */
   toolErrors: ToolError[];
@@ -193,12 +193,16 @@ export function extractCalledTools(events: StreamEvent[]): string[] {
   return out;
 }
 
-/** 从 react_step_trace 事件还原 stepTrace。 */
+/** 从 step_trace 事件还原 stepTrace（兼容旧名 react_step_trace）。 */
 function extractStepTrace(events: StreamEvent[]): StepTrace[] {
   for (const ev of events) {
     if (ev.type !== "extension") continue;
     const p = ev.payload as { name?: string; data?: { stepTrace?: StepTrace[] } };
-    if (p?.name === "react_step_trace" && Array.isArray(p.data?.stepTrace)) {
+    // 兼容新旧 name：step_trace（新，R3 迁移后）/ react_step_trace（旧）
+    if (
+      (p?.name === "step_trace" || p?.name === "react_step_trace") &&
+      Array.isArray(p.data?.stepTrace)
+    ) {
       return p.data!.stepTrace!;
     }
   }

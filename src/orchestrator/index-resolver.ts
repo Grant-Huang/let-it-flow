@@ -8,7 +8,7 @@
  * 命中即返回，source="index"，confidence=1.0。
  */
 import { readFileSync, existsSync } from "node:fs";
-import type { ToolResolver, ResolvedTool, IndexEntry } from "./tool-resolver.js";
+import type { ToolResolver, ResolvedTool, IndexEntry, ReloadableResolver } from "./tool-resolver.js";
 import type { BizContext, SemanticNeed } from "./types.js";
 
 /** 索引文件结构（两种兼容格式）。 */
@@ -28,15 +28,33 @@ interface IndexFile {
  *   ① data/tool-semantic-index.json（entries 数组，显式 semantic → toolName）
  *   ② data/relos-mock/tool-index.json（tools 数组 + semanticTags，由 syncToolIndex 写出）
  */
-export class IndexToolResolver implements ToolResolver {
+export class IndexToolResolver implements ReloadableResolver {
+  private readonly indexPath: string;
   private index: Map<string, IndexEntry[]>;
 
   constructor(indexPath = "data/relos-mock/tool-index.json") {
+    this.indexPath = indexPath;
     this.index = this.loadIndex(indexPath);
   }
 
+  /**
+   * 重新加载索引文件（运行时定时刷新用）。
+   *
+   * 当 catalog 预热重写 tool-index.json 后，boot 的 setInterval 刷新会调用本方法，
+   * 让 IndexToolResolver 的内存 Map 同步到磁盘最新内容。
+   */
+  reload(): void {
+    this.index = this.loadIndex(this.indexPath);
+  }
+
   async resolve(need: SemanticNeed, _ctx: BizContext): Promise<ResolvedTool | null> {
-    const entries = this.index.get(need.semantic);
+    // 归一化：驼峰/大写/混合大小写统一转小写（planAchievement → planachievement）
+    // 进一步：驼峰转下划线（planAchievement → plan_achievement）尝试二次查找
+    const raw = need.semantic;
+    const lower = raw.toLowerCase();
+    const snake = raw.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
+
+    let entries = this.index.get(lower) ?? this.index.get(snake);
     if (!entries || entries.length === 0) return null;
 
     // 取 primary 标记的，否则取第一个
@@ -72,9 +90,10 @@ export class IndexToolResolver implements ToolResolver {
       // 格式 ①：entries 数组（显式 semantic → toolName，可含 primary/fieldMap）
       for (const e of data.entries ?? []) {
         const { semantic, ...rest } = e;
-        const list = map.get(semantic) ?? [];
+        const key = semantic.toLowerCase();
+        const list = map.get(key) ?? [];
         list.push(rest);
-        map.set(semantic, list);
+        map.set(key, list);
       }
 
       // 格式 ②：tools 数组 + semanticTags（由 syncToolIndex 写出，反推 semantic → toolName）
@@ -82,12 +101,13 @@ export class IndexToolResolver implements ToolResolver {
       for (const t of data.tools ?? []) {
         if (!t.name || !Array.isArray(t.semanticTags)) continue;
         for (const semantic of t.semanticTags) {
-          const list = map.get(semantic) ?? [];
+          const key = semantic.toLowerCase();
+          const list = map.get(key) ?? [];
           // 避免重复登记（entries 格式已登记过的跳过）
           if (!list.some((e) => e.toolName === t.name)) {
             list.push({ toolName: t.name });
           }
-          map.set(semantic, list);
+          map.set(key, list);
         }
       }
     } catch {

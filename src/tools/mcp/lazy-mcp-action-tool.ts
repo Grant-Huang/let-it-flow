@@ -19,7 +19,32 @@ import type { ToolEvent } from "../../core/stream-events.js";
 import { toolCallPayload, toolResultPayload } from "../../core/stream-events.js";
 import { wrapMcpResultAsEvidence } from "./mcp-client.js";
 import type { McpClient, McpToolCallResult } from "./mcp-client.js";
-import type { McpCatalogCache } from "./mcp-catalog-cache.js";
+import type { McpCatalogCache, InputFieldSummary } from "./mcp-catalog-cache.js";
+
+/**
+ * 根据 inputSummary 字段类型推断默认占位值。
+ *
+ * 用于 LLM 未提供 args 时构造最小参数骨架：
+ *   - string → ""（空串，LLM 看到会主动补）
+ *   - number → 0
+ *   - boolean → false
+ *   - 数组/其他 → null
+ *
+ * 设计意图：让 LLM 在工具调用时看到"需要哪些字段"，
+ * 而非黑盒调用 build_params（后者对 LLM 不可见参数语义）。
+ */
+function inferDefaultValue(field: InputFieldSummary): unknown {
+  const t = (field.type ?? "").toLowerCase();
+  if (t.includes("str")) return "";
+  if (t.includes("int") || t.includes("number") || t.includes("decimal") || t.includes("double") || t.includes("float")) {
+    return 0;
+  }
+  if (t.includes("bool")) return false;
+  if (t.includes("array") || t.includes("list")) return [];
+  // 枚举字段：取第一个 option 作为默认值
+  if (field.options && field.options.length > 0) return field.options[0];
+  return null;
+}
 
 /** 构造选项。 */
 export interface LazyMcpActionToolOptions {
@@ -126,15 +151,36 @@ export function createLazyMcpActionTool(opts: LazyMcpActionToolOptions): FlowCon
           // 激活失败不阻塞（可能已激活或 server 兼容性问题，继续尝试直接调）
         }
 
-        // 2. 构参（args 缺失时尝试 build_params）
+        // 2. 构参（args 缺失时优先用 inputSummary，再 fallback 到 build_params）
         let finalArgs = inputArgs;
         if (Object.keys(inputArgs).length === 0) {
-          try {
-            const built = await client.callTool("mestar.query.build_params", { toolName });
-            const params = (built as { structuredContent?: { params?: Record<string, unknown> } }).structuredContent?.params;
-            if (params) finalArgs = params;
-          } catch {
-            // build_params 失败用空 args（部分工具支持无参调用）
+          // L3.1：优先用 catalog 缓存的 inputSummary（服务自带的中文字段清单）
+          // 比调用 build_params 更快（本地查）且对 LLM 更友好（字段含中文 label）
+          const catalogItem = catalogCache?.findItem(toolName);
+          const inputSummary = catalogItem?.inputSummary;
+          if (inputSummary && inputSummary.length > 0) {
+            // 用 inputSummary 的 required 字段构造最小参数骨架
+            // required=true 的字段填空值占位（让 LLM 看到需要补什么），
+            // required=false 的字段跳过
+            const built: Record<string, unknown> = {};
+            for (const field of inputSummary) {
+              if (!field.required) continue;
+              built[field.name] = inferDefaultValue(field);
+            }
+            if (Object.keys(built).length > 0) {
+              finalArgs = built;
+            }
+          }
+
+          // inputSummary 也没覆盖 → fallback 到 build_params（在线构参）
+          if (Object.keys(finalArgs).length === 0) {
+            try {
+              const built = await client.callTool("mestar.query.build_params", { toolName });
+              const builtParams = (built as { structuredContent?: { params?: Record<string, unknown> } }).structuredContent?.params;
+              if (builtParams) finalArgs = builtParams;
+            } catch {
+              // build_params 失败用空 args（部分工具支持无参调用）
+            }
           }
         }
 

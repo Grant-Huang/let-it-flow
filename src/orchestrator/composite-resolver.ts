@@ -8,7 +8,7 @@
  *   2. LLM 推理（慢，source="llm"，confidence=0.7）
  *   3. 返回 null（数据不可用，分析继续不崩溃）
  */
-import type { ToolResolver, ResolvedTool } from "./tool-resolver.js";
+import type { ToolResolver, ResolvedTool, ReloadableResolver } from "./tool-resolver.js";
 import type { BizContext, SemanticNeed } from "./types.js";
 
 /**
@@ -54,5 +54,24 @@ export class CompositeToolResolver implements ToolResolver {
   /** 清除缓存（测试用）。 */
   clearCache(): void {
     this.cache.clear();
+  }
+
+  /**
+   * 联动刷新所有子 resolver + 清空会话缓存（运行时定时刷新用）。
+   *
+   * catalog 预热重写本地索引后，boot 的 setInterval 会调用本方法：
+   *   1. 对每个实现了 ReloadableResolver 的子 resolver 调 reload()
+   *   2. 清空本层会话缓存（旧 semantic → 旧 toolName 映射全部失效）
+   *
+   * 非破坏性：未实现 reload() 的子 resolver（如 KpiResolver/LlmToolResolver）跳过。
+   */
+  reload(): void {
+    for (const r of this.resolvers) {
+      const reloadable = r as Partial<ReloadableResolver>;
+      if (typeof reloadable.reload === "function") {
+        reloadable.reload();
+      }
+    }
+    this.clearCache();
   }
 }

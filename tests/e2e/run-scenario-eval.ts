@@ -211,7 +211,11 @@ function extractStepTrace(events: StreamEvent[]): StepTrace[] {
   for (const ev of events) {
     if (ev.type !== "extension") continue;
     const p = ev.payload as { name?: string; data?: { stepTrace?: StepTrace[] } };
-    if (p?.name === "react_step_trace" && Array.isArray(p.data?.stepTrace)) {
+    // 兼容新旧 name：step_trace（新，R3 迁移后）/ react_step_trace（旧）
+    if (
+      (p?.name === "step_trace" || p?.name === "react_step_trace") &&
+      Array.isArray(p.data?.stepTrace)
+    ) {
       return p.data!.stepTrace!;
     }
   }

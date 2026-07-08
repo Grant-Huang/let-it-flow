@@ -5,7 +5,7 @@
  * top-K 最相似的候选工具。
  *
  * 在五层解析管道里处于第③层（Index 未命中后、LlmToolResolver 域内选择前）：
- *   - top-1 相似度 > directHitThreshold（0.75）→ 直接返回（省一次 LLM 调用）
+ *   - top-1 相似度 > directHitThreshold（0.6）→ 直接返回（省一次 LLM 调用）
  *   - 否则返回 null，让下游 LlmToolResolver 在 top-K 候选里精选
  *
  * 实现简化：catalog 的 executable 工具约 285 个，向量维度 1536，
@@ -17,7 +17,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { embedMany, cosineSimilarity, type EmbeddingModel } from "ai";
-import type { ToolResolver, ResolvedTool } from "./tool-resolver.js";
+import type { ToolResolver, ResolvedTool, ReloadableResolver } from "./tool-resolver.js";
 import type { BizContext, SemanticNeed } from "./types.js";
 import type { BucketItem } from "../tools/mcp/mcp-catalog-cache.js";
 
@@ -44,10 +44,17 @@ export interface EmbeddingToolRouterOptions {
   cacheDir: string;
   /** Embedder 实例（注入便于测试）。 */
   embedder: Embedder;
-  /** top-1 相似度高于此值直接返回（缺省 0.75）。 */
+  /** top-1 相似度高于此值直接返回（缺省 0.6）。 */
   directHitThreshold?: number;
   /** 检索候选数（缺省 5）。 */
   topK?: number;
+  /**
+   * 可选：运行时重建索引时获取最新分桶清单的回调。
+   *
+   * boot 的 setInterval 定时刷新会通过 reload() 触发重建。
+   * 不注入时 reload() 退化为 loadIndex()（仅重读已持久化的 vectors.json）。
+   */
+  bucketProvider?: () => BucketItem[];
 }
 
 /** 持久化的向量索引文件结构。 */
@@ -79,15 +86,17 @@ export function makeAiEmbedder(model: EmbeddingModel): Embedder {
  * Embedding 路由解析器。
  *
  * 使用方式：
- *   const router = new EmbeddingToolRouter({ cacheDir, embedder });
+ *   const router = new EmbeddingToolRouter({ cacheDir, embedder, bucketProvider: () => cache.getAllBuckets() });
  *   await router.buildIndex(buckets);         // 启动时构建（持久化）
+ *   await router.reload();                    // 定时刷新：用 bucketProvider 拉最新清单重建
  *   const candidates = await router.retrieve("device_bom");  // 运行时检索
  */
-export class EmbeddingToolRouter implements ToolResolver {
+export class EmbeddingToolRouter implements ReloadableResolver {
   private readonly cacheDir: string;
   private readonly embedder: Embedder;
   private readonly directHitThreshold: number;
   private readonly topK: number;
+  private readonly bucketProvider?: () => BucketItem[];
 
   /** 内存中的向量索引（buildIndex/loadIndex 后填充）。 */
   private indexTexts: string[] = [];
@@ -99,8 +108,9 @@ export class EmbeddingToolRouter implements ToolResolver {
   constructor(opts: EmbeddingToolRouterOptions) {
     this.cacheDir = opts.cacheDir;
     this.embedder = opts.embedder;
-    this.directHitThreshold = opts.directHitThreshold ?? 0.75;
+    this.directHitThreshold = opts.directHitThreshold ?? 0.6;
     this.topK = opts.topK ?? 5;
+    this.bucketProvider = opts.bucketProvider;
   }
 
   /** 是否已就绪。 */
@@ -139,6 +149,27 @@ export class EmbeddingToolRouter implements ToolResolver {
         `[embedding-router] 向量索引构建失败，降级跳过：${e instanceof Error ? e.message : String(e)}`,
       );
       this.ready = false;
+    }
+  }
+
+  /**
+   * 运行时重建索引（定时刷新用，实现 ReloadableResolver）。
+   *
+   * 行为：
+   *   - 注入了 bucketProvider → 用最新分桶清单调 buildIndex（重算向量 + 持久化）
+   *   - 未注入 → 降级为 loadIndex（仅重读已持久化的 vectors.json）
+   *
+   * 注：本方法为 async，但 ReloadableResolver.reload 定义为同步签名。
+   * 这里同步触发重建、不 await（embedding 调用慢，不该阻塞 resolver 链）。
+   * 重建期间的查询走旧索引（内存未替换前仍可用），完成后下一次查询命中新索引。
+   */
+  reload(): void {
+    if (this.bucketProvider) {
+      void this.buildIndex(this.bucketProvider()).catch(() => {
+        // buildIndex 内部已 warn，此处静默
+      });
+    } else {
+      this.loadIndex();
     }
   }
 
@@ -233,11 +264,41 @@ export class EmbeddingToolRouter implements ToolResolver {
 
   // ── 内部 ──
 
-  /** 把分桶工具拼成可索引文本。 */
+  /**
+   * 把分桶工具拼成可索引文本。
+   *
+   * L2.1 改造：纳入服务自带的富语义字段，提升中文查询的检索质量：
+   *   - displayName（中文友好名，比 title 更口语化）
+   *   - aliases（同义词，覆盖多种问法）
+   *   - exampleQueries（中文自然语言查询，LLM 选择最佳提示语）
+   *   - domain（业务域，帮助跨域区分）
+   *
+   * 示例：用户问"查项目档案"，displayName="查询项目基本档案" + exampleQueries
+   * 含"我想看项目档案"，能高相似度命中，而非依赖 title 的英文拼音。
+   */
   private buildSearchableText(b: BucketItem): string {
-    const parts = [b.title, b.desc, ...(b.triggers ?? [])];
+    const parts: string[] = [];
+    // 优先级：displayName > title（中文友好名比英文拼音更适合 Embedding）
+    if (b.displayName) parts.push(b.displayName);
+    parts.push(b.title);
+    parts.push(b.desc);
+    // aliases 同义词（覆盖多种问法，如"OEE/设备效率/稼动率综合"）
+    if (b.aliases && b.aliases.length > 0) {
+      parts.push(...b.aliases);
+    }
+    // exampleQueries（中文自然语言查询，Embedding 检索质量最佳）
+    if (b.exampleQueries && b.exampleQueries.length > 0) {
+      parts.push(...b.exampleQueries);
+    }
+    // domain（业务域，帮助跨域区分同名工具）
+    if (b.domain) parts.push(b.domain);
+    // semanticTags（中文语义标签）
     if (b.semanticTags && b.semanticTags.length > 0) {
       parts.push(...b.semanticTags);
+    }
+    // triggers（兼容旧 bucket 文件，可能没有新字段）
+    if (b.triggers && b.triggers.length > 0) {
+      parts.push(...b.triggers);
     }
     return parts.filter(Boolean).join(" ");
   }

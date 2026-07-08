@@ -1,4 +1,4 @@
-import { createOpenAI } from "@ai-sdk/openai";
+import { createOpenAI, type OpenAIProviderSettings } from "@ai-sdk/openai";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createAzure } from "@ai-sdk/azure";
 import type { EmbeddingModel } from "ai";
@@ -8,6 +8,11 @@ import type { CallSite } from "../llm/call-sites.js";
 import { CALL_SITES } from "../llm/call-sites.js";
 import { loadConfig, type RuntimeConfig } from "../llm/config-loader.js";
 import type { ModelEndpoint } from "../llm/model-registry.js";
+
+// 当前 @ai-sdk/openai 的 OpenAIProviderSettings 已移除 systemMessageMode 字段，
+// 但 DeepSeek 等 OpenAI 兼容服务仍需要它来避免 SDK 把 system 改写成 developer role。
+// 运行时多传一个未知 key 对 SDK 无害；用断言绕过类型检查。
+const SYSTEM_MODE = { systemMessageMode: "system" } as OpenAIProviderSettings;
 
 /**
  * LLM 服务：按调用点注入模型（见 docs/13-p8-config-and-observability.md §13.3）。
@@ -114,7 +119,7 @@ export class LlmService {
     // 避免 SDK 默认把 system 转成 developer role（OpenAI o 系列专用）导致 400 错误
     this.openai = createOpenAI({
       apiKey: apiKey || "missing",
-      systemMessageMode: "system",
+      ...SYSTEM_MODE,
       ...(baseURL ? { baseURL } : {}),
     });
     // 非 OpenAI 官方 API（如 DeepSeek）不支持 Responses API，强制走 Chat Completions
@@ -206,13 +211,13 @@ export class LlmService {
         return createOpenAI({
           apiKey,
           baseURL: ep.baseURL ?? SERVICE_URLS.ollama,
-          systemMessageMode: "system",
+          ...SYSTEM_MODE,
         });
       case "openai-compatible":
-        return createOpenAI({ apiKey, baseURL: ep.baseURL!, systemMessageMode: "system" });
+        return createOpenAI({ apiKey, baseURL: ep.baseURL!, ...SYSTEM_MODE });
       case "openai":
       default:
-        return createOpenAI({ apiKey, systemMessageMode: "system" });
+        return createOpenAI({ apiKey, ...SYSTEM_MODE });
     }
   }
 
@@ -270,7 +275,7 @@ export class LlmService {
         apiKey: process.env.LIF_EMBEDDING_API_KEY ?? process.env.OPENAI_API_KEY ?? "missing",
         baseURL: embedBaseURL,
         // 兼容第三方 embedding 服务：强制 system role，避免 SDK 默认 developer
-        systemMessageMode: "system",
+        ...SYSTEM_MODE,
       });
       return embedProvider.embedding(modelId);
     }

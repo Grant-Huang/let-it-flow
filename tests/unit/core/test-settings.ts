@@ -59,6 +59,37 @@ describe("system-settings 数据层", () => {
     expect(s.contentSummarize).toBe(false);
   });
 
+  it("默认值含新增 SSE push 模式字段", () => {
+    const s = loadSystemSettings(tmpRoot);
+    expect(s.ssePushMode).toBe("push");
+    expect(s.coalescerEnabled).toBe(false);
+    expect(s.sseDeadlineMs).toBe(5 * 60 * 1000);
+    expect(s.ssePollIntervalMs).toBe(50);
+  });
+
+  it("ssePushMode 非法值降级为默认 push", () => {
+    mkdirSync(join(tmpRoot, "config"), { recursive: true });
+    writeFileSync(
+      join(tmpRoot, "config", "system_settings.json"),
+      JSON.stringify({ ...DEFAULT_SYSTEM_SETTINGS, ssePushMode: "invalid" }),
+      "utf8",
+    );
+    const s = loadSystemSettings(tmpRoot);
+    expect(s.ssePushMode).toBe("push");
+  });
+
+  it("patchSystemSettings 可切换 ssePushMode 到 poll", () => {
+    patchSystemSettings({ ssePushMode: "poll" }, tmpRoot);
+    const loaded = loadSystemSettings(tmpRoot);
+    expect(loaded.ssePushMode).toBe("poll");
+  });
+
+  it("patchSystemSettings 对非法 ssePushMode 抛错", () => {
+    expect(() =>
+      patchSystemSettings({ ssePushMode: "weird" as "push" | "poll" }, tmpRoot),
+    ).toThrow(/ssePushMode/);
+  });
+
   it("saveSystemSettings 写盘，loadSystemSettings 读回", () => {
     const modified = { ...DEFAULT_SYSTEM_SETTINGS, heavyIoTimeoutMs: 123456, coalescerMaxBuffer: 16 };
     saveSystemSettings(modified, tmpRoot);

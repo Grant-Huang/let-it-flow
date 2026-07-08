@@ -37,6 +37,14 @@ export interface LlmToolResolverOptions {
   llm: LlmClient;
   /** 限定候选集合（注入时只在小集合里选；缺省走 registry 全量）。 */
   candidateProvider?: (need: SemanticNeed) => Promise<CandidateManifest[] | null>;
+  /**
+   * 可选：catalog 全量工具兜底（Embedding 候选为空时使用）。
+   *
+   * catalog 模式的 mestar 工具不注册到 registry 的 domain tier，
+   * 当 Embedding 检索返回空候选时，registry.forPlanner(["domain"]) 拿不到 mestar 工具。
+   * 注入此 provider 后，兜底路径从 catalog 缓存拿全量 BucketItem 作为候选。
+   */
+  catalogFallbackProvider?: () => CandidateManifest[];
 }
 
 /**
@@ -48,6 +56,7 @@ export class LlmToolResolver implements ToolResolver {
   private readonly registry: ToolRegistry;
   private readonly llm: LlmClient;
   private readonly candidateProvider?: (need: SemanticNeed) => Promise<CandidateManifest[] | null>;
+  private readonly catalogFallbackProvider?: () => CandidateManifest[];
 
   constructor(registry: ToolRegistry, llm: LlmClient);
   constructor(opts: LlmToolResolverOptions);
@@ -62,6 +71,7 @@ export class LlmToolResolver implements ToolResolver {
       this.registry = opts.registry;
       this.llm = opts.llm;
       this.candidateProvider = opts.candidateProvider;
+      this.catalogFallbackProvider = opts.catalogFallbackProvider;
     }
   }
 
@@ -74,6 +84,10 @@ export class LlmToolResolver implements ToolResolver {
       const candidates = await this.candidateProvider(need);
       if (candidates && candidates.length > 0) {
         toolList = candidates;
+        scoped = true;
+      } else if (this.catalogFallbackProvider) {
+        // Embedding 候选为空 → 从 catalog 缓存拿全量 mestar 工具兜底
+        toolList = this.catalogFallbackProvider();
         scoped = true;
       } else {
         toolList = this.getFullDomainManifests();

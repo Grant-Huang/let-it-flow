@@ -65,15 +65,27 @@ async function drainGenerator(gen: AsyncGenerator<unknown, unknown>): Promise<{ 
   return { events, result: result as any };
 }
 
-/** 设备BOM 查询工具（catalog 项）。 */
+/** 设备BOM 查询工具（catalog 项，对齐 mestar v0.2.0 实际返回字段）。 */
 const deviceBomItem: CatalogItem = {
   name: "mestar.query.uempEquipBomView_FORM_Tree.uempEquipBomform.platform.select",
+  legacyName: "mestar.query.uempEquipBomView_FORM_Tree.uempEquipBomform.platform.select",
   title: "设备BOM",
-  description: "platformController platform#select 设备清单查询",
+  displayName: "查询设备BOM清单",
+  description: "查询设备的物料清单，含备件、数量、版本等信息",
+  domain: "Equipment",
+  subDomain: "Bom",
+  semanticTags: ["设备BOM", "备件清单"],
+  aliases: ["设备物料清单", "BOM"],
+  exampleQueries: ["我想查设备的BOM", "看一下设备备件清单"],
+  inputSummary: [
+    { name: "equipmentCode", label: "设备编码", type: "string", required: true },
+    { name: "bomVersion", label: "BOM版本", type: "string", required: false },
+  ],
+  semanticQuality: "ok",
   kind: "platformController",
   risk: "readOnly",
   executable: true,
-  route: { adapter: "platformController", bean: "platform", method: "select", entity: "UempEquipBom" },
+  route: null,
   menu: { name: "设备BOM", rel: "uempEquipBomView_FORM_Tree" },
   module: { name: "Uemp", source: "entityPrefix" },
 };
@@ -149,11 +161,11 @@ describe("Mestar MCP E2E（查设备BOM 全链路）", () => {
     await router.buildIndex(cache.getAllBuckets());
     expect(router.isReady()).toBe(true);
 
-    // 3. CompositeToolResolver 解析 semantic="device_bom"
-    //    （IndexToolResolver 会从 tool-index.json 命中，因为预热时派生了 semanticTags）
+    // 3. CompositeToolResolver 解析 semantic="equipment_bom"
+    //    （IndexToolResolver 会从 tool-index.json 的 entries 命中，因为预热时派生了英文 key）
     const indexResolver = new IndexToolResolver(toolIndexPath);
     const resolver = new CompositeToolResolver([indexResolver, router]);
-    const need: SemanticNeed = { semantic: "device_bom_query", required: true };
+    const need: SemanticNeed = { semantic: "equipment_bom", required: true };
     const resolved = await resolver.resolve(need, ctx);
     expect(resolved).not.toBeNull();
     expect(resolved!.toolName).toContain("uempEquipBom");
@@ -202,18 +214,52 @@ describe("Mestar MCP E2E（查设备BOM 全链路）", () => {
     expect(finalResult.output.data).toBeDefined();
   });
 
+  it("L3.1：LazyMcpActionTool args 缺失时优先用 inputSummary 构参（不调 build_params）", async () => {
+    const client = makeFullMockClient([deviceBomItem]);
+    const cache = new McpCatalogCache({
+      serverId: "mestar",
+      client,
+      cacheRoot: tmpDir,
+      toolIndexPath,
+    });
+    await cache.warmup();
+
+    const lazyTool = createLazyMcpActionTool({
+      serverId: "mestar",
+      client,
+      catalogCache: cache,
+    });
+
+    const { result: finalResult } = await drainGenerator(
+      lazyTool.execute!({ toolName: deviceBomItem.name }, makeMockExecCtx()),
+    );
+
+    // inputSummary 构参：用 required 字段（equipmentCode）填占位值
+    expect(client.callTool).toHaveBeenCalledWith(
+      deviceBomItem.name,
+      expect.objectContaining({ equipmentCode: expect.anything() }),
+    );
+    // build_params 不应被调用（inputSummary 已覆盖）
+    expect(client.callTool).not.toHaveBeenCalledWith("mestar.query.build_params", expect.anything());
+    expect(finalResult.output.data).toBeDefined();
+  });
+
   it("CatalogSearchResolver 在线兜底 + 回写本地索引", async () => {
-    // 用一个规则派生覆盖不到的工具（未知 module），确保回写新增条目
+    // 用一个完全无语义信息的工具（无 semanticTags/exampleQueries/domain/module），
+    // 确保 deriveSemantic 返回空，不进 tool-index.json，只能靠在线兜底回写
     const unknownItem: CatalogItem = {
-      name: "mestar.query.customReport xyz.platform.select",
+      name: "mestar.query.customReport.xyz.platform.select",
       title: "自定义报表XYZ",
       description: "customReport xyz query",
       kind: "platformController",
       risk: "readOnly",
       executable: true,
-      route: { adapter: "platformController", bean: "platform", method: "select" },
+      route: null,
       menu: { name: "自定义报表XYZ" },
-      module: { name: "CustomXyz", source: "entityPrefix" }, // 未知 module，规则派生返回空
+      module: undefined,
+      domain: undefined,
+      semanticTags: undefined,
+      exampleQueries: undefined,
     };
     const client = makeFullMockClient([unknownItem]);
 
@@ -225,8 +271,7 @@ describe("Mestar MCP E2E（查设备BOM 全链路）", () => {
     });
     await cache.warmup();
 
-    // 预热后该工具没有 semanticTags（规则派生覆盖不到），不在 tool-index.json 里
-    // （文件可能不存在，因为 persistToToolIndex 在无 tagged 工具时不创建）
+    // 预热后该工具没有 semanticTags（无任何语义信息，deriveSemantic 返回空），不在 tool-index.json 里
     let hadBefore = false;
     if (existsSync(toolIndexPath)) {
       const indexBefore = JSON.parse(readFileSync(toolIndexPath, "utf8"));
