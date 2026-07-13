@@ -19,6 +19,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync } from 
 import { join, dirname } from "node:path";
 import type { McpClient, McpToolCallResult } from "./mcp-client.js";
 import type { CatalogVersionProvider } from "./catalog-version-provider.js";
+import type { EntrySource } from "../../orchestrator/tool-resolver.js";
 
 // ── 数据类型（对齐 mestar catalog.search 返回的 item 结构） ──
 
@@ -416,7 +417,13 @@ export class McpCatalogCache {
         description: `在线 catalog 兜底发现：${semantic}`,
         semanticTags: [semantic],
       });
-      existing.entries.push({ semantic, toolName, primary: true });
+      existing.entries.push({
+        semantic,
+        toolName,
+        primary: true,
+        source: "derived_catalog",
+        confidence: 0.9,
+      });
       existing.syncedAt = new Date().toISOString();
       writeFileSync(this.toolIndexPath, JSON.stringify(existing, null, 2));
       console.log(
@@ -788,6 +795,8 @@ export class McpCatalogCache {
             semantic: sKey,
             toolName: item.name,
             primary: true,
+            source: "derived_catalog",
+            confidence: 0.9,
           });
           existingEntryKeys.add(entryKey);
           addedEntries++;
@@ -848,5 +857,9 @@ export interface ToolIndexFile {
     primary?: boolean;
     paramMap?: Record<string, string>;
     fieldMap?: Record<string, string>;
+    /** 条目来源（消费方据此推断 confidence 缺省值）。 */
+    source?: EntrySource;
+    /** 置信度（写入方自定；缺省时由 source 推断）。 */
+    confidence?: number;
   }>;
 }

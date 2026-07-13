@@ -137,4 +137,83 @@ describe("IndexToolResolver", () => {
     expect(result!.toolName).toBe("quality.fpy");
     expect(result!.source).toBe("index");
   });
+
+  // ── confidence 字段：写入方自定 / 缺省按来源感知 ──
+
+  it("人工 entry（无 source/confidence）缺省 confidence=1.0", async () => {
+    writeIndex([
+      { semantic: "process_capability", toolName: "quality.cp_cpk" },
+    ]);
+    const resolver = new IndexToolResolver(indexPath);
+    const need: SemanticNeed = { semantic: "process_capability", required: true };
+    const result = await resolver.resolve(need, ctx);
+    expect(result).not.toBeNull();
+    expect(result!.confidence).toBe(1.0);
+  });
+
+  it("source=manual 显式标注 → confidence=1.0", async () => {
+    writeIndex([
+      { semantic: "process_capability", toolName: "quality.cp_cpk", source: "manual" },
+    ]);
+    const resolver = new IndexToolResolver(indexPath);
+    const need: SemanticNeed = { semantic: "process_capability", required: true };
+    const result = await resolver.resolve(need, ctx);
+    expect(result).not.toBeNull();
+    expect(result!.confidence).toBe(1.0);
+  });
+
+  it("source=derived_catalog → confidence=0.9", async () => {
+    writeIndex([
+      { semantic: "process_capability", toolName: "quality.cp_cpk", source: "derived_catalog" },
+    ]);
+    const resolver = new IndexToolResolver(indexPath);
+    const need: SemanticNeed = { semantic: "process_capability", required: true };
+    const result = await resolver.resolve(need, ctx);
+    expect(result).not.toBeNull();
+    expect(result!.confidence).toBe(0.9);
+  });
+
+  it("source=derived_local → confidence=0.9", async () => {
+    writeIndex([
+      { semantic: "process_capability", toolName: "quality.cp_cpk", source: "derived_local" },
+    ]);
+    const resolver = new IndexToolResolver(indexPath);
+    const need: SemanticNeed = { semantic: "process_capability", required: true };
+    const result = await resolver.resolve(need, ctx);
+    expect(result).not.toBeNull();
+    expect(result!.confidence).toBe(0.9);
+  });
+
+  it("写入方显式 confidence 优先于 source 推断", async () => {
+    // source=derived_catalog 本应 0.9，但写入方显式写 0.75 应胜出
+    writeIndex([
+      { semantic: "process_capability", toolName: "quality.cp_cpk", source: "derived_catalog", confidence: 0.75 },
+    ]);
+    const resolver = new IndexToolResolver(indexPath);
+    const need: SemanticNeed = { semantic: "process_capability", required: true };
+    const result = await resolver.resolve(need, ctx);
+    expect(result).not.toBeNull();
+    expect(result!.confidence).toBe(0.75);
+  });
+
+  it("tools 数组格式（格式②反推）标 source=derived_local, confidence=0.9", async () => {
+    // 模拟 syncToolIndex 写出的 tools 数组 + semanticTags 格式
+    writeFileSync(
+      indexPath,
+      JSON.stringify({
+        version: "1.0",
+        enterprise: "test",
+        tools: [
+          { name: "quality.cp_cpk", semanticTags: ["process_capability"] },
+        ],
+      }),
+      "utf8",
+    );
+    const resolver = new IndexToolResolver(indexPath);
+    const need: SemanticNeed = { semantic: "process_capability", required: true };
+    const result = await resolver.resolve(need, ctx);
+    expect(result).not.toBeNull();
+    // 反推的 entry 应标 derived_local，confidence=0.9（非人工精确登记）
+    expect(result!.confidence).toBe(0.9);
+  });
 });

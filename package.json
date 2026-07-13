@@ -1,6 +1,6 @@
 {
   "name": "@meso.ai/let-it-flow",
-  "version": "0.2.1",
+  "version": "0.2.3",
   "description": "Intent-to-DAG Compiler — 开发者友好的、以意图为导向的流式任务编排框架",
   "type": "module",
   "license": "MIT",

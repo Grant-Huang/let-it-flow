@@ -5,11 +5,35 @@
  *
  * 数据源：企业工具索引（data/tool-semantic-index.json）。
  * 由实施时初始化，或从 FlowConnector.semanticTags 派生。
- * 命中即返回，source="index"，confidence=1.0。
+ * 命中即返回，source="index"，confidence 由 entry.confidence 决定：
+ *   - 人工维护的精确登记（source=manual 或缺省）→ 1.0
+ *   - catalog 派生（source=derived_catalog）→ 0.9
+ *   - tools 数组反推（source=derived_local）→ 0.9
+ * 写入方可通过 entry.confidence 显式覆盖以上默认值。
  */
 import { readFileSync, existsSync } from "node:fs";
-import type { ToolResolver, ResolvedTool, IndexEntry, ReloadableResolver } from "./tool-resolver.js";
+import type { ToolResolver, ResolvedTool, IndexEntry, ReloadableResolver, EntrySource } from "./tool-resolver.js";
 import type { BizContext, SemanticNeed } from "./types.js";
+
+/** 由 entry 来源推断缺省置信度。 */
+function defaultConfidenceBySource(source: EntrySource | undefined): number {
+  switch (source) {
+    case "derived_catalog":
+    case "derived_local":
+      return 0.9;
+    case "manual":
+    default:
+      return 1.0;
+  }
+}
+
+/** 解析 entry 的最终置信度：写入方显式优先，否则按来源推断。 */
+function resolveEntryConfidence(entry: IndexEntry): number {
+  if (typeof entry.confidence === "number" && !Number.isNaN(entry.confidence)) {
+    return entry.confidence;
+  }
+  return defaultConfidenceBySource(entry.source);
+}
 
 /** 索引文件结构（两种兼容格式）。 */
 interface IndexFile {
@@ -66,7 +90,7 @@ export class IndexToolResolver implements ReloadableResolver {
       params: {},
       ...(entry.fieldMap ? { fieldMap: entry.fieldMap } : {}),
       source: "index",
-      confidence: 1.0,
+      confidence: resolveEntryConfidence(entry),
     };
   }
 
@@ -98,6 +122,8 @@ export class IndexToolResolver implements ReloadableResolver {
 
       // 格式 ②：tools 数组 + semanticTags（由 syncToolIndex 写出，反推 semantic → toolName）
       // 同一 semantic 多个工具时，按工具注册顺序保留，不标 primary（resolve 取第一个）
+      // 这类 entry 是从 tools 的 semanticTags 反推的，无显式 semantic→toolName 登记，
+      // 标 source="derived_local"，confidence 缺省 0.9（非人工精确登记）
       for (const t of data.tools ?? []) {
         if (!t.name || !Array.isArray(t.semanticTags)) continue;
         for (const semantic of t.semanticTags) {
@@ -105,7 +131,7 @@ export class IndexToolResolver implements ReloadableResolver {
           const list = map.get(key) ?? [];
           // 避免重复登记（entries 格式已登记过的跳过）
           if (!list.some((e) => e.toolName === t.name)) {
-            list.push({ toolName: t.name });
+            list.push({ toolName: t.name, source: "derived_local", confidence: 0.9 });
           }
           map.set(key, list);
         }

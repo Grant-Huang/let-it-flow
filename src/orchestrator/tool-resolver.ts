@@ -16,6 +16,17 @@ import type { BizContext, SemanticNeed } from "./types.js";
 export type ResolveSource = "index" | "llm" | "fallback" | "kpi";
 
 /**
+ * 索引条目的来源（决定 confidence 缺省值）。
+ *
+ *   - `manual`：人工维护的数据文件 entry（缺省，confidence=1.0）
+ *   - `derived_catalog`：从 MCP catalog 派生的 entry（confidence=0.9，有派生误差风险）
+ *   - `derived_local`：从本地 tools 数组的 semanticTags 反推（confidence=0.9，无显式登记）
+ *
+ * 写入方应显式标注；未标注时按 `manual` 处理（人工维护的精确登记）。
+ */
+export type EntrySource = "manual" | "derived_catalog" | "derived_local";
+
+/**
  * KPI 不可算的缺失维度（mestar.kpi.assess 返回，供 prepare-step 可解释降级）。
  *
  * 示例：assessOee 返回 missingDimensions: ["设备停机时长", "标准工时"]，
@@ -104,6 +115,19 @@ export interface IndexEntry {
   fieldMap?: Record<string, string>;
   /** 是否为主工具（同 semantic 多工具时优先）。 */
   primary?: boolean;
+  /**
+   * 条目来源（决定 confidence 缺省值）。
+   *
+   * 写入方应显式标注：catalog 派生标 `derived_catalog`，tools 数组反推标 `derived_local`。
+   * 未标注时按 `manual` 处理（人工维护的精确登记）。
+   */
+  source?: EntrySource;
+  /**
+   * 置信度（写入方自定）。缺省时由 source 推断：
+   *   - manual（或缺省）→ 1.0
+   *   - derived_catalog / derived_local → 0.9
+   */
+  confidence?: number;
 }
 
 /**

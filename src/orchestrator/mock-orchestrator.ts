@@ -20,6 +20,7 @@ import type {
   FactorEntry,
   WhyChain,
 } from "./types.js";
+import type { EntrySource } from "./tool-resolver.js";
 
 /** relation 数据文件结构。 */
 interface RelationsFile {
@@ -43,6 +44,10 @@ interface ToolIndexEntry {
   primary?: boolean;
   paramMap?: Record<string, string>;
   fieldMap?: Record<string, string>;
+  /** 条目来源（由 McpCatalogCache 写入，syncToolIndex 原样保留）。 */
+  source?: EntrySource;
+  /** 置信度（写入方自定）。 */
+  confidence?: number;
 }
 
 interface ToolIndexFile {
