@@ -78,6 +78,7 @@ export function createWebFetchTool(): FlowConnector<FetchedDoc[]> {
         },
       ],
     },
+    selfEmitEvents: true,
 
     async *execute(params, ctx): AsyncGenerator<ToolEvent, ToolResult<FetchedDoc[]>> {
       const args = inputSchema.parse(params);

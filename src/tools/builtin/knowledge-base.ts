@@ -91,6 +91,7 @@ export function createKnowledgeBaseTool(
       confidence: "inferred",
       source: { system: "obsidian", provenance: "knowledge_base" },
     },
+    selfEmitEvents: true,
 
     async *execute(
       params: Record<string, unknown>,

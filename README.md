@@ -27,6 +27,51 @@
 - 学术文献综述（LitPilot 原型）：多源学术搜索 → 全文抓取 → 分章综述
 - 竞品调研：web + 内部知识库 → 对比矩阵
 
+## Skill 间数据流（resolveRef）
+
+当一个 skill 的输出需要作为另一个 skill 的输入（如"诊断 → 报表"链路），下游 skill 可通过 `ctx.resolveRef` 零拷贝读取前序 skill 的结构化产出（`EvidenceEnvelope.data`），无需 planner 手动回填字段。
+
+### 通道
+
+- **基础设施层**：`StepCtx.resolveRef(ref)` —— 透传自 `ExecutionContext.resolveRef`，JSONPath 语法 `$.tasks[<callId>].output` / `.output.data`。
+- **约定层**：`StepsInput.priorCallId`（`string | string[]`）—— planner 调下游 skill 时把前序 skill 的 callId 透传进来，skill 内部 `ctx.resolveRef(`$.tasks[${input.priorCallId}].output.data`)` 即可读取。
+- **类型提示**：`StepsInput.priorKind`（`string`）—— 前序产出的简短类型标签（如 `oee_diagnose`），供 skill 内 LLM 快速判断前置类型，不参与解析。
+
+### 执行路径
+
+| 执行路径 | resolveRef 可用性 | 说明 |
+|----------|------------------|------|
+| DAG executor | 完整可用 | 基于 `recordOutput` 的 outputs Map + JSONPath |
+| ReAct executor | 可用（0.3.0+） | harness 在 `onStepFinish` 维护 `Map<callId, output>` 并注入 `deps.resolveRef` |
+| 测试 mock | 取决于 mock | skill 应做 `typeof ctx.resolveRef === "function"` 判断后走退化路径 |
+
+### 范式（skill 侧）
+
+```ts
+async steps(input) {
+  const { step } = input;
+
+  const composed = await step("LLM 编排", async (ctx) => {
+    // 优先用 resolveRef 读取前序 skill 的完整产出
+    let priorData: unknown;
+    if (ctx.resolveRef && typeof input.priorCallId === "string") {
+      priorData = ctx.resolveRef(`$.tasks[${input.priorCallId}].output.data`);
+    }
+    // 退化：用 input 参数（planner 回填）
+    if (!priorData) {
+      priorData = { rootCause: input.primaryRootCause, /* ... */ };
+    }
+    return await llmCompose(priorData);
+  });
+
+  return { composed };
+}
+```
+
+### 兼容性
+
+`StepCtx.resolveRef`、`StepsInput.priorCallId` / `priorKind`、`ToolAdapterDeps.resolveRef` 全部是 **新增 optional 字段**，零破坏现有 skill 与测试。executor 未注入时 skill 走 `input` 参数回填的退化路径。
+
 ## 快速开始
 
 ```bash

@@ -44,6 +44,26 @@ export interface StepCtx {
   emit: ExecutionContext["emit"];
   /** 当前 skill 调用的 toolCall id（用于 skill 末步注入指向自身产物的链接）。测试 mock 可缺省。 */
   selfCallId?: string;
+  /**
+   * 解析 JSONPath 引用到上游 skill / 工具调用的结构化产出（透传自 ExecutionContext.resolveRef）。
+   *
+   * 用法：ctx.resolveRef("$.tasks[priorCallId].output.data")
+   *
+   * 仅在 executor 注入了 resolveRef 时可用：
+   *   - DAG executor：完整可用（基于 recordOutput 的 outputs Map + JSONPath）
+   *   - ReAct executor：harness 维护 callId→output 后注入；未注入时返回 undefined
+   *   - 测试 mock：可不提供，skill 应做 typeof 判断后走退化路径
+   *
+   * skill 侧推荐范式：
+   * ```ts
+   * let priorData: unknown;
+   * if (ctx.resolveRef && typeof input.priorCallId === "string") {
+   *   priorData = ctx.resolveRef(`$.tasks[${input.priorCallId}].output.data`);
+   * }
+   * if (!priorData) priorData = { ...input };  // 退化：planner 回填字段
+   * ```
+   */
+  resolveRef?: (ref: string) => unknown;
 }
 
 /**
@@ -101,9 +121,23 @@ export interface StepsInput {
    * }
    */
   selfCallId?: string;
+  /**
+   * 前序 skill / 工具调用的 callId 引用（可选，planner 填充）。
+   *
+   * skill 内部用 ctx.resolveRef(`$.tasks[${priorCallId}].output.data`) 读取前序产出。
+   * 支持单个 callId（string）或多个 callId（string[]，多前置场景，如"诊断 + 取样"两条上游）。
+   *
+   * 与 StepCtx.resolveRef 配合：priorCallId 是约定层（planner 传谁），
+   * resolveRef 是基础设施层（怎么读）。两者构成 skill 间数据流契约。
+   */
+  priorCallId?: string | string[];
+  /**
+   * 前序产出的简短类型标签（planner 填充，供 skill 内 LLM 快速判断前置类型）。
+   * 如 "oee_diagnose" / "dmaic" / "waste_audit"。
+   * 不参与 resolveRef 解析，纯提示性。
+   */
+  priorKind?: string;
 }
-
-/** 动态 steps 函数签名。入参是 StepsInput（含 skill params + step 工厂），返回 skill 业务输出。 */
 export type DynamicStepsFn<TOutput = unknown> = (input: StepsInput) => Promise<TOutput>;
 
 /** ExecutionContext 别名（从 base.ts 引入，避免循环依赖重复定义）。 */
@@ -172,6 +206,7 @@ export function createSkill(opts: CreateSkillOptions): SkillConnector {
     outputSchema,
     outputExample,
     whenToUse,
+    selfEmitEvents: true,
     ...(risk ? { risk } : {}),
     dynamicSteps,
     status,
@@ -332,6 +367,7 @@ async function* runDynamicSteps(
     requireConfirmation: ctx.requireConfirmation,
     emit: ctx.emit,
     selfCallId,
+    resolveRef: ctx.resolveRef,
   };
 
   let stepCallCount = 0;

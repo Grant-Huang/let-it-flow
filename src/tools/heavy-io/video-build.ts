@@ -42,6 +42,7 @@ export function createVideoBuildTool(runtime: VideoBuildRuntime): FlowConnector<
       properties: { videoPath: { type: "string", description: "final.mp4 的绝对路径" } },
     },
     outputExample: { videoPath: "/data/tasks/xxx/video/final.mp4" },
+    selfEmitEvents: true,
 
     async *execute(params, ctx): AsyncGenerator<ToolEvent, ToolResult<VideoBuildOutput>> {
       const args = inputSchema.parse(params);

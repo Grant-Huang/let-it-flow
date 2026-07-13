@@ -47,6 +47,7 @@ export function createImageGenTool(runtime: ImageGenRuntime): FlowConnector<Imag
       },
     },
     outputExample: { imageDir: "/data/tasks/xxx/images", count: 5 },
+    selfEmitEvents: true,
 
     async *execute(params, ctx): AsyncGenerator<ToolEvent, ToolResult<ImageGenOutput>> {
       const args = inputSchema.parse(params);

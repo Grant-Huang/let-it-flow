@@ -17,6 +17,7 @@ function mockCtx(extra: Partial<{
   emit: (e: ToolEvent) => Promise<unknown>;
   requireConfirmation: (g: unknown) => Promise<{ approved: boolean; params?: Record<string, unknown> }>;
   resolveTool: (name: string) => FlowConnector | undefined;
+  resolveRef: (ref: string) => unknown;
 }> = {}) {
   return {
     taskId: "t",
@@ -25,7 +26,7 @@ function mockCtx(extra: Partial<{
     intent: "",
     emit: extra.emit ?? (async () => ({})),
     requireConfirmation: extra.requireConfirmation ?? (async () => ({ approved: true })),
-    resolveRef: () => undefined,
+    resolveRef: extra.resolveRef ?? (() => undefined),
     // DSL 专用：ctx.call 解析工具名 → connector（由 boot 注入注册表）
     resolveTool: extra.resolveTool ?? (() => undefined),
   } as unknown as Parameters<FlowConnector["execute"]>[1];
@@ -339,5 +340,133 @@ describe("P2 动态 DSL 错误处理", () => {
     // tool_result 事件仍应发射（含错误 caveat）
     const resultEvents = events.filter((e) => e.type === "tool_result");
     expect(resultEvents.length).toBe(1);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// StepCtx.resolveRef 透传（S1：skill 间数据流通道）
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("S1 StepCtx.resolveRef 透传", () => {
+  it("ctx.resolveRef 透传自 ExecutionContext，能读到上游 skill / 工具的结构化产出", async () => {
+    // 模拟上游 skill 产出的 EvidenceEnvelope.data
+    const upstreamOutput = {
+      data: { rootCause: "刀具磨损", metrics: { oee: 0.62 }, recs: [{ id: "r1" }] },
+      freshness: "realtime",
+      capturedAt: "2026-07-13T00:00:00Z",
+      confidence: "inferred",
+      source: { system: "skill", provenance: "oee_diagnose" },
+    };
+
+    const ctx = mockCtx({
+      resolveRef: (ref: string) => {
+        // 解析 $.tasks[prior_call_1].output 与 $.tasks[prior_call_1].output.data
+        if (ref === "$.tasks[prior_call_1].output") return upstreamOutput;
+        if (ref === "$.tasks[prior_call_1].output.data") return upstreamOutput.data;
+        return undefined;
+      },
+    });
+
+    const skill = createSkill({
+      name: "test.s1.resolve_ref",
+      description: "resolveRef 透传测试",
+      whenToUse: { triggers: ["t"], notFor: [] },
+      inputSchema: { type: "object", properties: { priorCallId: { type: "string" } } },
+      outputSchema: { type: "object" },
+      outputExample: {},
+      async steps(input) {
+        const { step } = input;
+        const priorData = await step("读取前序产出", async (c) => {
+          // 核心断言目标：skill 内能通过 ctx.resolveRef 读取上游产出
+          return c.resolveRef!(`$.tasks[${input.priorCallId as string}].output.data`);
+        });
+        return { priorData };
+      },
+    });
+
+    const { final } = await runSkill(skill, { priorCallId: "prior_call_1" }, ctx);
+    const stepResults = (final!.output as { data: { stepResults: unknown[] } }).data.stepResults;
+    expect(stepResults[0]).toEqual(upstreamOutput.data);
+  });
+
+  it("resolveRef 未注入时（ReAct/测试 mock 缺省），skill 走优雅降级路径", async () => {
+    // 构造完全不提供 resolveRef 的 ExecutionContext（模拟 ReAct 路径未升级时的占位 ctx）
+    const ctxWithoutResolveRef = {
+      taskId: "t",
+      runId: "r",
+      nodeId: "n",
+      intent: "",
+      emit: async () => ({}),
+      requireConfirmation: async () => ({ approved: true }),
+      resolveTool: () => undefined,
+      // 故意不提供 resolveRef
+    } as unknown as Parameters<FlowConnector["execute"]>[1];
+
+    const skill = createSkill({
+      name: "test.s1.degrade",
+      description: "resolveRef 缺省降级测试",
+      whenToUse: { triggers: ["t"], notFor: [] },
+      inputSchema: { type: "object", properties: { primaryRootCause: { type: "string" } } },
+      outputSchema: { type: "object" },
+      outputExample: {},
+      async steps(input) {
+        const { step } = input;
+        const composed = await step("LLM 编排（降级）", async (c) => {
+          // 推荐范式：先尝试 resolveRef，不可用时回退到 input 参数
+          let v: unknown;
+          if (c.resolveRef && typeof input.priorCallId === "string") {
+            v = c.resolveRef(`$.tasks[${input.priorCallId as string}].output.data`);
+          } else {
+            v = { degraded: true, fromInput: { rootCause: input.primaryRootCause } };
+          }
+          return v;
+        });
+        return { composed };
+      },
+    });
+
+    const { final } = await runSkill(skill, { primaryRootCause: "刀具磨损" }, ctxWithoutResolveRef);
+    const stepResults = (final!.output as { data: { stepResults: Array<{ degraded: boolean; fromInput: { rootCause: string } }> } }).data.stepResults;
+    expect(stepResults[0]!.degraded).toBe(true);
+    expect(stepResults[0]!.fromInput.rootCause).toBe("刀具磨损");
+  });
+
+  it("StepsInput.priorCallId 支持 string 与 string[]（S2 约定字段，planner 透传）", async () => {
+    // 验证 priorCallId 字段可作为 skill 输入参数透传，且不影响 step() 工厂
+    const skill = createSkill({
+      name: "test.s2.prior_call_id",
+      description: "priorCallId 字段透传测试",
+      whenToUse: { triggers: ["t"], notFor: [] },
+      inputSchema: {
+        type: "object",
+        properties: {
+          priorCallId: { type: ["string", "array"], items: { type: "string" } },
+          priorKind: { type: "string" },
+        },
+      },
+      outputSchema: { type: "object" },
+      outputExample: {},
+      async steps(input) {
+        const { step } = input;
+        const echoed = await step("回显约定字段", async () => {
+          return {
+            priorCallId: input.priorCallId,
+            priorKind: input.priorKind,
+          };
+        });
+        return echoed as Record<string, unknown>;
+      },
+    });
+
+    // string 形态
+    const r1 = await runSkill(skill, { priorCallId: "call_a", priorKind: "oee_diagnose" });
+    const d1 = (r1.final!.output as { data: { stepResults: Array<{ priorCallId: unknown; priorKind: unknown }> } }).data.stepResults[0]!;
+    expect(d1.priorCallId).toBe("call_a");
+    expect(d1.priorKind).toBe("oee_diagnose");
+
+    // string[] 形态
+    const r2 = await runSkill(skill, { priorCallId: ["call_a", "call_b"], priorKind: "multi" });
+    const d2 = (r2.final!.output as { data: { stepResults: Array<{ priorCallId: unknown }> } }).data.stepResults[0]!;
+    expect(d2.priorCallId).toEqual(["call_a", "call_b"]);
   });
 });

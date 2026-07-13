@@ -67,6 +67,7 @@ export function createRewriteTool(deps: RewriteToolDeps): FlowConnector<RewriteO
       properties: { script: { type: "string", description: "改写后的旁述文稿" } },
     },
     outputExample: { script: "改写后的播客旁述文稿..." },
+    selfEmitEvents: true,
 
     async *execute(params, ctx): AsyncGenerator<ToolEvent, ToolResult<RewriteOutput>> {
       const args = inputSchema.parse(params);

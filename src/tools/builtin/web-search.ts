@@ -151,6 +151,7 @@ export function createWebSearchTool(opts: WebSearchToolOptions = {}): FlowConnec
     outputExample: {
       results: [{ title: "Q1 财报", url: "https://example.com/report", snippet: "营收同比增长..." }],
     },
+    selfEmitEvents: true,
 
     async *execute(params, ctx: ExecutionContext): AsyncGenerator<ToolEvent, ToolResult<SearchResult[]>> {
       const args = inputSchema.parse(params);

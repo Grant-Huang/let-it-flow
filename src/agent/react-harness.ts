@@ -19,6 +19,7 @@
  *   - 弱 provider（不支持 function calling）的文本回退留接口位，本次不实装
  */
 import { streamText } from "ai";
+import { JSONPath } from "jsonpath-plus";
 import { buildStopWhen } from "./stop-policy.js";
 import { adaptToolSet, toolNameToKey } from "./tool-adapter.js";
 import { TraceAccumulator, emitStepPhase } from "./step-emitter.js";
@@ -90,6 +91,20 @@ export async function runReactHarness(
   const finalizeKey = toolNameToKey(stopPolicy?.finalizeTool ?? "nexus_finalize");
 
   // 适配工具集（harness 内部的 ctxMeta 用 "react" 占位）
+  // outputRegistry：维护 callId → toolResult.output，供 skill 内 ctx.resolveRef 读上游产出
+  // （ReAct 模式无 DAG inputRefs，但 skill 间数据流需要前序 skill 的结构化产出）
+  const outputRegistry = new Map<string, unknown>();
+  // resolveRef：复用 DAG executor 的 JSONPath 语法（$.tasks[<callId>].output / .output.data），
+  // 让 skill 内 ctx.resolveRef 与 DAG 路径写法一致。jsonpath-plus 已是项目依赖。
+  const resolveRef = (ref: string): unknown => {
+    const tasks: Record<string, { output: unknown }> = {};
+    for (const [id, out] of outputRegistry) {
+      tasks[id] = { output: out };
+    }
+    const root = { tasks, intent };
+    const results = JSONPath({ path: ref, json: root });
+    return Array.isArray(results) && results.length === 1 ? results[0] : results;
+  };
   const tools = adaptToolSet(
     connectors,
     {
@@ -97,6 +112,8 @@ export async function runReactHarness(
       emit,
       // DSL ctx.call 需要：把 registry 查询能力透传给 skill 的动态步骤上下文
       resolveTool: config.registry.get?.bind(config.registry),
+      // skill 间数据流：让 skill 内 ctx.resolveRef 能读到前序 skill 的产出
+      resolveRef,
       governancePreToolUse: config.governanceHooks?.preToolUse,
       governancePostToolUse: config.governanceHooks?.postToolUse,
     },
@@ -149,6 +166,12 @@ export async function runReactHarness(
         // O 层：转 StepTrace 累积
         const trace = convertStep(ev, riskMap, confirmedSet, rejectedSet, keyToName);
         accumulator.push(trace);
+        // 把本步每个工具调用的结果写入 outputRegistry（供后续 skill 内 ctx.resolveRef 读上游产出）
+        for (const tc of trace.toolCalls) {
+          if (tc.result !== undefined) {
+            outputRegistry.set(tc.id, tc.result);
+          }
+        }
         // E 层：发 phase 事件（前端可见）
         await emitStepPhase(emit, ev.stepNumber, "done");
         // 文本已由 onChunk 实时 emit，这里只补一个换行分隔符

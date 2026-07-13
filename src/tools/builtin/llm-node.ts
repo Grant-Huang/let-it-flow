@@ -71,6 +71,7 @@ export function createLlmNodeTool(opts: LlmNodeToolOptions): FlowConnector<strin
       },
     },
     outputExample: { text: "生成的播客文稿内容..." },
+    selfEmitEvents: true,
 
     async *execute(params, ctx): AsyncGenerator<ToolEvent, ToolResult<string>> {
       const args = inputSchema.parse(params);

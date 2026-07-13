@@ -178,14 +178,13 @@ describe("Mestar MCP E2E（查设备BOM 全链路）", () => {
     });
     expect(lazyTool.name).toBe("mcp.mestar.call");
 
-    const { events, result: finalResult } = await drainGenerator(
+    const { result: finalResult } = await drainGenerator(
       lazyTool.execute!({ toolName: resolved!.toolName }, makeMockExecCtx()),
     );
 
-    // 4a. 产生了 tool_call + tool_result 事件
-    const eventTypes = events.map((e) => (e as { type: string }).type);
-    expect(eventTypes).toContain("tool_call");
-    expect(eventTypes).toContain("tool_result");
+    // 4a. emit 责任：MCP 工具（selfEmitEvents 缺省 false）不再内层 yield tool_call/tool_result，
+    //     由外层（tool-adapter / node-runner）统一 emit。故 generator 流为空，不在此断言事件。
+    //     业务正确性由下方 4b（EvidenceEnvelope）+ 4c（callTool 调用）覆盖。
 
     // 4b. 最终返回 ToolResult，output 是 EvidenceEnvelope
     expect(finalResult).toBeDefined();

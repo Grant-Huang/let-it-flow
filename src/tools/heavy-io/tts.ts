@@ -53,6 +53,7 @@ export function createTtsTool(runtime: TtsRuntime): FlowConnector<TtsOutput> {
       },
     },
     outputExample: { audioPath: "/data/tasks/xxx/audio/voiceover_full.mp3", engine: "edge" },
+    selfEmitEvents: true,
 
     async *execute(params, ctx): AsyncGenerator<ToolEvent, ToolResult<TtsOutput>> {
       const args = inputSchema.parse(params);

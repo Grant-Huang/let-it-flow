@@ -37,6 +37,16 @@ export interface ToolAdapterDeps {
    */
   resolveTool?: (name: string) => FlowConnector | undefined;
   /**
+   * 解析上游 skill / 工具调用的结构化产出引用（可选，skill 间数据流用）。
+   *
+   * harness 在主 ReAct 循环里维护 callId → toolResult.output 的 Map，
+   * 注入此函数后，skill 内 ctx.resolveRef("$.tasks[<priorCallId>].output.data")
+   * 即可零拷贝读取前序 skill 的 EvidenceEnvelope.data。
+   *
+   * 缺省时返回 undefined（skill 应做 typeof 判断后走 input 参数回填的退化路径）。
+   */
+  resolveRef?: (ref: string) => unknown;
+  /**
    * Governance preToolUse 钩子（G 层阻断规则）。
    * 工具执行前调用；返回 allow=false 则拒绝执行（不发请求）。
    * 注意：与 HITL 不同，governance 是确定性阻断（不询问用户）。
@@ -122,12 +132,14 @@ export function adaptTool(
         }
       }
 
-      // skill connector 自己的 execute() 会 emit tool_call/tool_result，
-      // 不再从外层再 emit 一次，避免同一 skill 在 eventLog 中出现两次。
-      const isSkill = (connector as { kind?: string }).kind === "skill";
+      // selfEmitEvents=true 的工具（如内置 core.* 工具、skill）自己的 execute() 会 emit
+      // tool_call/tool_result（可能含特殊语义：定制 args 预览、流式 text、错误分支 error），
+      // 外层不再 emit，避免重复且不丢失语义。
+      // selfEmitEvents 缺省（false）的工具（如 MCP 桥接工具）由外层统一 emit。
+      const selfEmit = (connector as FlowConnector & { selfEmitEvents?: boolean }).selfEmitEvents === true;
 
       // 发 tool_call 事件（SSE 可见）
-      if (!isSkill) {
+      if (!selfEmit) {
         await safeEmit(deps.emit, {
           type: "tool_call",
           channel: "status",
@@ -223,7 +235,7 @@ export function adaptTool(
           }
         }
 
-        if (!isSkill) {
+        if (!selfEmit) {
           await safeEmit(deps.emit, {
             type: "tool_result",
             channel: "status",
@@ -312,7 +324,7 @@ function buildAdapterContext(
       if (!deps.requireConfirmation) return { approved: true };
       return deps.requireConfirmation(gate);
     },
-    resolveRef: (_ref: string) => undefined, // ReAct 模式无 DAG inputRefs
+    resolveRef: deps.resolveRef ?? ((_ref: string) => undefined), // ReAct 模式：harness 可选注入，缺省无上游引用
     resolveTool: deps.resolveTool, // DSL ctx.call 用（查注册表调其他工具）
     recordOutput: () => {},
     getOutput: () => undefined,

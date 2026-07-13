@@ -13,10 +13,8 @@
  * 风险评级：代理本身标 safe，但执行时根据 catalog 缓存里的 risk 字段
  * 动态判定是否需要 HITL（写动作触发确认门）。
  */
-import { randomUUID } from "node:crypto";
 import type { FlowConnector, ToolResult } from "../base.js";
 import type { ToolEvent } from "../../core/stream-events.js";
-import { toolCallPayload, toolResultPayload } from "../../core/stream-events.js";
 import { wrapMcpResultAsEvidence } from "./mcp-client.js";
 import type { McpClient, McpToolCallResult } from "./mcp-client.js";
 import type { McpCatalogCache, InputFieldSummary } from "./mcp-catalog-cache.js";
@@ -117,23 +115,8 @@ export function createLazyMcpActionTool(opts: LazyMcpActionToolOptions): FlowCon
     async *execute(
       params: Record<string, unknown>,
     ): AsyncGenerator<ToolEvent, ToolResult> {
-      const callId = `c_${randomUUID().slice(0, 8)}`;
-      const startedAt = Date.now();
-
       const toolName = String(params.toolName ?? "");
       const inputArgs = (params.args as Record<string, unknown> | undefined) ?? {};
-
-      yield {
-        type: "tool_call",
-        channel: "status",
-        payload: toolCallPayload({
-          id: callId,
-          name,
-          args: { toolName, args: inputArgs },
-          risk: "safe",
-          groupId: `mcp.${serverId}`,
-        }),
-      };
 
       let result: McpToolCallResult;
       let summary: string;
@@ -202,17 +185,6 @@ export function createLazyMcpActionTool(opts: LazyMcpActionToolOptions): FlowCon
         system: serverId,
         provenance: `${name}(${toolName})`,
       });
-
-      const durationMs = Date.now() - startedAt;
-      yield {
-        type: "tool_result",
-        channel: "status",
-        payload: toolResultPayload({
-          tool_call_id: callId,
-          output: JSON.stringify(envelope),
-          duration_ms: durationMs,
-        }),
-      };
 
       return {
         output: envelope,

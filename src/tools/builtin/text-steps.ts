@@ -96,6 +96,7 @@ export function createTranslateTool(
       properties: { text: { type: "string", description: "翻译结果" } },
     },
     outputExample: { text: "翻译后的文本内容..." },
+    selfEmitEvents: true,
 
     async *execute(params, ctx): AsyncGenerator<ToolEvent, ToolResult<{ text: string }>> {
       const args = schema.parse(params);
@@ -271,6 +272,7 @@ export function createSeamRepairTool(
       properties: { text: { type: "string", description: "修复结果" } },
     },
     outputExample: { text: "修复后的连贯文本..." },
+    selfEmitEvents: true,
 
     async *execute(params, ctx): AsyncGenerator<ToolEvent, ToolResult<{ text: string }>> {
       const args = schema.parse(params);
@@ -471,6 +473,7 @@ export function createTerminologyTool(
       properties: { text: { type: "string", description: "权威文本" } },
     },
     outputExample: { text: "术语统一的权威文本..." },
+    selfEmitEvents: true,
 
     async *execute(params, ctx): AsyncGenerator<ToolEvent, ToolResult<{ text: string }>> {
       const args = schema.parse(params);
@@ -576,6 +579,7 @@ export function createSubtitleTool(runtime: SubtitleRuntime): FlowConnector<{ sr
       properties: { srtPath: { type: "string", description: "final.srt 的绝对路径" } },
     },
     outputExample: { srtPath: "/data/tasks/xxx/video/final.srt" },
+    selfEmitEvents: true,
 
     async *execute(params, ctx): AsyncGenerator<ToolEvent, ToolResult<{ srtPath: string }>> {
       const workDir = runtime.workDirOf(ctx.taskId);
@@ -661,6 +665,7 @@ export function createImagePromptsTool(
       },
     },
     outputExample: { plan: '[{"image_path":"cover.png","para_summary":"开场场景"}]' },
+    selfEmitEvents: true,
 
     async *execute(params, ctx): AsyncGenerator<ToolEvent, ToolResult<{ plan: string }>> {
       const args = schema.parse(params);

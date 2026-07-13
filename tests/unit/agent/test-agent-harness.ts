@@ -199,6 +199,71 @@ describe("tool-adapter", () => {
     const result = await adapted.execute?.({ msg: "approved" }, { toolCallId: "tc_test", messages: [] } as never);
     expect(result).toMatchObject({ echoed: "approved" });
   });
+
+  it("deps.resolveRef 透传到 skill 内的 StepCtx.resolveRef（skill 间数据流）", async () => {
+    // 构造一个 skill，内部用 ctx.resolveRef 读上游产出
+    const upstream = { data: { rootCause: "刀具磨损", oee: 0.62 } };
+    const skill = createSkill({
+      name: "test.skill.resolveref_inject",
+      description: "验证 deps.resolveRef 透传到 skill",
+      whenToUse: { triggers: ["t"], notFor: [] },
+      inputSchema: { type: "object", properties: { priorCallId: { type: "string" } } },
+      outputSchema: { type: "object" },
+      outputExample: {},
+      async steps(input) {
+        const { step } = input;
+        return await step("读上游", async (c) => {
+          // 关键断言目标：skill 内能拿到注入的 resolveRef
+          return c.resolveRef!(`$.tasks[${input.priorCallId as string}].output`);
+        });
+      },
+    });
+
+    const adapted = adaptTool(
+      skill,
+      {
+        resolveRef: (ref: string) => {
+          if (ref === "$.tasks[prior_call_1].output") return upstream;
+          return undefined;
+        },
+      },
+      { taskId: "t1", runId: "r1", nodeId: "n1" },
+    );
+
+    const result = await adapted.execute?.(
+      { priorCallId: "prior_call_1" },
+      { toolCallId: "tc_test", messages: [] } as never,
+    );
+    // adaptTool.execute 返回的就是 output 本身（不经 ToolResult 包装）
+    // skill 末步返回值经 EvidenceEnvelope 包装后落到 data.stepResults[0]
+    const output = result as { data?: { stepResults?: unknown[] } };
+    expect(output.data?.stepResults?.[0]).toEqual(upstream);
+  });
+
+  it("deps.resolveRef 缺省时 skill 内 ctx.resolveRef 返回 undefined（优雅降级）", async () => {
+    const skill = createSkill({
+      name: "test.skill.resolveref_default",
+      description: "验证 deps 未提供 resolveRef 时 skill 降级",
+      whenToUse: { triggers: ["t"], notFor: [] },
+      inputSchema: { type: "object", properties: {} },
+      outputSchema: { type: "object" },
+      outputExample: {},
+      async steps(input) {
+        const { step } = input;
+        return await step("探查", async (c) => {
+          return { hasRef: typeof c.resolveRef === "function", value: c.resolveRef?.("$.tasks[x].output") };
+        });
+      },
+    });
+
+    // deps 不传 resolveRef
+    const adapted = adaptTool(skill, {}, { taskId: "t1", runId: "r1", nodeId: "n1" });
+    const result = await adapted.execute?.({}, { toolCallId: "tc_test", messages: [] } as never);
+    const output = result as { data?: { stepResults?: Array<{ hasRef: boolean; value: unknown }> } };
+    // 缺省时 ctx.resolveRef 仍是函数（tool-adapter 注入了 noOp），但返回 undefined
+    expect(output.data?.stepResults?.[0]?.hasRef).toBe(true);
+    expect(output.data?.stepResults?.[0]?.value).toBeUndefined();
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

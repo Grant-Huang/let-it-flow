@@ -8,10 +8,8 @@
  *
  * 让 MCP 工具像平台原生工具一样进 ToolRegistry，被 ReAct 主循环复用。
  */
-import { randomUUID } from "node:crypto";
 import type { FlowConnector, ToolResult } from "../base.js";
 import type { ToolEvent } from "../../core/stream-events.js";
-import { toolCallPayload, toolResultPayload } from "../../core/stream-events.js";
 import { wrapMcpResultAsEvidence } from "./mcp-client.js";
 import type { McpClient, McpToolDescriptor } from "./mcp-client.js";
 
@@ -33,6 +31,10 @@ export interface McpActionToolOptions {
  * 把一个 MCP 工具适配成 FlowConnector。
  *
  * 命名规则：mcp.<serverId>.<toolName>（如 mcp.mes.update_schedule）。
+ *
+ * emit 责任：selfEmitEvents 缺省（false），工具 execute 不 yield tool_call/tool_result，
+ * 由编排层（tool-adapter / node-runner）统一 emit。MCP 工具的事件语义是机械的
+ * （无定制 args 预览、无流式增量），外层可完整重建，故走外层统一 emit 更干净。
  */
 export function createMcpActionTool(opts: McpActionToolOptions): FlowConnector {
   const { serverId, descriptor, client } = opts;
@@ -76,38 +78,12 @@ export function createMcpActionTool(opts: McpActionToolOptions): FlowConnector {
     async *execute(
       params: Record<string, unknown>,
     ): AsyncGenerator<ToolEvent, ToolResult> {
-      const callId = `c_${randomUUID().slice(0, 8)}`;
-      const startedAt = Date.now();
-
-      yield {
-        type: "tool_call",
-        channel: "status",
-        payload: toolCallPayload({
-          id: callId,
-          name,
-          args: params,
-          risk,
-          groupId: `mcp.${serverId}`,
-        }),
-      };
-
       const result = await client.callTool(descriptor.name, params);
       const envelope = wrapMcpResultAsEvidence(result, {
         freshness,
         system: serverId,
         provenance: `${name}(${JSON.stringify(params).slice(0, 80)})`,
       });
-
-      const durationMs = Date.now() - startedAt;
-      yield {
-        type: "tool_result",
-        channel: "status",
-        payload: toolResultPayload({
-          tool_call_id: callId,
-          output: JSON.stringify(envelope),
-          duration_ms: durationMs,
-        }),
-      };
 
       return {
         output: envelope,

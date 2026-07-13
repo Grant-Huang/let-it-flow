@@ -51,6 +51,7 @@ export function createDeliverTool(): FlowConnector<{ type: string; title?: strin
       },
     },
     outputExample: { type: "podcast_script", title: "播客脚本", content: "聚合后的完整文稿..." },
+    selfEmitEvents: true,
 
     async *execute(params, ctx): AsyncGenerator<ToolEvent, ToolResult<{ type: string; title?: string; content: string }>> {
       const args = inputSchema.parse(params);

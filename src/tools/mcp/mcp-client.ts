@@ -184,18 +184,21 @@ export class McpClient {
 /**
  * MCP 工具调用结果 → EvidenceEnvelope（MCP 类证据统一信封）。
  * MCP 默认 confidence=measured（MES/ERP 实测），freshness 由调用者指定。
+ *
+ * data 只保留 text 字段（content 数组的文本拼接），不保留原始 content 数组：
+ * LLM 直接读字符串比解析 content 数组更省 token，消费方统一从 data.text 读。
  */
 export function wrapMcpResultAsEvidence(
   result: McpToolCallResult,
   opts: { freshness?: EvidenceEnvelope["freshness"]; system: string; provenance: string },
 ): EvidenceEnvelope {
-  const textParts = result.content
+  const text = result.content
     .filter((c): c is { type: "text"; text: string } => c.type === "text")
-    .map((c) => c.text);
+    .map((c) => c.text)
+    .join("\n");
   return {
     data: {
-      content: result.content,
-      text: textParts.join("\n"),
+      text,
       isError: result.isError ?? false,
     },
     freshness: opts.freshness ?? "realtime",

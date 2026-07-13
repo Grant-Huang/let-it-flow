@@ -1,7 +1,8 @@
+import { randomUUID } from "node:crypto";
 import type { WorkflowNode, WorkflowDAG } from "../planner/dag-schema.js";
-import type { ToolResult } from "../tools/base.js";
+import type { FlowConnector, ToolResult } from "../tools/base.js";
 import type { ExecutionContext } from "./context.js";
-import { workflowNodePayload } from "../core/stream-events.js";
+import { workflowNodePayload, toolCallPayload, toolResultPayload } from "../core/stream-events.js";
 import { createDefaultToolRegistry } from "./default-tools.js";
 
 /**
@@ -73,6 +74,25 @@ export async function runNode(
   }
 
   try {
+    // selfEmitEvents=false 的工具（如 MCP 桥接工具）不自行 emit tool_call/tool_result，
+    // 由 node-runner 统一补 emit（selfEmitEvents=true 的内置工具/skill 自己 emit，外层跳过避免重复）。
+    const selfEmit = (tool as FlowConnector & { selfEmitEvents?: boolean }).selfEmitEvents === true;
+    const callId = `c_${randomUUID().slice(0, 8)}`;
+    const startedToolAt = Date.now();
+    if (!selfEmit) {
+      await ctx.emit({
+        type: "tool_call",
+        channel: "status",
+        payload: toolCallPayload({
+          id: callId,
+          name: node.toolName,
+          args: params,
+          risk: (tool as FlowConnector & { risk?: "safe" | "write" | "destructive" }).risk ?? "safe",
+          groupId: node.id,
+        }),
+      });
+    }
+
     const gen = tool.execute(params, ctx);
     let final: ToolResult | undefined;
     while (true) {
@@ -86,6 +106,19 @@ export async function runNode(
     }
     const output = final?.output;
     ctx.recordOutput(node.id, output);
+
+    if (!selfEmit) {
+      await ctx.emit({
+        type: "tool_result",
+        channel: "status",
+        payload: toolResultPayload({
+          tool_call_id: callId,
+          output: typeof output === "string" ? output : JSON.stringify(output),
+          duration_ms: Date.now() - startedToolAt,
+        }),
+      });
+    }
+
     await emitNodeDone(ctx, node, startedAt, "done");
     return { output, skipped: false, durationMs: Date.now() - startedAt };
   } catch (e) {

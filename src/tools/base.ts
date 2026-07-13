@@ -161,4 +161,20 @@ export interface FlowConnector<TOutput = unknown> {
    * 未标注的工具仍可被 LLM 兜底解析，只是慢（走 LLM 推理而非索引命中）。
    */
   readonly semanticTags?: string[];
+
+  /**
+   * 是否由工具自身负责 emit tool_call / tool_result 事件（可选，缺省 false）。
+   *
+   * emit 责任契约（避免外层与内层重复 emit 同一对事件）：
+   *   - false（缺省）：工具 execute 不 yield tool_call/tool_result，
+   *     由编排层（tool-adapter / node-runner）统一 emit。
+   *     适用于事件语义是机械的、外层能完整重建的工具（如 MCP 桥接工具）。
+   *   - true：工具 execute 自行 yield tool_call/tool_result（可能含特殊语义：
+   *     定制 args 预览、流式 text 增量、错误分支 error 字段等），外层跳过 emit。
+   *     适用于事件语义外层无法重建的工具（内置 core.* 工具、skill）。
+   *
+   * 注：无论本字段取值，工具仍可 yield 其他事件类型（text/workflow_node 等），
+   *     这些事件始终由内层 emit、外层透传。
+   */
+  readonly selfEmitEvents?: boolean;
 }
