@@ -7,10 +7,11 @@ on:
 
 permissions:
   contents: write
+  id-token: write   # OIDC Trusted Publishing 必需
 
 jobs:
   publish:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest   # 必须用 GitHub-hosted runner，OIDC 不支持 self-hosted
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -23,9 +24,12 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'   # OIDC 要求 Node >= 22.14
           cache: 'pnpm'
           registry-url: 'https://registry.npmjs.org'
+
+      - name: Upgrade npm to latest   # OIDC 要求 npm CLI >= 11.5.1
+        run: npm install -g npm@latest
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -44,10 +48,8 @@ jobs:
       - name: Build
         run: pnpm build
 
-      - name: Publish to npm
-        run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish to npm via OIDC Trusted Publishing
+        run: npm publish --access public --provenance
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
