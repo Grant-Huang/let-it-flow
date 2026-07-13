@@ -56,3 +56,6 @@ apps/
 
 # Word 文档（非文本，不入库；如需共享走 wiki/网盘）
 *.docx
+
+# 本地排障脚本（临时调试用，不入库）
+scripts/check-mestar-health.ts
