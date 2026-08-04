@@ -63,6 +63,7 @@
     "test:watch": "vitest",
     "dev": "tsx watch src/server.ts",
     "dev:sdk": "tsx watch src/index.ts",
+    "dev:cabinet-quotes": "tsx watch examples/cabinet-quotes-scraper/server.ts",
     "dev:nexus": "tsx watch apps/nexusops/server/index.ts",
     "dev:aicf": "tsx watch apps/ai-content-factory/server/index.ts",
     "dev:nexus:web": "pnpm --filter @let-it-flow/nexusops-web dev",
@@ -92,12 +93,14 @@
     "hono": "^4.6.0",
     "jsonpath-plus": "^10.1.0",
     "marked": "^18.0.5",
+    "nodemailer": "^6.9.0",
     "zod": "^3.23.0",
     "zod-to-json-schema": "^3.25.2"
   },
   "devDependencies": {
     "@eslint/js": "^9.13.0",
     "@types/node": "^22.0.0",
+    "@types/nodemailer": "^6.4.0",
     "eslint": "^9.13.0",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0",
