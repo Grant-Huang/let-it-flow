@@ -110,6 +110,19 @@ for await (const chunk of stream) { /* 处理流式事件 */ }
 - ❌ 业务应用（业务逻辑由消费应用实现）
 - ❌ 数据存储层（应用自管数据库）
 
+## API 稳定性（0.x 即有承诺）
+
+包版本仍为 **0.x**，但核心公开面已分级标记，避免「0.x = 随时可破」：
+
+| 等级 | 含义 |
+|------|------|
+| **Stable** | 可生产依赖；breaking 须先 deprecate，移除推迟至 1.0.0 |
+| **Evolving** | 可用，minor 内可能调整；升级需读 CHANGELOG |
+| **Experimental** | 无承诺，勿用于生产 |
+
+- 政策全文：[docs/27-api-stability.md](docs/27-api-stability.md)
+- 机器可读清单：`import { MAIN_EXPORT_STABILITY, STABILITY_POLICY } from "@meso.ai/let-it-flow"`
+
 详见 [docs/00-platform-positioning.md](docs/00-platform-positioning.md) 完整定位文档。
 
 ## 项目结构
@@ -173,6 +186,7 @@ let-it-flow/
 |------|------|
 | [docs/21-streaming-ui-guidelines.md](docs/21-streaming-ui-guidelines.md) | 流式 UI 设计规范 |
 | [docs/22-upstream-migration-plan.md](docs/22-upstream-migration-plan.md) | @meso.ai/ui 上游集成计划 |
+| [docs/27-api-stability.md](docs/27-api-stability.md) | **0.x API 稳定性分级（Stable/Evolving/Experimental）** |
 
 **参考 & 其他**:
 

@@ -124,3 +124,13 @@ export { createKnowledgeBaseTool } from "./tools/builtin/knowledge-base.js";
 export { TaskRegistry } from "./tasks/registry.js";
 export type { TaskRuntime, TaskRunnerHooks } from "./tasks/registry.js";
 export type { TaskMeta } from "./tasks/task-store.js";
+
+// ── API 稳定性政策（0.x 阶段即分级承诺，见 docs/27-api-stability.md）──────────
+export {
+  STABILITY_POLICY,
+  MAIN_EXPORT_STABILITY,
+  RUNTIME_EXPORT_STABILITY,
+  HTTP_ROUTE_STABILITY,
+  listExportsByStability,
+} from "./stability.js";
+export type { ApiSurfaceEntry, StabilityLevel } from "./stability.js";

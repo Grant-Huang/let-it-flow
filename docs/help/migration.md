@@ -370,13 +370,15 @@ state.stages[n].state
 
 ## 版本策略
 
-遵循 [SemVer](https://semver.org/)：
+遵循 [SemVer](https://semver.org/)，并在 **0.x 阶段** 对公开面分级承诺（Stable / Evolving / Experimental）。详见 [docs/27-api-stability.md](../27-api-stability.md)。
 
 | 变更类型 | 版本 bump |
 |---------|----------|
-| Bug fix，不影响 API / 协议 / CSS token | Patch（x.y.**z**）|
-| 新增功能，向后兼容 | Minor（x.**y**.0）|
-| Breaking：API 字段、SSE 协议、稳定 CSS 类名、稳定 token | Major（**x**.0.0）|
+| Bug fix，不影响 Stable 契约 | Patch（x.y.**z**）|
+| Stable 面 additive（新 optional 字段 / 新导出） | Minor（x.**y**.0）|
+| Stable 面 breaking（须先 deprecate，移除推迟至 1.0.0） | 不允许 silent break |
+| Evolving / Experimental 面 breaking | Minor + CHANGELOG |
+| 全面 Stable 承诺升级 | Major（**1**.0.0）|
 
 协议层 Breaking 变更须：
 1. 先更新 `docs/streaming-protocol.md`（单一事实来源）

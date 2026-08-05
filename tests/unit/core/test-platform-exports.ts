@@ -6,8 +6,37 @@
  */
 import { describe, it, expect } from "vitest";
 import * as Lif from "../../../src/index.js";
+import { MAIN_EXPORT_STABILITY } from "../../../src/stability.js";
+
+/** 主入口导出中不参与稳定性清单的符号（政策元数据自身）。 */
+const STABILITY_META_EXPORTS = new Set([
+  "STABILITY_POLICY",
+  "MAIN_EXPORT_STABILITY",
+  "RUNTIME_EXPORT_STABILITY",
+  "HTTP_ROUTE_STABILITY",
+  "listExportsByStability",
+]);
 
 describe("平台公共导出", () => {
+  describe("API 稳定性注册表", () => {
+    it("每个主入口导出（除政策元数据）均有稳定性等级", () => {
+      const exportNames = Object.keys(Lif).filter((k) => !STABILITY_META_EXPORTS.has(k));
+      const missing = exportNames.filter((name) => !(name in MAIN_EXPORT_STABILITY));
+      expect(missing, `未登记稳定性: ${missing.join(", ")}`).toEqual([]);
+    });
+
+    it("STABILITY_POLICY 已导出且生效版本合理", () => {
+      expect(Lif.STABILITY_POLICY.effectiveSince).toMatch(/^\d+\.\d+\.\d+$/);
+      expect(Lif.STABILITY_POLICY.levels.stable).toContain("1.0.0");
+    });
+
+    it("核心 SDK 面标记为 stable", () => {
+      expect(Lif.MAIN_EXPORT_STABILITY.LetItFlow).toBe("stable");
+      expect(Lif.MAIN_EXPORT_STABILITY.runReactHarness).toBe("stable");
+      expect(Lif.MAIN_EXPORT_STABILITY.createSkill).toBe("stable");
+    });
+  });
+
   describe("R1/R2 传输层（补全导出）", () => {
     it("EventBroadcaster 类已导出", () => {
       expect(Lif.EventBroadcaster).toBeDefined();
