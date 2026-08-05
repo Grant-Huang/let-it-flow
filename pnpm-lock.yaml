@@ -29,9 +29,6 @@ importers:
       '@meso.ai/types':
         specifier: ^2.2.0
         version: 2.2.0
-      '@meso.ai/ui':
-        specifier: ^3.3.0
-        version: 3.3.0(@meso.ai/types@2.2.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(zod@3.25.76)
@@ -81,116 +78,6 @@ importers:
       vitest:
         specifier: ^2.1.0
         version: 2.1.9(@types/node@22.19.21)
-
-  apps/ai-content-factory:
-    dependencies:
-      let-it-flow:
-        specifier: workspace:*
-        version: link:../..
-
-  apps/ai-content-factory/web:
-    dependencies:
-      '@let-it-flow/common-ui':
-        specifier: workspace:*
-        version: link:../../../packages/common-ui
-      '@meso.ai/client':
-        specifier: ^0.1.0
-        version: 0.1.0
-      '@meso.ai/types':
-        specifier: ^2.2.0
-        version: 2.2.0
-      '@meso.ai/ui':
-        specifier: ^3.3.0
-        version: 3.3.0(@meso.ai/types@2.2.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
-      react:
-        specifier: ^18.3.1
-        version: 18.3.1
-      react-dom:
-        specifier: ^18.3.1
-        version: 18.3.1(react@18.3.1)
-      react-router-dom:
-        specifier: ^6.26.0
-        version: 6.30.4(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
-    devDependencies:
-      '@types/react':
-        specifier: ^18.3.0
-        version: 18.3.31
-      '@types/react-dom':
-        specifier: ^18.3.0
-        version: 18.3.7(@types/react@18.3.31)
-      '@vitejs/plugin-react':
-        specifier: ^4.3.0
-        version: 4.7.0(vite@5.4.21(@types/node@22.19.21))
-      autoprefixer:
-        specifier: ^10.4.20
-        version: 10.5.0(postcss@8.5.15)
-      postcss:
-        specifier: ^8.4.41
-        version: 8.5.15
-      tailwindcss:
-        specifier: ^3.4.10
-        version: 3.4.19(tsx@4.22.4)
-      typescript:
-        specifier: ^5.6.0
-        version: 5.9.3
-      vite:
-        specifier: ^5.4.0
-        version: 5.4.21(@types/node@22.19.21)
-
-  apps/nexusops:
-    dependencies:
-      let-it-flow:
-        specifier: workspace:*
-        version: link:../..
-
-  apps/nexusops/web:
-    dependencies:
-      '@let-it-flow/common-ui':
-        specifier: workspace:*
-        version: link:../../../packages/common-ui
-      '@meso.ai/client':
-        specifier: ^0.1.0
-        version: 0.1.0
-      '@meso.ai/types':
-        specifier: ^2.2.0
-        version: 2.2.0
-      '@meso.ai/ui':
-        specifier: ^3.3.0
-        version: 3.3.0(@meso.ai/types@2.2.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
-      react:
-        specifier: ^18.3.1
-        version: 18.3.1
-      react-dom:
-        specifier: ^18.3.1
-        version: 18.3.1(react@18.3.1)
-      react-router-dom:
-        specifier: ^6.26.0
-        version: 6.30.4(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
-    devDependencies:
-      '@types/react':
-        specifier: ^18.3.0
-        version: 18.3.31
-      '@types/react-dom':
-        specifier: ^18.3.0
-        version: 18.3.7(@types/react@18.3.31)
-      '@vitejs/plugin-react':
-        specifier: ^4.3.0
-        version: 4.7.0(vite@5.4.21(@types/node@22.19.21))
-      autoprefixer:
-        specifier: ^10.4.20
-        version: 10.5.0(postcss@8.5.15)
-      postcss:
-        specifier: ^8.4.41
-        version: 8.5.15
-      tailwindcss:
-        specifier: ^3.4.10
-        version: 3.4.19(tsx@4.22.4)
-      typescript:
-        specifier: ^5.6.0
-        version: 5.9.3
-      vite:
-        specifier: ^5.4.0
-        version: 5.4.21(@types/node@22.19.21)
 
   packages/common-ui:
     dependencies:
@@ -787,13 +674,6 @@ packages:
 
   '@meso.ai/types@2.2.0':
     resolution: {integrity: sha512-yYuWd3KFrA0/wgf0QtWRTo2Tpx4dY03SSOwipJ9Bj+flymQDKBsDmZotSpmjYfKuMK1Y8bpjvDliBcJwMwKwow==}
-
-  '@meso.ai/ui@3.3.0':
-    resolution: {integrity: sha512-95ZjYg1dP8tH9h3BG/fUl3brSEeGiwVTkTfi6pUuJwatFO4pCdY/ykOXP3llKHt5dyafGENokL6BoqZwgnHxPw==}
-    peerDependencies:
-      '@meso.ai/types': '>=2.2.0'
-      react: '>=18.0.0'
-      react-dom: '>=18.0.0'
 
   '@modelcontextprotocol/sdk@1.29.0':
     resolution: {integrity: sha512-zo37mZA9hJWpULgkRpowewez1y6ML5GsXJPY8FI0tBBCd77HEvza4jDqRKOXgHNn867PVGCyTdzqpz0izu5ZjQ==}
@@ -2701,12 +2581,6 @@ snapshots:
   '@meso.ai/types@2.1.1': {}
 
   '@meso.ai/types@2.2.0': {}
-
-  '@meso.ai/ui@3.3.0(@meso.ai/types@2.2.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)':
-    dependencies:
-      '@meso.ai/types': 2.2.0
-      react: 18.3.1
-      react-dom: 18.3.1(react@18.3.1)
 
   '@modelcontextprotocol/sdk@1.29.0(zod@3.25.76)':
     dependencies:

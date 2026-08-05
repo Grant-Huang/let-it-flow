@@ -3,7 +3,7 @@
  *
  * 用法：pnpm scenarios
  *
- * 聚合 V/G/C/L/T 各层场景，逐个执行，生成供人阅读的 Markdown 报告：
+ * 聚合 L 层场景，逐个执行，生成供人阅读的 Markdown 报告：
  *   tests/reports/scenario-report.md
  *
  * 报告结构（每个场景）：
@@ -20,43 +20,18 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { versions, platform, cwd } from "node:process";
 import type { Scenario, ScenarioResult, CallProvenance } from "./types.js";
-import { vLayerScenarios } from "./v-layer.js";
-import { aicfVLayerScenarios } from "./v-layer-aicf.js";
-import { gLayerScenarios } from "./g-layer.js";
-import { aicfGLayerScenarios } from "./g-layer-aicf.js";
-import { cLayerScenarios } from "./c-layer.js";
 import { lLayerScenarios } from "./l-layer.js";
-import { tLayerScenarios } from "./t-layer.js";
-import { eLayerScenarios } from "./e-layer.js";
-import { nexusELayerScenarios } from "./e-layer-nexus.js";
-import { narrativeScenarios } from "./narrative-layer.js";
 
 const ROOT = cwd();
 const REPORT_DIR = join(ROOT, "tests", "reports");
 const REPORT_PATH = join(REPORT_DIR, "scenario-report.md");
 
 const LAYER_NAMES: Record<string, string> = {
-  V: "V 层 · 一致性（Precondition 前置条件）",
-  G: "G 层 · 治理（Governance 确定性约束）",
-  C: "C 层 · 准确度（输出结构自检）",
   L: "L 层 · 生命周期（Skill 沉淀）",
-  T: "T 层 · 工具协议（EvidenceEnvelope + 动态裁剪）",
-  E: "E 层 · 端到端（AI Content Factory fixture 回放）",
 };
 
 async function main() {
-  const allScenarios: Scenario[] = [
-    ...tLayerScenarios,
-    ...vLayerScenarios,
-    ...aicfVLayerScenarios,
-    ...gLayerScenarios,
-    ...aicfGLayerScenarios,
-    ...cLayerScenarios,
-    ...lLayerScenarios,
-    ...eLayerScenarios,
-    ...nexusELayerScenarios,
-    ...narrativeScenarios,
-  ];
+  const allScenarios: Scenario[] = [...lLayerScenarios];
 
   console.log(`\n运行 ${allScenarios.length} 个全流程场景...\n`);
   const results: ScenarioResult[] = [];
@@ -136,7 +111,7 @@ function renderReport(results: ScenarioResult[], meta: ReportMeta): string {
   L.push("");
   L.push(`> 生成时间：${meta.generatedAt}`);
   L.push(`> 环境：Node ${meta.env.node} / ${meta.env.platform}`);
-  L.push(`> 性质说明：本报告验证 NexusOps + AI Content Factory + let-it-flow 在**离线条件**下，各层机制（V/G/C/L/T/E）能否确定性输出符合预期的可信结果。真实 LLM 决策链路（ReAct 全流程）属 e2e 职责，不在此报告范围。`);
+  L.push(`> 性质说明：本报告验证 let-it-flow 平台核心在**离线条件**下，L 层 skill 沉淀机制能否确定性输出符合预期的可信结果。`);
   L.push("");
 
   // ── 汇总 ──
@@ -167,7 +142,7 @@ function renderReport(results: ScenarioResult[], meta: ReportMeta): string {
     if (!byLayer.has(r.scenario.layer)) byLayer.set(r.scenario.layer, []);
     byLayer.get(r.scenario.layer)!.push(r);
   }
-  for (const layer of ["T", "V", "G", "C", "L", "E"]) {
+  for (const layer of ["L"]) {
     const items = byLayer.get(layer);
     if (!items || items.length === 0) continue;
     L.push(`---`);
