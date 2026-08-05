@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>加拿大橱柜报价助手 · let-it-flow</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #0f1216; color: #e6e8eb; height: 100vh; display: flex; flex-direction: column;
+  }
+  header { padding: 14px 20px; border-bottom: 1px solid #262b33; display: flex; align-items: center; gap: 10px; }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  header .badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: #262b33; color: #9aa4b2; }
+  main { flex: 1; display: grid; grid-template-columns: 380px 1fr; overflow: hidden; }
+  .chat { display: flex; flex-direction: column; border-right: 1px solid #262b33; min-width: 0; }
+  .chat-log { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+  .msg { max-width: 90%; padding: 8px 12px; border-radius: 10px; font-size: 13px; line-height: 1.5; white-space: pre-wrap; }
+  .msg.user { align-self: flex-end; background: #2a5bd7; color: white; }
+  .msg.assistant { align-self: flex-start; background: #1c2129; }
+  .chat-input { display: flex; gap: 8px; padding: 12px; border-top: 1px solid #262b33; }
+  .chat-input input { flex: 1; background: #1c2129; border: 1px solid #262b33; color: inherit; padding: 8px 10px; border-radius: 8px; font-size: 13px; }
+  .chat-input button, .toolbar button, .lead-row button {
+    background: #2a5bd7; border: none; color: white; padding: 8px 14px; border-radius: 8px; font-size: 13px; cursor: pointer;
+  }
+  .chat-input button:disabled, .toolbar button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .req-box { padding: 10px 12px; font-size: 12px; color: #9aa4b2; border-top: 1px solid #262b33; white-space: pre-wrap; }
+  .panel { display: flex; flex-direction: column; overflow: hidden; }
+  .toolbar { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid #262b33; flex-wrap: wrap; }
+  .toolbar .status { font-size: 12px; color: #9aa4b2; }
+  .content { flex: 1; overflow-y: auto; padding: 12px 16px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid #1c2129; vertical-align: top; }
+  th { color: #9aa4b2; font-weight: 500; font-size: 12px; }
+  .drafts { margin-top: 20px; }
+  .draft-card { background: #1c2129; border: 1px solid #262b33; border-radius: 10px; padding: 12px; margin-bottom: 10px; font-size: 13px; }
+  .draft-card .to { color: #9aa4b2; font-size: 12px; margin-bottom: 4px; }
+  .draft-card .subject { font-weight: 600; margin-bottom: 6px; }
+  .draft-card .body { white-space: pre-wrap; color: #cbd2db; }
+  .draft-card .status { display: inline-block; margin-top: 8px; font-size: 11px; padding: 2px 8px; border-radius: 10px; background: #262b33; }
+  .draft-card .status.sent { background: #1c4d2b; color: #7bd88f; }
+  .draft-card .status.failed { background: #4d1c1c; color: #d87b7b; }
+  .draft-card .status.skipped { background: #4d3f1c; color: #d8c37b; }
+  .warn { font-size: 12px; color: #d8c37b; padding: 8px 16px; border-bottom: 1px solid #262b33; }
+  small.hint { color: #6a7382; }
+</style>
+</head>
+<body>
+<header>
+  <h1>加拿大橱柜报价助手</h1>
+  <span class="badge" id="sendBadge">检查发信配置中…</span>
+</header>
+<main>
+  <section class="chat">
+    <div class="chat-log" id="chatLog">
+      <div class="msg assistant">你好！我是橱柜设计顾问。先聊聊你的项目吧——厨房大概多大？喜欢什么风格（现代/传统/简约）？预算范围大概是多少？</div>
+    </div>
+    <div class="req-box" id="reqBox"><small class="hint">需求摘要会在这里逐步汇总…</small></div>
+    <form class="chat-input" id="chatForm">
+      <input id="chatInput" placeholder="说说你的需求…" autocomplete="off" />
+      <button type="submit">发送</button>
+    </form>
+  </section>
+  <section class="panel">
+    <div class="warn">发送询价邮件前请务必人工核对草稿内容与收件人；本页不会未经确认自动群发。</div>
+    <div class="toolbar">
+      <button id="searchBtn">搜索加拿大橱柜报价公司</button>
+      <span class="status" id="searchStatus"></span>
+      <span style="flex:1"></span>
+      <button id="composeBtn" disabled>为选中公司生成询价邮件草稿</button>
+    </div>
+    <div class="content">
+      <table id="leadsTable">
+        <thead>
+          <tr><th></th><th>公司</th><th>联系人</th><th>邮箱</th><th>电话</th><th>城市</th><th>来源</th></tr>
+        </thead>
+        <tbody id="leadsBody"></tbody>
+      </table>
+      <div class="drafts" id="draftsSection" style="display:none">
+        <div class="toolbar" style="padding:0 0 10px 0; border:none;">
+          <strong>询价邮件草稿</strong>
+          <span style="flex:1"></span>
+          <button id="sendBtn">确认并发送选中草稿</button>
+        </div>
+        <div id="draftsList"></div>
+      </div>
+    </div>
+  </section>
+</main>
+<script>
+const chatLog = document.getElementById('chatLog');
+const reqBox = document.getElementById('reqBox');
+const leadsBody = document.getElementById('leadsBody');
+const draftsSection = document.getElementById('draftsSection');
+const draftsList = document.getElementById('draftsList');
+const sendBadge = document.getElementById('sendBadge');
+
+let leads = [];
+let drafts = [];
+
+function addMsg(role, text) {
+  const div = document.createElement('div');
+  div.className = 'msg ' + role;
+  div.textContent = text;
+  chatLog.appendChild(div);
+  chatLog.scrollTop = chatLog.scrollHeight;
+}
+
+document.getElementById('chatForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const input = document.getElementById('chatInput');
+  const message = input.value.trim();
+  if (!message) return;
+  addMsg('user', message);
+  input.value = '';
+  const res = await fetch('/api/chat', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ message }),
+  });
+  const data = await res.json();
+  addMsg('assistant', data.reply);
+  reqBox.textContent = data.requirements?.summary || '';
+});
+
+function renderLeads() {
+  leadsBody.innerHTML = '';
+  for (const lead of leads) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><input type="checkbox" class="lead-check" value="${lead.id}" /></td>
+      <td>${escapeHtml(lead.companyName)}</td>
+      <td>${escapeHtml(lead.contactName || '-')}</td>
+      <td>${escapeHtml(lead.email)}</td>
+      <td>${escapeHtml(lead.phone || '-')}</td>
+      <td>${escapeHtml(lead.city || '-')}</td>
+      <td><a href="${lead.website}" target="_blank" rel="noopener" style="color:#7ba8ff">网站</a></td>
+    `;
+    leadsBody.appendChild(tr);
+  }
+  document.getElementById('composeBtn').disabled = leads.length === 0;
+}
+
+document.getElementById('searchBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('searchBtn');
+  const status = document.getElementById('searchStatus');
+  btn.disabled = true;
+  status.textContent = '搜索中，可能需要一两分钟…';
+  try {
+    const res = await fetch('/api/leads/search', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+    });
+    const data = await res.json();
+    leads = data.leads || [];
+    renderLeads();
+    status.textContent = `找到 ${leads.length} 家公司`;
+  } catch (e) {
+    status.textContent = '搜索失败：' + e;
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+document.getElementById('composeBtn').addEventListener('click', async () => {
+  const leadIds = [...document.querySelectorAll('.lead-check:checked')].map((el) => el.value);
+  if (leadIds.length === 0) { alert('请先勾选要询价的公司'); return; }
+  const res = await fetch('/api/emails/compose', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ leadIds }),
+  });
+  const data = await res.json();
+  if (data.error) { alert(data.error); return; }
+  drafts = data.drafts || [];
+  sendBadge.textContent = data.sendConfigured ? 'SMTP 已配置：可真实发送' : 'SMTP 未配置：仅可预览（dry run）';
+  renderDrafts();
+});
+
+function renderDrafts() {
+  draftsSection.style.display = drafts.length ? 'block' : 'none';
+  draftsList.innerHTML = '';
+  for (const d of drafts) {
+    const card = document.createElement('div');
+    card.className = 'draft-card';
+    card.innerHTML = `
+      <label><input type="checkbox" class="draft-check" value="${d.id}" checked /> <span class="to">收件人：${escapeHtml(d.to)}</span></label>
+      <div class="subject">${escapeHtml(d.subject)}</div>
+      <div class="body">${escapeHtml(d.body)}</div>
+      <span class="status ${d.status}">${d.status}${d.error ? ' · ' + escapeHtml(d.error) : ''}</span>
+    `;
+    draftsList.appendChild(card);
+  }
+}
+
+document.getElementById('sendBtn').addEventListener('click', async () => {
+  const draftIds = [...document.querySelectorAll('.draft-check:checked')].map((el) => el.value);
+  if (draftIds.length === 0) { alert('请先勾选要发送的草稿'); return; }
+  if (!confirm(`确认要向 ${draftIds.length} 家公司发送询价邮件吗？`)) return;
+  const res = await fetch('/api/emails/send', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ draftIds, confirm: true }),
+  });
+  const data = await res.json();
+  const byId = new Map(data.drafts.map((d) => [d.id, d]));
+  drafts = drafts.map((d) => byId.get(d.id) || d);
+  renderDrafts();
+});
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+fetch('/api/emails').then((r) => r.json()).then((data) => {
+  sendBadge.textContent = data.sendConfigured ? 'SMTP 已配置：可真实发送' : 'SMTP 未配置：仅可预览（dry run）';
+});
+</script>
+</body>
+</html>

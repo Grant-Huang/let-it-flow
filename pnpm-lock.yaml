@@ -53,6 +53,9 @@ importers:
       marked:
         specifier: ^18.0.5
         version: 18.0.5
+      nodemailer:
+        specifier: ^6.9.0
+        version: 6.10.1
       zod:
         specifier: ^3.23.0
         version: 3.25.76
@@ -66,6 +69,9 @@ importers:
       '@types/node':
         specifier: ^22.0.0
         version: 22.19.21
+      '@types/nodemailer':
+        specifier: ^6.4.0
+        version: 6.4.24
       eslint:
         specifier: ^9.13.0
         version: 9.39.4(jiti@1.21.7)
@@ -81,116 +87,6 @@ importers:
       vitest:
         specifier: ^2.1.0
         version: 2.1.9(@types/node@22.19.21)
-
-  apps/ai-content-factory:
-    dependencies:
-      let-it-flow:
-        specifier: workspace:*
-        version: link:../..
-
-  apps/ai-content-factory/web:
-    dependencies:
-      '@let-it-flow/common-ui':
-        specifier: workspace:*
-        version: link:../../../packages/common-ui
-      '@meso.ai/client':
-        specifier: ^0.1.0
-        version: 0.1.0
-      '@meso.ai/types':
-        specifier: ^2.2.0
-        version: 2.2.0
-      '@meso.ai/ui':
-        specifier: ^3.3.0
-        version: 3.3.0(@meso.ai/types@2.2.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
-      react:
-        specifier: ^18.3.1
-        version: 18.3.1
-      react-dom:
-        specifier: ^18.3.1
-        version: 18.3.1(react@18.3.1)
-      react-router-dom:
-        specifier: ^6.26.0
-        version: 6.30.4(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
-    devDependencies:
-      '@types/react':
-        specifier: ^18.3.0
-        version: 18.3.31
-      '@types/react-dom':
-        specifier: ^18.3.0
-        version: 18.3.7(@types/react@18.3.31)
-      '@vitejs/plugin-react':
-        specifier: ^4.3.0
-        version: 4.7.0(vite@5.4.21(@types/node@22.19.21))
-      autoprefixer:
-        specifier: ^10.4.20
-        version: 10.5.0(postcss@8.5.15)
-      postcss:
-        specifier: ^8.4.41
-        version: 8.5.15
-      tailwindcss:
-        specifier: ^3.4.10
-        version: 3.4.19(tsx@4.22.4)
-      typescript:
-        specifier: ^5.6.0
-        version: 5.9.3
-      vite:
-        specifier: ^5.4.0
-        version: 5.4.21(@types/node@22.19.21)
-
-  apps/nexusops:
-    dependencies:
-      let-it-flow:
-        specifier: workspace:*
-        version: link:../..
-
-  apps/nexusops/web:
-    dependencies:
-      '@let-it-flow/common-ui':
-        specifier: workspace:*
-        version: link:../../../packages/common-ui
-      '@meso.ai/client':
-        specifier: ^0.1.0
-        version: 0.1.0
-      '@meso.ai/types':
-        specifier: ^2.2.0
-        version: 2.2.0
-      '@meso.ai/ui':
-        specifier: ^3.3.0
-        version: 3.3.0(@meso.ai/types@2.2.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
-      react:
-        specifier: ^18.3.1
-        version: 18.3.1
-      react-dom:
-        specifier: ^18.3.1
-        version: 18.3.1(react@18.3.1)
-      react-router-dom:
-        specifier: ^6.26.0
-        version: 6.30.4(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
-    devDependencies:
-      '@types/react':
-        specifier: ^18.3.0
-        version: 18.3.31
-      '@types/react-dom':
-        specifier: ^18.3.0
-        version: 18.3.7(@types/react@18.3.31)
-      '@vitejs/plugin-react':
-        specifier: ^4.3.0
-        version: 4.7.0(vite@5.4.21(@types/node@22.19.21))
-      autoprefixer:
-        specifier: ^10.4.20
-        version: 10.5.0(postcss@8.5.15)
-      postcss:
-        specifier: ^8.4.41
-        version: 8.5.15
-      tailwindcss:
-        specifier: ^3.4.10
-        version: 3.4.19(tsx@4.22.4)
-      typescript:
-        specifier: ^5.6.0
-        version: 5.9.3
-      vite:
-        specifier: ^5.4.0
-        version: 5.4.21(@types/node@22.19.21)
 
   packages/common-ui:
     dependencies:
@@ -990,6 +886,9 @@ packages:
   '@types/node@22.19.21':
     resolution: {integrity: sha512-VMeFBSCKQKmm2swI2kW51SFusDqekC6q9trBCvJ/JliDchFSuoYYKN7yVNjPthP1HKZcx3U1gI/wTcEBjEFKTA==}
 
+  '@types/nodemailer@6.4.24':
+    resolution: {integrity: sha512-Ww4u0rT9wQNXh4JiQaIwx3QWdcOFXzOjQA2zc+jtFYNmQiT4mIUqcDin51bDFdkzKubFnQCZNK7FIHlPKQ/q9w==}
+
   '@types/prop-types@15.7.15':
     resolution: {integrity: sha512-F6bEyamV9jKGAFBEmlQnesRPGOQqS2+Uwi0Em15xenOxHaf2hv6L8YCVn3rPdPJOiJfPiCnLIRyvwVaqMY3MIw==}
 
@@ -1775,6 +1674,10 @@ packages:
   node-releases@2.0.47:
     resolution: {integrity: sha512-Uzmd6LXpouKo8EUK68IjH4+E01w/hXyV3R3g/geCJo+rXLNfh1xucB+LOzYEOQPSiUK3h/xZf0cQGcSsmyL2Og==}
     engines: {node: '>=18'}
+
+  nodemailer@6.10.1:
+    resolution: {integrity: sha512-Z+iLaBGVaSjbIzQ4pX6XV41HrooLsQ10ZWPUehGmuantvzWoDVBnmsdUcOIDM1t+yPor5pDhVlDESgOMEGxhHA==}
+    engines: {node: '>=6.0.0'}
 
   normalize-path@3.0.0:
     resolution: {integrity: sha512-6eZs5Ls3WtCisHWp9S2GUy8dqkpGi4BVSz3GaqiE6ezub0512ESztXUwUB6C6IKbQkY2Pnb/mD4WYojCRwcwLA==}
@@ -2854,6 +2757,10 @@ snapshots:
     dependencies:
       undici-types: 6.21.0
 
+  '@types/nodemailer@6.4.24':
+    dependencies:
+      '@types/node': 22.19.21
+
   '@types/prop-types@15.7.15': {}
 
   '@types/react-dom@18.3.7(@types/react@18.3.31)':
@@ -3696,6 +3603,8 @@ snapshots:
   negotiator@1.0.0: {}
 
   node-releases@2.0.47: {}
+
+  nodemailer@6.10.1: {}
 
   normalize-path@3.0.0: {}
 
